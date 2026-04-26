@@ -93,6 +93,8 @@ OLLAMA_MODEL=qwen3:4b
 
 If no post-processing provider is configured, Echo Voice falls back to a conservative rule-based cleanup.
 
+If server-side STT is not configured, Android Chrome can fall back to the browser Web Speech API when available. In that mode the browser produces the raw transcript, then the server still performs the structured refinement step.
+
 ## Desktop Insertion
 
 The agent copies the final text to the system clipboard and then simulates paste:

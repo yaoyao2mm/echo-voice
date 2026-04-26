@@ -22,6 +22,11 @@ let mode = "chat";
 let mediaRecorder = null;
 let chunks = [];
 let recordingStartedAt = 0;
+let serverStatus = null;
+let recognition = null;
+let browserSpeechActive = false;
+let browserSpeechFinalText = "";
+let recognitionStopRequested = false;
 
 elements.refreshStatus.addEventListener("click", refreshStatus);
 elements.recordButton.addEventListener("click", toggleRecording);
@@ -46,14 +51,16 @@ await loadHistory();
 async function refreshStatus() {
   try {
     const status = await apiGet("/api/status");
+    serverStatus = status;
     const stt = status.stt.provider === "none" ? "未配置转写" : `转写 ${status.stt.provider}`;
+    const effectiveStt = status.stt.provider === "none" && supportsBrowserSpeechRecognition() ? "浏览器转写" : stt;
     const refine = status.refine.provider === "none" ? "不整理" : `整理 ${status.refine.provider}`;
     const relay = status.mode === "relay"
       ? status.relay?.desktopOnline
         ? "桌面在线"
         : "桌面离线"
       : status.platform;
-    elements.statusText.textContent = `${stt} · ${refine} · ${relay}`;
+    elements.statusText.textContent = `${effectiveStt} · ${refine} · ${relay}`;
   } catch (error) {
     elements.statusText.textContent = token ? "连接失败" : "缺少配对 token";
     toast(error.message);
@@ -68,6 +75,11 @@ async function toggleRecording() {
 
   if (!window.isSecureContext) {
     toast("手机录音需要 HTTPS，或通过 adb reverse 打开 localhost URL");
+    return;
+  }
+
+  if (shouldUseBrowserSpeech()) {
+    toggleBrowserSpeech();
     return;
   }
 
@@ -94,6 +106,65 @@ async function toggleRecording() {
   } catch (error) {
     toast(error.message);
   }
+}
+
+function shouldUseBrowserSpeech() {
+  return serverStatus?.stt?.provider === "none" && supportsBrowserSpeechRecognition();
+}
+
+function supportsBrowserSpeechRecognition() {
+  return Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
+}
+
+function toggleBrowserSpeech() {
+  if (browserSpeechActive) {
+    recognitionStopRequested = true;
+    recognition?.stop();
+    return;
+  }
+
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new Recognition();
+  recognition.lang = "zh-CN";
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  browserSpeechFinalText = elements.rawText.value.trim();
+  recognitionStopRequested = false;
+
+  recognition.onstart = () => {
+    browserSpeechActive = true;
+    recordingStartedAt = Date.now();
+    setRecording(true);
+  };
+
+  recognition.onresult = (event) => {
+    let interim = "";
+    for (let index = event.resultIndex; index < event.results.length; index += 1) {
+      const transcript = event.results[index][0]?.transcript || "";
+      if (event.results[index].isFinal) {
+        browserSpeechFinalText = `${browserSpeechFinalText}${transcript}`.trim();
+      } else {
+        interim += transcript;
+      }
+    }
+    elements.rawText.value = [browserSpeechFinalText, interim].filter(Boolean).join("\n");
+  };
+
+  recognition.onerror = (event) => {
+    toast(event.error || "浏览器转写失败");
+  };
+
+  recognition.onend = async () => {
+    browserSpeechActive = false;
+    setRecording(false);
+    const raw = browserSpeechFinalText.trim() || elements.rawText.value.trim();
+    if (recognitionStopRequested && raw) {
+      elements.rawText.value = raw;
+      await refineCurrentText();
+    }
+  };
+
+  recognition.start();
 }
 
 function setRecording(isRecording) {
