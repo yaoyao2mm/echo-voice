@@ -8,6 +8,8 @@ Echo Voice is a phone-first voice input bridge:
 4. Review the raw transcript and AI-refined text on the phone.
 5. Send the final text to the current cursor on the computer.
 
+It can also act as a mobile remote for local Codex: the phone submits a structured task to the relay, the desktop agent pulls it, runs `codex exec` inside an allowlisted local project, and streams the result back to the phone.
+
 The first version is intentionally lightweight: a cross-platform Node desktop agent plus a mobile web/PWA UI. It can use OpenAI-compatible cloud transcription, a self-hosted Whisper service, Ollama/local LLM post-processing, or a rule-based fallback.
 
 ## Quick Start
@@ -53,6 +55,15 @@ Run the desktop receiver on the computer where text should be pasted:
 
 ```bash
 ECHO_RELAY_URL=https://voice.example.com ECHO_TOKEN=a-long-random-secret npm run desktop
+```
+
+To enable local Codex control, expose only the project directories you trust:
+
+```bash
+ECHO_RELAY_URL=https://voice.example.com \
+ECHO_TOKEN=a-long-random-secret \
+ECHO_CODEX_WORKSPACES=echo=/Users/john/workspace/projects/echo,metio=/Users/john/workspace/projects/metio \
+npm run desktop
 ```
 
 Open `https://voice.example.com/?token=a-long-random-secret` on the phone. See [docs/internet-deploy.md](docs/internet-deploy.md) for Nginx, systemd, and HTTPS notes.
@@ -106,6 +117,17 @@ The agent copies the final text to the system clipboard and then simulates paste
 Set `INSERT_MODE=copy` to only copy text to the clipboard.
 
 In relay mode, the public server never pastes into your computer directly. It only queues text; the desktop agent makes outbound HTTPS requests, pulls jobs, and performs the paste locally.
+
+## Mobile Codex Remote
+
+The first Codex remote mode is intentionally conservative:
+
+- The phone can submit prompts, but cannot choose arbitrary filesystem paths or shell commands.
+- The desktop agent only runs `codex exec` inside `ECHO_CODEX_WORKSPACES`.
+- The default sandbox is `workspace-write`.
+- The relay receives job logs and final messages so the phone can monitor progress.
+
+Interactive TUI mirroring is a later layer on top of Codex `app-server`; this MVP uses `codex exec --json` because it is stable enough for one-shot engineering tasks from mobile.
 
 ## Product Shape
 

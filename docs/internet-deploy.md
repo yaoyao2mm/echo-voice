@@ -97,6 +97,17 @@ ECHO_RELAY_URL=https://voice.example.com ECHO_TOKEN=replace-with-a-long-random-s
 
 macOS requires Accessibility permission for the terminal or packaged app so it can send `Cmd+V`.
 
+To allow mobile control of local Codex, add an explicit workspace allowlist:
+
+```bash
+ECHO_RELAY_URL=https://voice.example.com \
+ECHO_TOKEN=replace-with-a-long-random-secret \
+ECHO_CODEX_WORKSPACES=echo=/Users/john/workspace/projects/echo,metio=/Users/john/workspace/projects/metio \
+npm run desktop
+```
+
+The phone can only choose these workspace ids; it cannot send arbitrary paths or shell commands.
+
 ## 5. Phone URL
 
 Open:
@@ -112,4 +123,5 @@ HTTPS is required for Android microphone access. The token is your pairing secre
 - Use HTTPS only in internet mode.
 - Use a long random `ECHO_TOKEN`; anyone with it can submit text to your desktop queue.
 - The relay server receives audio, transcripts, and refined text. Put the relay on infrastructure you trust.
+- Codex remote jobs run locally on the desktop agent inside `ECHO_CODEX_WORKSPACES`; keep that allowlist narrow.
 - For multi-user support later, replace the single token with per-device accounts and encrypted queue storage.

@@ -15,6 +15,12 @@ const elements = {
   refineButton: document.querySelector("#refineButton"),
   copyButton: document.querySelector("#copyButton"),
   sendButton: document.querySelector("#sendButton"),
+  codexStatusText: document.querySelector("#codexStatusText"),
+  refreshCodex: document.querySelector("#refreshCodex"),
+  codexProject: document.querySelector("#codexProject"),
+  sendCodexButton: document.querySelector("#sendCodexButton"),
+  codexJobs: document.querySelector("#codexJobs"),
+  codexLog: document.querySelector("#codexLog"),
   history: document.querySelector("#history")
 };
 
@@ -33,6 +39,11 @@ elements.recordButton.addEventListener("click", toggleRecording);
 elements.refineButton.addEventListener("click", refineCurrentText);
 elements.copyButton.addEventListener("click", copyFinalText);
 elements.sendButton.addEventListener("click", sendToCursor);
+elements.refreshCodex.addEventListener("click", refreshCodex);
+elements.sendCodexButton.addEventListener("click", sendToCodex);
+elements.codexProject.addEventListener("change", () => {
+  localStorage.setItem("echoCodexProject", elements.codexProject.value);
+});
 
 for (const button of elements.modes) {
   button.addEventListener("click", () => {
@@ -47,6 +58,8 @@ if ("serviceWorker" in navigator) {
 
 await refreshStatus();
 await loadHistory();
+await refreshCodex();
+window.setInterval(refreshCodex, 3500);
 
 async function refreshStatus() {
   try {
@@ -61,6 +74,7 @@ async function refreshStatus() {
         : "桌面离线"
       : status.platform;
     elements.statusText.textContent = `${effectiveStt} · ${refine} · ${relay}`;
+    if (status.codex) renderCodexStatus(status.codex);
   } catch (error) {
     elements.statusText.textContent = token ? "连接失败" : "缺少配对 token";
     toast(error.message);
@@ -255,6 +269,92 @@ async function sendToCursor() {
   }
 }
 
+async function refreshCodex() {
+  try {
+    const data = await apiGet("/api/codex/status");
+    renderCodexStatus(data);
+    await loadCodexJobs();
+  } catch (error) {
+    elements.codexStatusText.textContent = "Codex 未连接";
+    elements.codexProject.innerHTML = "";
+    if (error.message && !error.message.includes("relay mode")) toast(error.message);
+  }
+}
+
+function renderCodexStatus(codex) {
+  const workspaces = codex.workspaces || [];
+  elements.codexStatusText.textContent = codex.agentOnline
+    ? `桌面 agent 在线 · ${workspaces.length} 个项目`
+    : "等待桌面 agent";
+
+  const selected = localStorage.getItem("echoCodexProject") || elements.codexProject.value;
+  elements.codexProject.innerHTML = "";
+  for (const workspace of workspaces) {
+    const option = document.createElement("option");
+    option.value = workspace.id;
+    option.textContent = `${workspace.label} · ${workspace.path}`;
+    option.selected = workspace.id === selected;
+    elements.codexProject.append(option);
+  }
+  if (elements.codexProject.value) {
+    localStorage.setItem("echoCodexProject", elements.codexProject.value);
+  }
+}
+
+async function sendToCodex() {
+  const prompt = elements.finalText.value.trim() || elements.rawText.value.trim();
+  const projectId = elements.codexProject.value;
+  if (!prompt) {
+    toast("没有可交给 Codex 的任务");
+    return;
+  }
+  if (!projectId) {
+    toast("桌面 agent 还没有公布项目");
+    return;
+  }
+
+  localStorage.setItem("echoCodexProject", projectId);
+  elements.sendCodexButton.disabled = true;
+  try {
+    const data = await apiPost("/api/codex/jobs", { projectId, prompt });
+    toast("已交给本机 Codex");
+    await loadCodexJobs();
+    await showCodexJob(data.job.id);
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    elements.sendCodexButton.disabled = false;
+  }
+}
+
+async function loadCodexJobs() {
+  const data = await apiGet("/api/codex/jobs");
+  elements.codexJobs.innerHTML = "";
+  for (const job of data.items.slice(0, 8)) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "codex-job";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.innerHTML = `<strong>${escapeHtml(job.status)} · ${escapeHtml(job.projectId)}</strong>${escapeHtml(job.prompt.slice(0, 140))}`;
+    button.addEventListener("click", () => showCodexJob(job.id));
+    wrapper.append(button);
+    elements.codexJobs.append(wrapper);
+  }
+}
+
+async function showCodexJob(id) {
+  const data = await apiGet(`/api/codex/jobs/${encodeURIComponent(id)}`);
+  const job = data.job;
+  const lines = [
+    `# ${job.status} · ${job.projectId}`,
+    job.error ? `ERROR: ${job.error}` : "",
+    job.finalMessage ? `\nFinal:\n${job.finalMessage}` : "",
+    "\nEvents:",
+    ...(job.events || []).slice(-80).map((event) => `${event.at || ""} ${event.type || ""}\n${event.text || ""}`)
+  ].filter(Boolean);
+  elements.codexLog.textContent = lines.join("\n\n");
+}
+
 async function loadHistory() {
   try {
     const data = await apiGet("/api/history");
@@ -334,4 +434,13 @@ function toast(message) {
   node.textContent = message;
   document.body.append(node);
   window.setTimeout(() => node.remove(), 2600);
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }

@@ -39,9 +39,50 @@ export const config = {
     ollamaModel: process.env.OLLAMA_MODEL || "qwen3:4b"
   },
 
-  insertMode: process.env.INSERT_MODE || "paste"
+  insertMode: process.env.INSERT_MODE || "paste",
+
+  codex: {
+    enabled: process.env.ECHO_CODEX_ENABLED !== "false",
+    command: process.env.ECHO_CODEX_COMMAND || "codex",
+    workspaces: parseWorkspaces(process.env.ECHO_CODEX_WORKSPACES || process.cwd()),
+    sandbox: process.env.ECHO_CODEX_SANDBOX || "workspace-write",
+    model: process.env.ECHO_CODEX_MODEL || "",
+    profile: process.env.ECHO_CODEX_PROFILE || "",
+    timeoutMs: Number(process.env.ECHO_CODEX_TIMEOUT_MS || 30 * 60 * 1000),
+    maxEvents: Number(process.env.ECHO_CODEX_MAX_EVENTS || 500)
+  }
 };
 
 function trimTrailingSlash(value) {
   return value.replace(/\/+$/, "");
+}
+
+function parseWorkspaces(value) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const [label, rawPath] = item.includes("=") ? item.split("=", 2) : ["", item];
+      const workspacePath = path.resolve(expandHome(rawPath.trim()));
+      return {
+        id: slug(label || path.basename(workspacePath) || "workspace"),
+        label: label || path.basename(workspacePath) || workspacePath,
+        path: workspacePath
+      };
+    });
+}
+
+function expandHome(value) {
+  if (value === "~") return os.homedir();
+  if (value.startsWith("~/")) return path.join(os.homedir(), value.slice(2));
+  return value;
+}
+
+function slug(value) {
+  return String(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "workspace";
 }

@@ -1,4 +1,5 @@
 import { config } from "./config.js";
+import { publicWorkspaces, runCodexJob } from "./lib/codexRunner.js";
 import { insertText } from "./lib/paste.js";
 
 if (!config.relayUrl) {
@@ -14,30 +15,85 @@ if (!config.token) {
 console.log("Echo Voice desktop agent is running.");
 console.log(`Relay: ${config.relayUrl}`);
 console.log(`Insert mode: ${config.insertMode}`);
+console.log(`Codex remote: ${config.codex.enabled ? "enabled" : "disabled"}`);
+if (config.codex.enabled) {
+  for (const workspace of publicWorkspaces()) {
+    console.log(`  ${workspace.id}: ${workspace.path}`);
+  }
+}
 console.log("Keep the target app focused before sending text from the phone.\n");
 
-while (true) {
-  let job = null;
-  try {
-    job = await pollNextJob();
-    if (!job) continue;
+runInsertLoop();
+if (config.codex.enabled) runCodexLoop();
 
-    console.log(`[${new Date().toLocaleTimeString()}] inserting ${job.text.length} chars`);
-    const result = await insertText(job.text);
-    await postJson("/api/agent/ack", { id: job.id, result });
-    console.log(`  ${result.message}`);
-  } catch (error) {
-    console.error(`[${new Date().toLocaleTimeString()}] ${error.message}`);
-    if (job?.id) {
-      await postJson("/api/agent/fail", { id: job.id, error: error.message }).catch(() => {});
+async function runInsertLoop() {
+  while (true) {
+    let job = null;
+    try {
+      job = await pollNextInsertJob();
+      if (!job) continue;
+
+      console.log(`[${new Date().toLocaleTimeString()}] inserting ${job.text.length} chars`);
+      const result = await insertText(job.text);
+      await postJson("/api/agent/ack", { id: job.id, result });
+      console.log(`  ${result.message}`);
+    } catch (error) {
+      console.error(`[insert ${new Date().toLocaleTimeString()}] ${error.message}`);
+      if (job?.id) {
+        await postJson("/api/agent/fail", { id: job.id, error: error.message }).catch(() => {});
+      }
+      await sleep(2500);
     }
-    await sleep(2500);
   }
 }
 
-async function pollNextJob() {
+async function runCodexLoop() {
+  while (true) {
+    let job = null;
+    try {
+      job = await pollNextCodexJob();
+      if (!job) continue;
+
+      console.log(`[${new Date().toLocaleTimeString()}] codex ${job.id} in ${job.projectId}`);
+      const result = await runCodexJob(job, {
+        onEvents: (events) => postJson("/api/agent/codex/events", { id: job.id, events }).catch(() => {})
+      });
+      await postJson("/api/agent/codex/complete", { id: job.id, result });
+      console.log(`  codex ${result.ok ? "completed" : "failed"} (${result.exitCode ?? "no exit code"})`);
+    } catch (error) {
+      console.error(`[codex ${new Date().toLocaleTimeString()}] ${error.message}`);
+      if (job?.id) {
+        await postJson("/api/agent/codex/complete", {
+          id: job.id,
+          result: {
+            ok: false,
+            error: error.message
+          }
+        }).catch(() => {});
+      }
+      await sleep(2500);
+    }
+  }
+}
+
+async function pollNextInsertJob() {
   const response = await fetch(`${config.relayUrl}/api/agent/next?wait=25000`, {
     headers: authHeaders()
+  });
+  const data = await parseApiResponse(response);
+  return data.job || null;
+}
+
+async function pollNextCodexJob() {
+  const response = await fetch(`${config.relayUrl}/api/agent/codex/next?wait=25000`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders()
+    },
+    body: JSON.stringify({
+      workspaces: publicWorkspaces()
+    })
   });
   const data = await parseApiResponse(response);
   return data.job || null;

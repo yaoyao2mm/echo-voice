@@ -11,6 +11,15 @@ import { getSttStatus, transcribeAudio } from "./lib/stt.js";
 import { getRefineStatus, refineTranscript } from "./lib/refine.js";
 import { insertText } from "./lib/paste.js";
 import { ackInsertJob, enqueueInsertJob, failInsertJob, relayStatus, waitForInsertJob } from "./lib/relayQueue.js";
+import {
+  appendCodexEvents,
+  codexStatus,
+  completeCodexJob,
+  createCodexJob,
+  getCodexJob,
+  listCodexJobs,
+  waitForCodexJob
+} from "./lib/codexQueue.js";
 
 const app = express();
 const upload = multer({
@@ -41,6 +50,7 @@ app.get("/api/status", (req, res) => {
     refine: getRefineStatus(),
     insertMode: config.insertMode,
     relay: config.mode === "relay" ? relayStatus() : null,
+    codex: config.mode === "relay" ? codexStatus() : null,
     platform: process.platform
   });
 });
@@ -150,6 +160,84 @@ app.post("/api/agent/fail", (req, res) => {
   }
 
   const ok = failInsertJob(req.body.id, req.body.error || "Unknown insertion error");
+  res.json({ ok });
+});
+
+app.get("/api/codex/status", (req, res) => {
+  if (config.mode !== "relay") {
+    return res.status(400).json({ error: "Codex remote control is only available in relay mode." });
+  }
+
+  res.json(codexStatus());
+});
+
+app.get("/api/codex/jobs", (req, res) => {
+  if (config.mode !== "relay") {
+    return res.status(400).json({ error: "Codex remote control is only available in relay mode." });
+  }
+
+  res.json({ items: listCodexJobs(30) });
+});
+
+app.post("/api/codex/jobs", (req, res) => {
+  try {
+    if (config.mode !== "relay") {
+      return res.status(400).json({ error: "Codex remote control is only available in relay mode." });
+    }
+
+    const job = createCodexJob({
+      projectId: req.body.projectId,
+      prompt: req.body.prompt
+    });
+    res.json({ job });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.get("/api/codex/jobs/:id", (req, res) => {
+  if (config.mode !== "relay") {
+    return res.status(400).json({ error: "Codex remote control is only available in relay mode." });
+  }
+
+  const job = getCodexJob(req.params.id);
+  if (!job) return res.status(404).json({ error: "Codex job not found." });
+  res.json({ job });
+});
+
+app.post("/api/agent/codex/next", async (req, res) => {
+  try {
+    if (config.mode !== "relay") {
+      return res.status(400).json({ error: "Codex agent polling is only available in relay mode." });
+    }
+
+    const job = await waitForCodexJob({
+      waitMs: Number(req.query.wait || req.body.wait || 25000),
+      agent: {
+        workspaces: req.body.workspaces || []
+      }
+    });
+    res.json({ job });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.post("/api/agent/codex/events", (req, res) => {
+  if (config.mode !== "relay") {
+    return res.status(400).json({ error: "Codex agent events are only available in relay mode." });
+  }
+
+  const ok = appendCodexEvents(req.body.id, req.body.events || []);
+  res.json({ ok });
+});
+
+app.post("/api/agent/codex/complete", (req, res) => {
+  if (config.mode !== "relay") {
+    return res.status(400).json({ error: "Codex agent completion is only available in relay mode." });
+  }
+
+  const ok = completeCodexJob(req.body.id, req.body.result || {});
   res.json({ ok });
 });
 

@@ -59,6 +59,23 @@
         <button id="sendButton" class="primary" type="button">发送到光标</button>
       </nav>
 
+      <section class="codex-section">
+        <div class="section-head">
+          <div>
+            <div class="pane-title">本机 Codex</div>
+            <p id="codexStatusText">等待桌面 agent</p>
+          </div>
+          <button id="refreshCodex" class="icon-button" type="button" title="刷新 Codex" aria-label="刷新 Codex">
+            ↻
+          </button>
+        </div>
+        <label class="field-label" for="codexProject">项目</label>
+        <select id="codexProject" class="select"></select>
+        <button id="sendCodexButton" class="codex-submit" type="button">交给本机 Codex</button>
+        <div id="codexJobs" class="codex-jobs"></div>
+        <pre id="codexLog" class="codex-log"></pre>
+      </section>
+
       <section class="history-section">
         <div class="pane-title">最近</div>
         <div id="history" class="history"></div>
