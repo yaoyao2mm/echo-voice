@@ -1,0 +1,31 @@
+{
+  "name": "echo-voice",
+  "version": "0.1.0",
+  "description": "Phone-first voice input bridge with transcription, refinement, and desktop cursor insertion.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yaoyao2mm/echo-voice.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yaoyao2mm/echo-voice/issues"
+  },
+  "homepage": "https://github.com/yaoyao2mm/echo-voice#readme",
+  "scripts": {
+    "start": "node src/server.js",
+    "relay": "node src/server.js --relay",
+    "desktop": "node src/desktop-agent.js",
+    "dev": "node --watch src/server.js",
+    "android:usb": "node scripts/adb-reverse.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "multer": "^2.0.2",
+    "qrcode-terminal": "^0.12.0"
+  }
+}

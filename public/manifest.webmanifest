@@ -1,0 +1,8 @@
+{
+  "name": "Echo Voice",
+  "short_name": "Echo Voice",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7f4ee",
+  "theme_color": "#254e58"
+}

@@ -1,0 +1,110 @@
+# Echo Voice
+
+Echo Voice is a phone-first voice input bridge:
+
+1. Start the local desktop agent or deploy the public relay server.
+2. Open the paired URL from an Android browser.
+3. Record speech on the phone.
+4. Review the raw transcript and AI-refined text on the phone.
+5. Send the final text to the current cursor on the computer.
+
+The first version is intentionally lightweight: a cross-platform Node desktop agent plus a mobile web/PWA UI. It can use OpenAI-compatible cloud transcription, a self-hosted Whisper service, Ollama/local LLM post-processing, or a rule-based fallback.
+
+## Quick Start
+
+### Local/LAN Mode
+
+```bash
+npm install
+cp .env.example .env
+npm start
+```
+
+Open the printed URL on your Android phone. The URL includes a pairing token; API calls without that token are rejected.
+
+Android browsers require a secure context before they allow microphone access. The easiest development path is USB forwarding:
+
+```bash
+npm run android:usb
+```
+
+Then open the printed `http://localhost:3888/?token=...` URL on the phone. For LAN use without USB, run the server with a trusted HTTPS certificate:
+
+```bash
+HTTPS_CERT=/absolute/path/to/cert.pem HTTPS_KEY=/absolute/path/to/key.pem npm start
+```
+
+### Internet Relay Mode
+
+Run the relay server on your VPS/domain:
+
+```bash
+cp .env.example .env
+# Set at least:
+# ECHO_MODE=relay
+# ECHO_PUBLIC_URL=https://voice.example.com
+# ECHO_TOKEN=a-long-random-secret
+# OPENAI_API_KEY=...
+npm install
+npm run relay
+```
+
+Run the desktop receiver on the computer where text should be pasted:
+
+```bash
+ECHO_RELAY_URL=https://voice.example.com ECHO_TOKEN=a-long-random-secret npm run desktop
+```
+
+Open `https://voice.example.com/?token=a-long-random-secret` on the phone. See [docs/internet-deploy.md](docs/internet-deploy.md) for Nginx, systemd, and HTTPS notes.
+
+## Model Setup
+
+For OpenAI speech-to-text, set:
+
+```bash
+OPENAI_API_KEY=sk-...
+STT_PROVIDER=openai
+OPENAI_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
+```
+
+For a local Whisper ASR Webservice, set:
+
+```bash
+STT_PROVIDER=local
+LOCAL_STT_URL=http://YOUR_SERVER:9000/asr
+LOCAL_STT_FILE_FIELD=audio_file
+```
+
+For text refinement with an OpenAI-compatible chat endpoint:
+
+```bash
+POSTPROCESS_PROVIDER=openai
+LLM_API_KEY=sk-...
+LLM_MODEL=gpt-4.1-mini
+```
+
+For local refinement through Ollama:
+
+```bash
+POSTPROCESS_PROVIDER=ollama
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+OLLAMA_MODEL=qwen3:4b
+```
+
+If no post-processing provider is configured, Echo Voice falls back to a conservative rule-based cleanup.
+
+## Desktop Insertion
+
+The agent copies the final text to the system clipboard and then simulates paste:
+
+- macOS: `pbcopy` plus AppleScript `Cmd+V`; requires Accessibility permission for the terminal/app.
+- Windows: PowerShell clipboard plus `Ctrl+V` SendKeys.
+- Linux: `wl-copy` or `xclip`/`xsel`, then `xdotool` or `wtype` when available.
+
+Set `INSERT_MODE=copy` to only copy text to the clipboard.
+
+In relay mode, the public server never pastes into your computer directly. It only queues text; the desktop agent makes outbound HTTPS requests, pulls jobs, and performs the paste locally.
+
+## Product Shape
+
+This MVP is designed around the main idea: speaking is fast, but sending raw spoken text into an AI chat is often mentally leaky. Echo Voice makes the phone the composition surface, so the user can pause, inspect, edit, and send a more deliberate version to the desktop cursor.

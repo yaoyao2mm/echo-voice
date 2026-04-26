@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Echo Voice</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <h1>Echo Voice</h1>
+          <p id="statusText">连接中</p>
+        </div>
+        <button id="refreshStatus" class="icon-button" type="button" title="刷新状态" aria-label="刷新状态">
+          ↻
+        </button>
+      </header>
+
+      <section class="compose">
+        <div class="mode-row" role="tablist" aria-label="处理模式">
+          <button class="mode active" data-mode="chat" type="button">AI 指令</button>
+          <button class="mode" data-mode="formal" type="button">正式文本</button>
+          <button class="mode" data-mode="bullet" type="button">要点</button>
+          <button class="mode" data-mode="email" type="button">消息</button>
+          <button class="mode" data-mode="verbatim" type="button">原话</button>
+        </div>
+
+        <label class="field-label" for="contextHint">上下文</label>
+        <textarea id="contextHint" class="context" rows="2" placeholder="例如：这是发给 coding agent 的需求；保留技术名词；语气要直接。"></textarea>
+
+        <div class="recorder">
+          <button id="recordButton" class="record-button" type="button" aria-label="开始录音">
+            <span id="recordDot"></span>
+            <span id="recordLabel">按下说话</span>
+          </button>
+          <div class="meters" aria-hidden="true">
+            <span></span><span></span><span></span><span></span><span></span><span></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="editor">
+        <div class="pane">
+          <div class="pane-title">原始转写</div>
+          <textarea id="rawText" rows="6" placeholder="录音完成后显示"></textarea>
+        </div>
+        <div class="pane primary">
+          <div class="pane-title">整理后</div>
+          <textarea id="finalText" rows="8" placeholder="可以在发送前继续编辑"></textarea>
+        </div>
+      </section>
+
+      <nav class="actions" aria-label="操作">
+        <button id="refineButton" class="secondary" type="button">重新整理</button>
+        <button id="copyButton" class="secondary" type="button">复制</button>
+        <button id="sendButton" class="primary" type="button">发送到光标</button>
+      </nav>
+
+      <section class="history-section">
+        <div class="pane-title">最近</div>
+        <div id="history" class="history"></div>
+      </section>
+    </main>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
