@@ -3,6 +3,7 @@ const settingsKey = params.get("key") || "";
 const form = document.querySelector("#settingsForm");
 const output = document.querySelector("#output");
 const envPath = document.querySelector("#envPath");
+const healthGrid = document.querySelector("#healthGrid");
 const tabs = document.querySelectorAll(".tab");
 const panels = document.querySelectorAll(".panel");
 
@@ -31,6 +32,7 @@ function bindEvents() {
   );
   document.querySelector("#restartAgent").addEventListener("click", () => runAction("/api/desktop/restart", "Restarting desktop agent..."));
   document.querySelector("#reloadState").addEventListener("click", loadState);
+  document.querySelector("#refreshHealth").addEventListener("click", loadHealth);
 }
 
 function showPanel(name) {
@@ -43,10 +45,117 @@ async function loadState() {
     const state = await apiGet("/api/state");
     envPath.textContent = state.envFile;
     fillForm(state.fields);
+    renderHealth(state.health);
     writeOutput(formatState(state));
   } catch (error) {
     writeOutput(error.message, true);
   }
+}
+
+async function loadHealth() {
+  try {
+    const state = await apiGet("/api/desktop/health");
+    renderHealth(state.health);
+    writeOutput("Health refreshed.");
+  } catch (error) {
+    writeOutput(error.message, true);
+  }
+}
+
+function renderHealth(health) {
+  if (!healthGrid || !health) return;
+
+  const items = [
+    {
+      title: "Relay",
+      ok: health.connection?.ok,
+      status: health.connection?.ok ? "ready" : "missing config",
+      detail: [
+        health.connection?.relayUrl || "No relay URL",
+        health.connection?.tokenSet ? "token set" : "token missing",
+        `proxy: ${health.connection?.proxy || "direct"}`
+      ].join("\n")
+    },
+    {
+      title: "Desktop Agent",
+      ok: health.agent?.ok,
+      status: health.agent?.status || "unknown",
+      detail: health.agent?.detail || "",
+      actions: [
+        { label: "Restart", path: "/api/desktop/restart", pending: "Restarting desktop agent..." }
+      ]
+    },
+    {
+      title: "Accessibility",
+      ok: health.accessibility?.ok,
+      status: health.accessibility?.status || "unknown",
+      detail: health.accessibility?.detail || "",
+      actions: [
+        { label: "Open Settings", path: "/api/system/open", body: { target: "accessibility" }, pending: "Opening Accessibility settings..." }
+      ]
+    },
+    {
+      title: "Clipboard",
+      ok: health.clipboard?.ok,
+      status: health.clipboard?.status || "unknown",
+      detail: health.clipboard?.path || health.clipboard?.detail || ""
+    },
+    {
+      title: "Codex CLI",
+      ok: health.codex?.ok,
+      status: health.codex?.status || "unknown",
+      detail: [health.codex?.path, health.codex?.version, health.codex?.detail].filter(Boolean).join("\n")
+    },
+    {
+      title: "Workspaces",
+      ok: health.workspaces?.ok,
+      status: health.workspaces?.ok ? "ready" : "check paths",
+      detail: (health.workspaces?.items || [])
+        .map((item) => `${item.ok ? "OK" : "NO"} ${item.label}: ${item.path}`)
+        .join("\n")
+    }
+  ];
+
+  healthGrid.replaceChildren(...items.map(renderHealthItem));
+}
+
+function renderHealthItem(item) {
+  const root = document.createElement("div");
+  root.className = "healthItem";
+
+  const top = document.createElement("div");
+  top.className = "healthTop";
+
+  const title = document.createElement("div");
+  title.className = "healthTitle";
+  title.textContent = item.title;
+
+  const pill = document.createElement("span");
+  pill.className = `pill${item.ok ? "" : " bad"}`;
+  pill.textContent = item.status;
+
+  top.append(title, pill);
+
+  const detail = document.createElement("div");
+  detail.className = "healthDetail";
+  detail.textContent = item.detail || "";
+
+  root.append(top, detail);
+
+  if (item.actions?.length) {
+    const actions = document.createElement("div");
+    actions.className = "healthActions";
+    for (const action of item.actions) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = action.label;
+      button.addEventListener("click", () => runAction(action.path, action.pending, action.body || {}));
+      actions.append(button);
+    }
+    root.append(actions);
+  }
+
+  return root;
 }
 
 function fillForm(fields) {

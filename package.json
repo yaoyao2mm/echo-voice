@@ -19,6 +19,7 @@
     "desktop:app:install": "npm --prefix desktop-app install",
     "desktop:app": "npm --prefix desktop-app start",
     "desktop:mac:app": "bash scripts/macos-create-app.sh",
+    "desktop:mac:dmg": "bash scripts/macos-create-dmg.sh",
     "desktop:settings": "node scripts/desktop-settings.js --open",
     "desktop:mac": "bash scripts/macos-desktop-agent.sh",
     "dev": "node --watch src/server.js",

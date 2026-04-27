@@ -21,7 +21,8 @@
 
     <main class="layout">
       <nav class="sidebar" aria-label="Settings sections">
-        <button type="button" class="tab active" data-tab="connection">连接</button>
+        <button type="button" class="tab active" data-tab="overview">概览</button>
+        <button type="button" class="tab" data-tab="connection">连接</button>
         <button type="button" class="tab" data-tab="network">VPN</button>
         <button type="button" class="tab" data-tab="refine">本机模型</button>
         <button type="button" class="tab" data-tab="stt">语音识别</button>
@@ -29,7 +30,15 @@
       </nav>
 
       <form id="settingsForm" class="content">
-        <section class="panel active" data-panel="connection">
+        <section class="panel active" data-panel="overview">
+          <div class="sectionHeader">
+            <h2>概览</h2>
+            <button type="button" id="refreshHealth">刷新状态</button>
+          </div>
+          <div id="healthGrid" class="healthGrid"></div>
+        </section>
+
+        <section class="panel" data-panel="connection">
           <div class="sectionHeader">
             <h2>连接</h2>
             <button type="submit">保存配置</button>

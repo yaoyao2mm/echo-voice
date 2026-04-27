@@ -90,10 +90,12 @@ app.use("/api", (req, res, next) => {
 app.get("/api/state", async (req, res) => {
   try {
     const env = await readEnv();
+    const health = await buildHealth(env);
     res.json({
       ok: true,
       envFile,
       fields: toPublicFields(env),
+      health,
       meta: {
         platform: process.platform,
         settingsHost: host,
@@ -146,6 +148,32 @@ app.post("/api/test/refine", async (req, res) => {
 app.post("/api/desktop/restart", async (req, res) => {
   try {
     const result = await runCommand("bash", ["scripts/macos-desktop-agent.sh", "restart"], 20000);
+    res.json({ ok: result.code === 0, ...result });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.get("/api/desktop/health", async (req, res) => {
+  try {
+    const env = await readEnv();
+    res.json({
+      ok: true,
+      health: await buildHealth(env)
+    });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.post("/api/system/open", async (req, res) => {
+  try {
+    const target = req.body?.target || "";
+    const url = systemOpenUrl(target);
+    if (!url) {
+      return res.status(400).json({ error: "Unknown system target." });
+    }
+    const result = await runCommand("open", [url], 5000);
     res.json({ ok: result.code === 0, ...result });
   } catch (error) {
     handleError(res, error);
@@ -406,6 +434,146 @@ async function runCommand(command, args, timeoutMs) {
       }
     );
   });
+}
+
+async function buildHealth(env) {
+  const [agent, accessibility, clipboard, codex, workspaces] = await Promise.all([
+    checkAgentStatus(),
+    checkAccessibility(),
+    checkCommand("pbcopy", "pbcopy"),
+    checkCodex(env),
+    checkWorkspaces(env)
+  ]);
+
+  return {
+    generatedAt: new Date().toISOString(),
+    connection: {
+      ok: Boolean(env.ECHO_RELAY_URL && env.ECHO_TOKEN),
+      relayUrl: env.ECHO_RELAY_URL || "",
+      tokenSet: Boolean(env.ECHO_TOKEN),
+      proxy: env.ECHO_PROXY_URL || "direct"
+    },
+    agent,
+    accessibility,
+    clipboard,
+    codex,
+    workspaces
+  };
+}
+
+async function checkAgentStatus() {
+  if (process.platform !== "darwin") {
+    return { ok: false, status: "unsupported", detail: "Agent status check is implemented for macOS launchd." };
+  }
+
+  const result = await runCommand("launchctl", ["print", `gui/${process.getuid()}/xyz.554119401.echo.desktop-agent`], 5000);
+  const state = result.stdout.match(/state = ([^\n]+)/)?.[1]?.trim() || "";
+  const pid = result.stdout.match(/\bpid = (\d+)/)?.[1] || "";
+  const ok = result.code === 0 && state === "running";
+  return {
+    ok,
+    status: ok ? "running" : "not running",
+    detail: ok ? `pid ${pid || "unknown"}` : result.stderr || result.stdout || "LaunchAgent is not loaded."
+  };
+}
+
+async function checkAccessibility() {
+  if (process.platform !== "darwin") {
+    return { ok: true, status: "not required", detail: "Accessibility permission is only required for macOS auto-paste." };
+  }
+
+  const result = await runCommand("osascript", ["-e", 'tell application "System Events" to get UI elements enabled'], 5000);
+  const enabled = result.code === 0 && result.stdout.trim() === "true";
+  return {
+    ok: enabled,
+    status: enabled ? "enabled" : "needs permission",
+    detail: enabled
+      ? "System Events can send paste keystrokes."
+      : "Grant Accessibility permission to the terminal, Electron app, or launchd-run node process used by Echo."
+  };
+}
+
+async function checkCodex(env) {
+  const command = env.ECHO_CODEX_COMMAND || "codex";
+  const result = await runCommand("zsh", ["-lc", `command -v ${shellQuote(command)} && ${shellQuote(command)} --version`], 8000);
+  const lines = result.stdout.split(/\r?\n/).filter(Boolean);
+  return {
+    ok: result.code === 0,
+    status: result.code === 0 ? "available" : "missing",
+    command,
+    path: lines[0] || "",
+    version: lines[1] || "",
+    detail: result.code === 0 ? "" : result.stderr || result.stdout || `${command} was not found in PATH.`
+  };
+}
+
+async function checkCommand(command, label) {
+  const result = await runCommand("zsh", ["-lc", `command -v ${shellQuote(command)}`], 5000);
+  return {
+    ok: result.code === 0,
+    status: result.code === 0 ? "available" : "missing",
+    command,
+    path: result.stdout.trim(),
+    detail: result.code === 0 ? `${label} is available.` : `${label} was not found.`
+  };
+}
+
+async function checkWorkspaces(env) {
+  const items = parseWorkspaceList(env.ECHO_CODEX_WORKSPACES || rootDir);
+  const results = await Promise.all(
+    items.map(async (item) => {
+      try {
+        const stat = await fs.stat(expandHome(item.path));
+        return {
+          ...item,
+          ok: stat.isDirectory(),
+          detail: stat.isDirectory() ? "directory exists" : "not a directory"
+        };
+      } catch (error) {
+        return {
+          ...item,
+          ok: false,
+          detail: error.message
+        };
+      }
+    })
+  );
+
+  return {
+    ok: results.length > 0 && results.every((item) => item.ok),
+    items: results
+  };
+}
+
+function parseWorkspaceList(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const [label, rawPath] = item.includes("=") ? item.split("=", 2) : ["", item];
+      return {
+        label: label || path.basename(rawPath) || rawPath,
+        path: rawPath
+      };
+    });
+}
+
+function expandHome(value) {
+  if (value === "~") return process.env.HOME || value;
+  if (value.startsWith("~/")) return path.join(process.env.HOME || "", value.slice(2));
+  return value;
+}
+
+function systemOpenUrl(target) {
+  if (process.platform !== "darwin") return "";
+  if (target === "accessibility") return "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
+  if (target === "login-items") return "x-apple.systempreferences:com.apple.LoginItems-Settings.extension";
+  return "";
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
 function openBrowser(url) {

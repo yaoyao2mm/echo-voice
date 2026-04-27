@@ -173,6 +173,70 @@ button[type="submit"]:hover,
   gap: 14px;
 }
 
+.healthGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.healthItem {
+  display: grid;
+  gap: 8px;
+  min-height: 112px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 13px;
+}
+
+.healthTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.healthTitle {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border-radius: 999px;
+  padding: 0 9px;
+  background: #e8f5ed;
+  color: #137333;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.pill.bad {
+  background: #fdecec;
+  color: var(--danger);
+}
+
+.healthDetail {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.healthActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.healthActions button {
+  min-height: 30px;
+  padding: 0 10px;
+}
+
 .notice {
   margin: -4px 0 16px;
   border: 1px solid #c7d8d5;
@@ -302,7 +366,7 @@ pre {
 
   .sidebar {
     position: static;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     overflow-x: auto;
   }
 
@@ -313,6 +377,10 @@ pre {
   }
 
   .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .healthGrid {
     grid-template-columns: 1fr;
   }
 
