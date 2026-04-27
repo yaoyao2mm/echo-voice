@@ -19,7 +19,26 @@
         </button>
       </header>
 
-      <section class="compose">
+      <section id="pairingPanel" class="pairing-panel" hidden>
+        <div>
+          <h2>扫码配对</h2>
+          <p>打开 Echo Desktop 的概览页，扫描「手机扫码配对」二维码。</p>
+        </div>
+        <div class="scanner-frame">
+          <video id="pairingVideo" playsinline muted></video>
+        </div>
+        <div class="pairing-actions">
+          <button id="scanPairingButton" class="primary" type="button">扫描桌面二维码</button>
+          <button id="stopScanButton" class="secondary" type="button" hidden>停止扫描</button>
+        </div>
+        <label class="field-label" for="pairingInput">或粘贴配对链接</label>
+        <div class="pairing-input-row">
+          <input id="pairingInput" type="text" autocomplete="off" placeholder="https://echo.example.com/?token=..." />
+          <button id="savePairingButton" class="secondary" type="button">配对</button>
+        </div>
+      </section>
+
+      <section class="compose" data-authenticated>
         <div class="mode-row" role="tablist" aria-label="处理模式">
           <button class="mode active" data-mode="chat" type="button">AI 指令</button>
           <button class="mode" data-mode="formal" type="button">正式文本</button>
@@ -42,7 +61,7 @@
         </div>
       </section>
 
-      <section class="editor">
+      <section class="editor" data-authenticated>
         <div class="pane">
           <div class="pane-title">原始转写</div>
           <textarea id="rawText" rows="6" placeholder="录音完成后显示"></textarea>
@@ -53,13 +72,13 @@
         </div>
       </section>
 
-      <nav class="actions" aria-label="操作">
+      <nav class="actions" aria-label="操作" data-authenticated>
         <button id="refineButton" class="secondary" type="button">重新整理</button>
         <button id="copyButton" class="secondary" type="button">复制</button>
         <button id="sendButton" class="primary" type="button">发送到光标</button>
       </nav>
 
-      <section class="codex-section">
+      <section class="codex-section" data-authenticated>
         <div class="section-head">
           <div>
             <div class="pane-title">本机 Codex</div>
@@ -76,7 +95,7 @@
         <pre id="codexLog" class="codex-log"></pre>
       </section>
 
-      <section class="history-section">
+      <section class="history-section" data-authenticated>
         <div class="pane-title">最近</div>
         <div id="history" class="history"></div>
       </section>

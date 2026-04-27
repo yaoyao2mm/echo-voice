@@ -27,6 +27,8 @@ body {
 }
 
 button,
+input,
+select,
 textarea {
   font: inherit;
 }
@@ -73,6 +75,81 @@ p {
 .editor,
 .history-section {
   margin-top: 10px;
+}
+
+.pairing-panel {
+  display: grid;
+  gap: 14px;
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+
+.pairing-panel[hidden] {
+  display: none;
+}
+
+.pairing-panel h2 {
+  margin: 0;
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.scanner-frame {
+  display: grid;
+  place-items: center;
+  min-height: 260px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #101817;
+  overflow: hidden;
+}
+
+#pairingVideo {
+  width: 100%;
+  max-height: 320px;
+  object-fit: cover;
+}
+
+.pairing-actions,
+.pairing-input-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.pairing-actions button,
+.pairing-input-row button {
+  min-height: 46px;
+  border-radius: 8px;
+  font-weight: 740;
+}
+
+.pairing-actions .primary {
+  border: 0;
+  background: var(--accent);
+  color: #fff;
+}
+
+.pairing-actions .secondary,
+.pairing-input-row .secondary {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.pairing-input-row input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: var(--surface);
+  color: var(--ink);
+  outline: none;
 }
 
 .mode-row {
@@ -132,6 +209,7 @@ select {
   font: inherit;
 }
 
+input:focus,
 textarea:focus {
   border-color: rgba(31, 111, 104, 0.7);
   box-shadow: 0 0 0 3px rgba(31, 111, 104, 0.12);
@@ -397,5 +475,11 @@ textarea:focus {
   .editor {
     grid-template-columns: 1fr 1.15fr;
     gap: 12px;
+  }
+}
+
+@media (max-width: 420px) {
+  .pairing-input-row {
+    grid-template-columns: 1fr;
   }
 }

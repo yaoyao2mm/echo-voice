@@ -1,11 +1,21 @@
 const params = new URLSearchParams(window.location.search);
 const tokenFromUrl = params.get("token");
 if (tokenFromUrl) localStorage.setItem("echoToken", tokenFromUrl);
-const token = tokenFromUrl || localStorage.getItem("echoToken") || "";
+let token = tokenFromUrl || localStorage.getItem("echoToken") || "";
+if (tokenFromUrl) {
+  window.history.replaceState({}, "", window.location.pathname);
+}
 
 const elements = {
   statusText: document.querySelector("#statusText"),
   refreshStatus: document.querySelector("#refreshStatus"),
+  pairingPanel: document.querySelector("#pairingPanel"),
+  pairingVideo: document.querySelector("#pairingVideo"),
+  pairingInput: document.querySelector("#pairingInput"),
+  scanPairingButton: document.querySelector("#scanPairingButton"),
+  stopScanButton: document.querySelector("#stopScanButton"),
+  savePairingButton: document.querySelector("#savePairingButton"),
+  authenticated: Array.from(document.querySelectorAll("[data-authenticated]")),
   modes: Array.from(document.querySelectorAll(".mode")),
   contextHint: document.querySelector("#contextHint"),
   recordButton: document.querySelector("#recordButton"),
@@ -33,8 +43,15 @@ let recognition = null;
 let browserSpeechActive = false;
 let browserSpeechFinalText = "";
 let recognitionStopRequested = false;
+let codexTimer = null;
+let pairingStream = null;
+let pairingScanActive = false;
+let pairingScanBusy = false;
 
 elements.refreshStatus.addEventListener("click", refreshStatus);
+elements.scanPairingButton.addEventListener("click", startPairingScanner);
+elements.stopScanButton.addEventListener("click", stopPairingScanner);
+elements.savePairingButton.addEventListener("click", pairFromInput);
 elements.recordButton.addEventListener("click", toggleRecording);
 elements.refineButton.addEventListener("click", refineCurrentText);
 elements.copyButton.addEventListener("click", copyFinalText);
@@ -56,12 +73,34 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
 }
 
-await refreshStatus();
-await loadHistory();
-await refreshCodex();
-window.setInterval(refreshCodex, 3500);
+updateAuthView();
+if (token) {
+  await bootAuthenticated();
+}
+
+async function bootAuthenticated() {
+  updateAuthView();
+  await refreshStatus();
+  await loadHistory();
+  await refreshCodex();
+  if (!codexTimer) codexTimer = window.setInterval(refreshCodex, 3500);
+}
+
+function updateAuthView() {
+  const paired = Boolean(token);
+  elements.pairingPanel.hidden = paired;
+  for (const node of elements.authenticated) node.hidden = !paired;
+  if (!paired) {
+    elements.statusText.textContent = "等待配对";
+  }
+}
 
 async function refreshStatus() {
+  if (!token) {
+    updateAuthView();
+    return;
+  }
+
   try {
     const status = await apiGet("/api/status");
     serverStatus = status;
@@ -76,12 +115,114 @@ async function refreshStatus() {
     elements.statusText.textContent = `${effectiveStt} · ${refine} · ${relay}`;
     if (status.codex) renderCodexStatus(status.codex);
   } catch (error) {
-    elements.statusText.textContent = token ? "连接失败" : "缺少配对 token";
+    if (error.status === 401) {
+      localStorage.removeItem("echoToken");
+      token = "";
+      updateAuthView();
+      toast("配对已失效，请重新扫码");
+    } else {
+      elements.statusText.textContent = token ? "连接失败" : "等待配对";
+      toast(error.message);
+    }
+  }
+}
+
+async function startPairingScanner() {
+  if (!window.isSecureContext) {
+    toast("扫码需要 HTTPS 或 localhost 安全上下文");
+    return;
+  }
+  if (!("BarcodeDetector" in window)) {
+    toast("当前浏览器不支持扫码，请使用 Android Chrome 或粘贴配对链接");
+    return;
+  }
+
+  try {
+    const detector = new BarcodeDetector({ formats: ["qr_code"] });
+    pairingStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: "environment"
+      }
+    });
+    elements.pairingVideo.srcObject = pairingStream;
+    await elements.pairingVideo.play();
+    pairingScanActive = true;
+    elements.scanPairingButton.hidden = true;
+    elements.stopScanButton.hidden = false;
+    scanPairingFrame(detector);
+  } catch (error) {
+    stopPairingScanner();
     toast(error.message);
   }
 }
 
+async function scanPairingFrame(detector) {
+  if (!pairingScanActive) return;
+  if (!pairingScanBusy && elements.pairingVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+    pairingScanBusy = true;
+    try {
+      const codes = await detector.detect(elements.pairingVideo);
+      const value = codes[0]?.rawValue || "";
+      const nextToken = extractPairingToken(value);
+      if (nextToken) {
+        await completePairing(nextToken);
+        return;
+      }
+    } catch {
+      // Keep scanning; transient detector errors are common while the camera warms up.
+    } finally {
+      pairingScanBusy = false;
+    }
+  }
+  requestAnimationFrame(() => scanPairingFrame(detector));
+}
+
+function stopPairingScanner() {
+  pairingScanActive = false;
+  pairingScanBusy = false;
+  if (pairingStream) {
+    pairingStream.getTracks().forEach((track) => track.stop());
+    pairingStream = null;
+  }
+  elements.pairingVideo.srcObject = null;
+  elements.scanPairingButton.hidden = false;
+  elements.stopScanButton.hidden = true;
+}
+
+async function pairFromInput() {
+  const nextToken = extractPairingToken(elements.pairingInput.value);
+  if (!nextToken) {
+    toast("没有找到配对 token");
+    return;
+  }
+  await completePairing(nextToken);
+}
+
+function extractPairingToken(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  try {
+    const url = new URL(text, window.location.origin);
+    const urlToken = url.searchParams.get("token") || "";
+    if (urlToken) return urlToken;
+  } catch {
+    // Fall through to raw-token handling.
+  }
+  return /^[A-Za-z0-9._-]{12,}$/.test(text) ? text : "";
+}
+
+async function completePairing(nextToken) {
+  token = nextToken;
+  localStorage.setItem("echoToken", token);
+  stopPairingScanner();
+  elements.pairingInput.value = "";
+  toast("配对成功");
+  await bootAuthenticated();
+}
+
 async function toggleRecording() {
+  if (!ensurePaired()) return;
+
   if (mediaRecorder?.state === "recording") {
     mediaRecorder.stop();
     return;
@@ -187,6 +328,8 @@ function setRecording(isRecording) {
 }
 
 async function submitAudio(blob) {
+  if (!ensurePaired()) return;
+
   const seconds = Math.round((Date.now() - recordingStartedAt) / 1000);
   if (seconds < 1 || blob.size < 1024) {
     toast("录音太短");
@@ -218,6 +361,8 @@ async function submitAudio(blob) {
 }
 
 async function refineCurrentText() {
+  if (!ensurePaired()) return;
+
   const rawText = elements.rawText.value.trim() || elements.finalText.value.trim();
   if (!rawText) {
     toast("没有可整理的文本");
@@ -252,6 +397,8 @@ async function copyFinalText() {
 }
 
 async function sendToCursor() {
+  if (!ensurePaired()) return;
+
   const text = elements.finalText.value.trim();
   if (!text) {
     toast("没有可发送的文本");
@@ -270,6 +417,8 @@ async function sendToCursor() {
 }
 
 async function refreshCodex() {
+  if (!token) return;
+
   try {
     const data = await apiGet("/api/codex/status");
     renderCodexStatus(data);
@@ -302,6 +451,8 @@ function renderCodexStatus(codex) {
 }
 
 async function sendToCodex() {
+  if (!ensurePaired()) return;
+
   const prompt = elements.finalText.value.trim() || elements.rawText.value.trim();
   const projectId = elements.codexProject.value;
   if (!prompt) {
@@ -356,6 +507,8 @@ async function showCodexJob(id) {
 }
 
 async function loadHistory() {
+  if (!token) return;
+
   try {
     const data = await apiGet("/api/history");
     elements.history.innerHTML = "";
@@ -391,6 +544,13 @@ function authHeaders() {
   return token ? { "X-Echo-Token": token } : {};
 }
 
+function ensurePaired() {
+  if (token) return true;
+  updateAuthView();
+  toast("请先扫码配对");
+  return false;
+}
+
 async function apiGet(path) {
   const response = await fetch(path, { headers: authHeaders() });
   return parseApiResponse(response);
@@ -410,7 +570,11 @@ async function apiPost(path, body) {
 
 async function parseApiResponse(response) {
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+  if (!response.ok) {
+    const error = new Error(data.error || `HTTP ${response.status}`);
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
 
