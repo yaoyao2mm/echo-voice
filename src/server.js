@@ -40,7 +40,14 @@ const upload = multer({
 await loadHistory();
 
 app.use(express.json({ limit: "1mb" }));
-app.use(express.static("public"));
+app.use(express.static("public", {
+  etag: false,
+  lastModified: false,
+  maxAge: 0,
+  setHeaders(res) {
+    res.setHeader("Cache-Control", "no-store, max-age=0");
+  }
+}));
 
 app.get("/api/auth/config", (req, res) => {
   res.json({ enabled: config.auth.enabled });
