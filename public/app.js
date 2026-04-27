@@ -2,14 +2,25 @@ const params = new URLSearchParams(window.location.search);
 const tokenFromUrl = params.get("token");
 if (tokenFromUrl) localStorage.setItem("echoToken", tokenFromUrl);
 let token = tokenFromUrl || localStorage.getItem("echoToken") || "";
+let sessionToken = localStorage.getItem("echoSession") || "";
+let currentUser = readStoredUser();
+let authEnabled = true;
 if (tokenFromUrl) {
   window.history.replaceState({}, "", window.location.pathname);
 }
 
 const elements = {
   statusText: document.querySelector("#statusText"),
+  userBadge: document.querySelector("#userBadge"),
+  logoutButton: document.querySelector("#logoutButton"),
   openPairingButton: document.querySelector("#openPairingButton"),
   refreshStatus: document.querySelector("#refreshStatus"),
+  loginPanel: document.querySelector("#loginPanel"),
+  loginForm: document.querySelector("#loginForm"),
+  loginStatus: document.querySelector("#loginStatus"),
+  loginUsername: document.querySelector("#loginUsername"),
+  loginPassword: document.querySelector("#loginPassword"),
+  loginButton: document.querySelector("#loginButton"),
   pairingPanel: document.querySelector("#pairingPanel"),
   pairingStatus: document.querySelector("#pairingStatus"),
   pairingVideo: document.querySelector("#pairingVideo"),
@@ -50,6 +61,8 @@ let pairingStream = null;
 let pairingScanActive = false;
 let pairingScanBusy = false;
 
+elements.loginForm.addEventListener("submit", login);
+elements.logoutButton.addEventListener("click", logout);
 elements.openPairingButton.addEventListener("click", () => showPairingPanel({ focus: true }));
 elements.refreshStatus.addEventListener("click", refreshStatus);
 elements.scanPairingButton.addEventListener("click", startPairingScanner);
@@ -76,12 +89,31 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
 }
 
+await bootUserSession();
 updateAuthView();
-if (token) {
+if (isLoggedIn() && token) {
   await bootAuthenticated();
 }
 
+async function bootUserSession() {
+  await loadAuthConfig();
+  if (!authEnabled) {
+    sessionToken = "";
+    currentUser = { username: "local", displayName: "Local", role: "owner" };
+    localStorage.removeItem("echoSession");
+    localStorage.removeItem("echoUser");
+    return;
+  }
+  if (sessionToken) {
+    await refreshCurrentUser({ silent: true });
+  }
+}
+
 async function bootAuthenticated() {
+  if (!isLoggedIn()) {
+    updateAuthView();
+    return;
+  }
   updateAuthView();
   await refreshStatus({ silentAuthFailure: true });
   if (!token) return;
@@ -92,18 +124,136 @@ async function bootAuthenticated() {
 }
 
 function updateAuthView(message = "") {
+  const loggedIn = isLoggedIn();
   const paired = Boolean(token);
-  elements.pairingPanel.hidden = paired;
-  elements.openPairingButton.hidden = paired;
-  elements.refreshStatus.hidden = !paired;
-  for (const node of elements.authenticated) node.hidden = !paired;
+  elements.loginPanel.hidden = loggedIn;
+  elements.pairingPanel.hidden = !loggedIn || paired;
+  elements.openPairingButton.hidden = !loggedIn || paired;
+  elements.refreshStatus.hidden = !loggedIn || !paired;
+  elements.userBadge.hidden = !loggedIn;
+  elements.logoutButton.hidden = !authEnabled || !loggedIn;
+  elements.userBadge.textContent = loggedIn ? displayUser(currentUser) : "";
+  for (const node of elements.authenticated) node.hidden = !loggedIn || !paired;
+
+  if (!loggedIn) {
+    elements.statusText.textContent = "等待登录";
+    elements.loginStatus.textContent = message || "请输入账号后继续。";
+    return;
+  }
+
   if (!paired) {
     elements.statusText.textContent = "等待配对";
     elements.pairingStatus.textContent = message || "如果你是直接打开这个网页，请先扫桌面端显示的二维码。";
   }
 }
 
+async function loadAuthConfig() {
+  try {
+    const response = await fetch("/api/auth/config");
+    const data = await parseApiResponse(response);
+    authEnabled = Boolean(data.enabled);
+  } catch {
+    authEnabled = true;
+  }
+}
+
+async function refreshCurrentUser({ silent = false } = {}) {
+  try {
+    const response = await fetch("/api/auth/me", { headers: sessionHeaders() });
+    const data = await parseApiResponse(response);
+    setCurrentUser(data.user);
+  } catch (error) {
+    enterLogin(silent ? "" : "登录已过期，请重新登录。");
+  }
+}
+
+async function login(event) {
+  event.preventDefault();
+  elements.loginButton.disabled = true;
+  elements.loginStatus.textContent = "登录中...";
+  try {
+    const response = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        username: elements.loginUsername.value.trim(),
+        password: elements.loginPassword.value
+      })
+    });
+    const data = await parseApiResponse(response);
+    sessionToken = data.sessionToken || "";
+    localStorage.setItem("echoSession", sessionToken);
+    setCurrentUser(data.user);
+    elements.loginPassword.value = "";
+    toast("已登录");
+    if (token) {
+      await bootAuthenticated();
+    } else {
+      updateAuthView();
+    }
+  } catch (error) {
+    elements.loginStatus.textContent = error.message || "登录失败";
+  } finally {
+    elements.loginButton.disabled = false;
+  }
+}
+
+function logout() {
+  sessionToken = "";
+  currentUser = null;
+  localStorage.removeItem("echoSession");
+  localStorage.removeItem("echoUser");
+  if (codexTimer) {
+    window.clearInterval(codexTimer);
+    codexTimer = null;
+  }
+  stopPairingScanner();
+  updateAuthView("已退出，请重新登录。");
+}
+
+function enterLogin(message = "登录已过期，请重新登录。") {
+  sessionToken = "";
+  currentUser = null;
+  localStorage.removeItem("echoSession");
+  localStorage.removeItem("echoUser");
+  if (codexTimer) {
+    window.clearInterval(codexTimer);
+    codexTimer = null;
+  }
+  stopPairingScanner();
+  updateAuthView(message);
+}
+
+function setCurrentUser(user) {
+  currentUser = user || null;
+  if (currentUser) {
+    localStorage.setItem("echoUser", JSON.stringify(currentUser));
+  } else {
+    localStorage.removeItem("echoUser");
+  }
+  updateAuthView();
+}
+
+function readStoredUser() {
+  try {
+    return JSON.parse(localStorage.getItem("echoUser") || "null");
+  } catch {
+    return null;
+  }
+}
+
+function isLoggedIn() {
+  return !authEnabled || Boolean(sessionToken && currentUser);
+}
+
+function displayUser(user) {
+  return user?.displayName || user?.username || "";
+}
+
 function showPairingPanel({ focus = false } = {}) {
+  if (!ensureLoggedIn()) return;
   updateAuthView();
   if (focus) {
     elements.pairingPanel.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -123,12 +273,21 @@ function enterPairing(message = "配对已失效，请重新扫描桌面端二�
 }
 
 function handleAuthError(error, message) {
+  if (error.code === "SESSION_REQUIRED") {
+    enterLogin("登录已过期，请重新登录。");
+    return true;
+  }
+  if (error.code && error.code !== "PAIRING_REQUIRED") return false;
   if (error.status !== 401) return false;
   enterPairing(message);
   return true;
 }
 
 async function refreshStatus(options = {}) {
+  if (!isLoggedIn()) {
+    updateAuthView();
+    return;
+  }
   if (!token) {
     updateAuthView();
     return;
@@ -146,6 +305,7 @@ async function refreshStatus(options = {}) {
         : "桌面离线"
       : status.platform;
     elements.statusText.textContent = `${effectiveStt} · ${refine} · ${relay}`;
+    if (status.user) setCurrentUser(status.user);
     if (status.codex) renderCodexStatus(status.codex);
   } catch (error) {
     if (handleAuthError(error, "当前浏览器没有有效配对，请扫描桌面端二维码。")) {
@@ -160,6 +320,7 @@ async function refreshStatus(options = {}) {
 }
 
 async function startPairingScanner() {
+  if (!ensureLoggedIn()) return;
   showPairingPanel();
   if (!window.isSecureContext) {
     toast("扫码需要 HTTPS 或 localhost 安全上下文");
@@ -248,6 +409,7 @@ function extractPairingToken(value) {
 }
 
 async function completePairing(nextToken) {
+  if (!ensureLoggedIn()) return;
   token = nextToken;
   localStorage.setItem("echoToken", token);
   stopPairingScanner();
@@ -459,7 +621,7 @@ async function sendToCursor() {
 }
 
 async function refreshCodex() {
-  if (!token) return;
+  if (!isLoggedIn() || !token) return;
 
   try {
     const data = await apiGet("/api/codex/status");
@@ -552,7 +714,7 @@ async function showCodexJob(id) {
 }
 
 async function loadHistory() {
-  if (!token) return;
+  if (!isLoggedIn() || !token) return;
 
   try {
     const data = await apiGet("/api/history");
@@ -587,10 +749,25 @@ function setBusy(isBusy, label = "") {
 }
 
 function authHeaders() {
-  return token ? { "X-Echo-Token": token } : {};
+  return {
+    ...sessionHeaders(),
+    ...(token ? { "X-Echo-Token": token } : {})
+  };
+}
+
+function sessionHeaders() {
+  return authEnabled && sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {};
+}
+
+function ensureLoggedIn() {
+  if (isLoggedIn()) return true;
+  updateAuthView("请先登录。");
+  elements.loginUsername.focus({ preventScroll: true });
+  return false;
 }
 
 function ensurePaired() {
+  if (!ensureLoggedIn()) return false;
   if (token) return true;
   updateAuthView("请先扫码配对。");
   showPairingPanel({ focus: true });
@@ -619,6 +796,7 @@ async function parseApiResponse(response) {
   if (!response.ok) {
     const error = new Error(data.error || `HTTP ${response.status}`);
     error.status = response.status;
+    error.code = data.code || "";
     throw error;
   }
   return data;

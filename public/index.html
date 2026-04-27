@@ -15,12 +15,29 @@
           <p id="statusText">连接中</p>
         </div>
         <div class="topbar-actions">
+          <span id="userBadge" class="user-badge" hidden></span>
+          <button id="logoutButton" class="top-logout-button" type="button" hidden>退出</button>
           <button id="openPairingButton" class="top-pair-button" type="button" hidden>扫码配对</button>
           <button id="refreshStatus" class="icon-button" type="button" title="刷新状态" aria-label="刷新状态">
             ↻
           </button>
         </div>
       </header>
+
+      <section id="loginPanel" class="auth-panel" hidden>
+        <div>
+          <h2>登录 Echo</h2>
+          <p>登录后再连接桌面端。</p>
+          <p id="loginStatus" class="auth-status" role="status"></p>
+        </div>
+        <form id="loginForm" class="login-form">
+          <label class="field-label" for="loginUsername">用户名</label>
+          <input id="loginUsername" type="text" autocomplete="username" />
+          <label class="field-label" for="loginPassword">密码</label>
+          <input id="loginPassword" type="password" autocomplete="current-password" />
+          <button id="loginButton" class="primary" type="submit">登录</button>
+        </form>
+      </section>
 
       <section id="pairingPanel" class="pairing-panel" hidden>
         <div>

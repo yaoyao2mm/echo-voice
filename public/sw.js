@@ -1,4 +1,4 @@
-self.ECHO_CACHE = "echo-voice-v2";
+self.ECHO_CACHE = "echo-voice-v3";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

@@ -10,6 +10,14 @@ import { loadHistory, recentHistory, allHistory, addHistory } from "./lib/histor
 import { getSttStatus, transcribeAudio } from "./lib/stt.js";
 import { getRefineStatus, refineTranscript } from "./lib/refine.js";
 import { insertText } from "./lib/paste.js";
+import {
+  bearerToken,
+  createSessionToken,
+  findUser,
+  publicUser,
+  validatePassword,
+  verifySessionToken
+} from "./lib/auth.js";
 import { ackInsertJob, enqueueInsertJob, failInsertJob, relayStatus, waitForInsertJob } from "./lib/relayQueue.js";
 import {
   appendCodexEvents,
@@ -34,10 +42,72 @@ await loadHistory();
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static("public"));
 
+app.get("/api/auth/config", (req, res) => {
+  res.json({ enabled: config.auth.enabled });
+});
+
+app.post("/api/auth/login", (req, res) => {
+  if (!config.auth.enabled) {
+    return res.json({
+      user: { username: "local", displayName: "Local", role: "owner" },
+      sessionToken: "",
+      expiresAt: null
+    });
+  }
+
+  const user = findUser(config.auth.users, req.body?.username);
+  if (!validatePassword(user, req.body?.password)) {
+    return res.status(401).json({
+      code: "LOGIN_FAILED",
+      error: "用户名或密码错误。"
+    });
+  }
+
+  const sessionToken = createSessionToken({
+    user,
+    secret: config.auth.sessionSecret,
+    ttlMs: config.auth.sessionTtlMs
+  });
+  res.json({
+    user: publicUser(user),
+    sessionToken,
+    expiresAt: new Date(Date.now() + config.auth.sessionTtlMs).toISOString()
+  });
+});
+
+app.get("/api/auth/me", (req, res) => {
+  if (!config.auth.enabled) {
+    return res.json({ user: { username: "local", displayName: "Local", role: "owner" } });
+  }
+
+  const user = currentSessionUser(req);
+  if (!user) {
+    return res.status(401).json({
+      code: "SESSION_REQUIRED",
+      error: "需要登录。"
+    });
+  }
+  res.json({ user });
+});
+
 app.use("/api", (req, res, next) => {
   const provided = req.get("x-echo-token") || req.query.token || req.body?.token;
   if (provided !== config.token) {
-    return res.status(401).json({ error: "Invalid or missing pairing token." });
+    return res.status(401).json({
+      code: "PAIRING_REQUIRED",
+      error: "配对 token 无效或缺失。"
+    });
+  }
+
+  if (config.auth.enabled && !isAgentRequest(req)) {
+    const user = currentSessionUser(req);
+    if (!user) {
+      return res.status(401).json({
+        code: "SESSION_REQUIRED",
+        error: "需要登录。"
+      });
+    }
+    req.user = user;
   }
   next();
 });
@@ -51,6 +121,7 @@ app.get("/api/status", (req, res) => {
     insertMode: config.insertMode,
     relay: config.mode === "relay" ? relayStatus() : null,
     codex: config.mode === "relay" ? codexStatus() : null,
+    user: req.user || null,
     platform: process.platform
   });
 });
@@ -84,7 +155,8 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
       raw,
       refined,
       mode,
-      contextHint
+      contextHint,
+      user: req.user || null
     });
 
     res.json({ item });
@@ -104,7 +176,7 @@ app.post("/api/refine", async (req, res) => {
       contextHint,
       history: recentHistory(8)
     });
-    const item = await addHistory({ raw: rawText, refined, mode, contextHint });
+    const item = await addHistory({ raw: rawText, refined, mode, contextHint, user: req.user || null });
     res.json({ item });
   } catch (error) {
     handleError(res, error);
@@ -287,4 +359,17 @@ function handleError(res, error) {
   res.status(status).json({
     error: error.message || "Unexpected error"
   });
+}
+
+function currentSessionUser(req) {
+  return verifySessionToken({
+    token: bearerToken(req),
+    users: config.auth.users,
+    secret: config.auth.sessionSecret
+  });
+}
+
+function isAgentRequest(req) {
+  const path = req.originalUrl.split("?")[0];
+  return path.startsWith("/api/agent/");
 }

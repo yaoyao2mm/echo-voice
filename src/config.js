@@ -22,6 +22,7 @@ const volcengineCodingModel =
   process.env.METIO_VOLCENGINE_CODING_CHAT_MODEL ||
   process.env.VOLCENGINE_CODING_CHAT_MODEL ||
   "ark-code-latest";
+const authUsers = parseAuthUsers();
 
 export const config = {
   host: process.env.ECHO_HOST || "0.0.0.0",
@@ -33,6 +34,13 @@ export const config = {
   dataDir: path.join(os.homedir(), ".echo-voice"),
   httpsCert: process.env.HTTPS_CERT || "",
   httpsKey: process.env.HTTPS_KEY || "",
+
+  auth: {
+    enabled: parseBoolean(process.env.ECHO_AUTH_ENABLED, authUsers.length > 0),
+    users: authUsers,
+    sessionSecret: process.env.ECHO_SESSION_SECRET || process.env.ECHO_TOKEN || runtimeToken,
+    sessionTtlMs: Number(process.env.ECHO_SESSION_TTL_HOURS || 24 * 30) * 60 * 60 * 1000
+  },
 
   network: {
     proxyUrl:
@@ -111,6 +119,52 @@ function resolveRefineModel() {
 
 function hasExplicitOpenAiCompatibleRefineKey() {
   return Boolean(process.env.LLM_API_KEY || process.env.OPENAI_API_KEY);
+}
+
+function parseBoolean(value, fallback) {
+  if (value === undefined || value === "") return fallback;
+  return ["1", "true", "yes", "on"].includes(String(value).toLowerCase());
+}
+
+function parseAuthUsers() {
+  const users = [];
+  if (process.env.ECHO_USERS_JSON) {
+    try {
+      const parsed = JSON.parse(process.env.ECHO_USERS_JSON);
+      const entries = Array.isArray(parsed) ? parsed : [parsed];
+      for (const entry of entries) {
+        const user = normalizeAuthUser(entry);
+        if (user) users.push(user);
+      }
+    } catch (error) {
+      console.warn("Could not parse ECHO_USERS_JSON:", error.message);
+    }
+  }
+
+  const envUser = normalizeAuthUser({
+    username: process.env.ECHO_AUTH_USERNAME,
+    password: process.env.ECHO_AUTH_PASSWORD,
+    passwordSha256: process.env.ECHO_AUTH_PASSWORD_SHA256,
+    displayName: process.env.ECHO_AUTH_DISPLAY_NAME,
+    role: process.env.ECHO_AUTH_ROLE || "owner"
+  });
+  if (envUser && !users.some((user) => user.username === envUser.username)) users.push(envUser);
+
+  return users;
+}
+
+function normalizeAuthUser(entry = {}) {
+  const username = String(entry.username || "").trim();
+  const password = String(entry.password || "");
+  const passwordSha256 = String(entry.passwordSha256 || entry.password_hash_sha256 || "").trim();
+  if (!username || (!password && !passwordSha256)) return null;
+  return {
+    username,
+    password,
+    passwordSha256,
+    displayName: String(entry.displayName || entry.display_name || username).trim() || username,
+    role: String(entry.role || "user").trim() || "user"
+  };
 }
 
 function parseWorkspaces(value) {

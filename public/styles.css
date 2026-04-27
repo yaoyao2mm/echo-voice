@@ -54,6 +54,16 @@ textarea {
   gap: 8px;
 }
 
+.user-badge {
+  max-width: 140px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 h1 {
   margin: 0;
   font-size: 24px;
@@ -88,12 +98,24 @@ p {
   white-space: nowrap;
 }
 
+.top-logout-button {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 720;
+  white-space: nowrap;
+}
+
 .compose,
 .editor,
 .history-section {
   margin-top: 10px;
 }
 
+.auth-panel,
 .pairing-panel {
   display: grid;
   gap: 14px;
@@ -105,20 +127,49 @@ p {
   box-shadow: var(--shadow);
 }
 
+.auth-panel[hidden],
 .pairing-panel[hidden] {
   display: none;
 }
 
+.auth-panel h2,
 .pairing-panel h2 {
   margin: 0;
   font-size: 24px;
   line-height: 1.2;
 }
 
+.auth-status,
 .pairing-status {
   min-height: 20px;
   color: var(--accent-dark);
   font-weight: 680;
+}
+
+.login-form {
+  display: grid;
+  gap: 2px;
+}
+
+.login-form input {
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: var(--surface);
+  color: var(--ink);
+  outline: none;
+}
+
+.login-form .primary {
+  min-height: 50px;
+  margin-top: 12px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 760;
 }
 
 .scanner-frame {
