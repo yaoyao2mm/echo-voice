@@ -7,6 +7,7 @@ dotenv.config();
 
 const runtimeToken = crypto.randomBytes(6).toString("hex");
 const postprocessProvider = process.env.POSTPROCESS_PROVIDER || "auto";
+const defaultNoProxy = "localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.local";
 const volcengineCodingApiKey =
   process.env.METIO_VOLCENGINE_CODING_API_KEY ||
   process.env.VOLCENGINE_CODING_API_KEY ||
@@ -32,6 +33,18 @@ export const config = {
   dataDir: path.join(os.homedir(), ".echo-voice"),
   httpsCert: process.env.HTTPS_CERT || "",
   httpsKey: process.env.HTTPS_KEY || "",
+
+  network: {
+    proxyUrl:
+      process.env.ECHO_PROXY_URL ||
+      process.env.HTTPS_PROXY ||
+      process.env.https_proxy ||
+      process.env.HTTP_PROXY ||
+      process.env.http_proxy ||
+      "",
+    noProxy: process.env.ECHO_NO_PROXY || process.env.NO_PROXY || process.env.no_proxy || defaultNoProxy,
+    timeoutMs: Number(process.env.ECHO_HTTP_TIMEOUT_MS || 60000)
+  },
 
   stt: {
     provider: process.env.STT_PROVIDER || "auto",

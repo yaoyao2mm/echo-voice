@@ -108,6 +108,21 @@ npm run desktop
 
 The phone can only choose these workspace ids; it cannot send arbitrary paths or shell commands.
 
+If you usually work with a VPN enabled, prefer relay mode and let the desktop agent follow the system proxy:
+
+```bash
+ECHO_PROXY_URL=system npm run desktop
+```
+
+For macOS launchd installs, put `ECHO_PROXY_URL=system` in `.env`, then run:
+
+```bash
+npm run desktop:mac -- restart
+npm run desktop:mac -- doctor
+```
+
+`system` follows the macOS HTTP/HTTPS proxy. If your VPN client only exposes SOCKS, enable its HTTP/mixed proxy port and set `ECHO_PROXY_URL=http://127.0.0.1:PORT` instead.
+
 ## 5. Phone URL
 
 Open:

@@ -1,5 +1,6 @@
 import path from "node:path";
 import { config } from "../config.js";
+import { httpFetch } from "./http.js";
 
 export function getSttStatus() {
   const provider = resolveSttProvider();
@@ -45,12 +46,13 @@ async function transcribeWithOpenAI({ buffer, mimeType, originalName }) {
   if (config.stt.prompt) form.append("prompt", config.stt.prompt);
   form.append("file", toBlob(buffer, mimeType), filename(originalName, mimeType));
 
-  const response = await fetch(`${config.stt.openaiBaseUrl}/audio/transcriptions`, {
+  const response = await httpFetch(`${config.stt.openaiBaseUrl}/audio/transcriptions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${config.stt.openaiApiKey}`
     },
-    body: form
+    body: form,
+    timeoutMs: 120000
   });
 
   return parseTranscriptResponse(response, "OpenAI transcription failed");
@@ -64,9 +66,10 @@ async function transcribeWithLocalService({ buffer, mimeType, originalName }) {
   if (config.stt.language) form.append("language", config.stt.language);
   if (config.stt.prompt) form.append("prompt", config.stt.prompt);
 
-  const response = await fetch(config.stt.localUrl, {
+  const response = await httpFetch(config.stt.localUrl, {
     method: "POST",
-    body: form
+    body: form,
+    timeoutMs: 120000
   });
 
   return parseTranscriptResponse(response, "Local transcription failed");

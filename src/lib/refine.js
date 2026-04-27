@@ -1,4 +1,5 @@
 import { config } from "../config.js";
+import { httpFetch } from "./http.js";
 
 const modes = {
   chat: "把口述整理成适合发给 AI 助手或协作对象的清晰指令。保留意图、约束和上下文，去掉口头停顿，让文本更像经过思考后的输入。",
@@ -86,7 +87,7 @@ function buildMessages({ rawText, mode, contextHint, history }) {
 }
 
 async function refineWithOpenAICompatible(messages) {
-  const response = await fetch(`${config.refine.llmBaseUrl}/chat/completions`, {
+  const response = await httpFetch(`${config.refine.llmBaseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -96,7 +97,8 @@ async function refineWithOpenAICompatible(messages) {
       model: config.refine.llmModel,
       messages,
       temperature: 0.2
-    })
+    }),
+    timeoutMs: 120000
   });
 
   const json = await parseJsonResponse(response, "Text refinement failed");
@@ -104,7 +106,7 @@ async function refineWithOpenAICompatible(messages) {
 }
 
 async function refineWithOllama(messages) {
-  const response = await fetch(`${config.refine.ollamaBaseUrl}/api/chat`, {
+  const response = await httpFetch(`${config.refine.ollamaBaseUrl}/api/chat`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
@@ -116,7 +118,8 @@ async function refineWithOllama(messages) {
       options: {
         temperature: 0.2
       }
-    })
+    }),
+    timeoutMs: 120000
   });
 
   const json = await parseJsonResponse(response, "Ollama refinement failed");

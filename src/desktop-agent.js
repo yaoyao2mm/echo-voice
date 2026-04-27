@@ -1,5 +1,6 @@
 import { config } from "./config.js";
 import { publicWorkspaces, runCodexJob } from "./lib/codexRunner.js";
+import { describeHttpNetwork, formatFetchError, httpFetch } from "./lib/http.js";
 import { insertText } from "./lib/paste.js";
 
 if (!config.relayUrl) {
@@ -15,6 +16,7 @@ if (!config.token) {
 console.log("Echo Voice desktop agent is running.");
 console.log(`Relay: ${config.relayUrl}`);
 console.log(`Insert mode: ${config.insertMode}`);
+console.log(`Network: ${formatNetworkStatus(describeHttpNetwork(config.relayUrl))}`);
 console.log(`Codex remote: ${config.codex.enabled ? "enabled" : "disabled"}`);
 if (config.codex.enabled) {
   for (const workspace of publicWorkspaces()) {
@@ -38,7 +40,7 @@ async function runInsertLoop() {
       await postJson("/api/agent/ack", { id: job.id, result });
       console.log(`  ${result.message}`);
     } catch (error) {
-      console.error(`[insert ${new Date().toLocaleTimeString()}] ${error.message}`);
+      console.error(`[insert ${new Date().toLocaleTimeString()}] ${formatFetchError(error)}`);
       if (job?.id) {
         await postJson("/api/agent/fail", { id: job.id, error: error.message }).catch(() => {});
       }
@@ -61,7 +63,7 @@ async function runCodexLoop() {
       await postJson("/api/agent/codex/complete", { id: job.id, result });
       console.log(`  codex ${result.ok ? "completed" : "failed"} (${result.exitCode ?? "no exit code"})`);
     } catch (error) {
-      console.error(`[codex ${new Date().toLocaleTimeString()}] ${error.message}`);
+      console.error(`[codex ${new Date().toLocaleTimeString()}] ${formatFetchError(error)}`);
       if (job?.id) {
         await postJson("/api/agent/codex/complete", {
           id: job.id,
@@ -77,15 +79,16 @@ async function runCodexLoop() {
 }
 
 async function pollNextInsertJob() {
-  const response = await fetch(`${config.relayUrl}/api/agent/next?wait=25000`, {
-    headers: authHeaders()
+  const response = await httpFetch(`${config.relayUrl}/api/agent/next?wait=25000`, {
+    headers: authHeaders(),
+    timeoutMs: 35000
   });
   const data = await parseApiResponse(response);
   return data.job || null;
 }
 
 async function pollNextCodexJob() {
-  const response = await fetch(`${config.relayUrl}/api/agent/codex/next?wait=25000`, {
+  const response = await httpFetch(`${config.relayUrl}/api/agent/codex/next?wait=25000`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -93,20 +96,22 @@ async function pollNextCodexJob() {
     },
     body: JSON.stringify({
       workspaces: publicWorkspaces()
-    })
+    }),
+    timeoutMs: 35000
   });
   const data = await parseApiResponse(response);
   return data.job || null;
 }
 
 async function postJson(path, body) {
-  const response = await fetch(`${config.relayUrl}${path}`, {
+  const response = await httpFetch(`${config.relayUrl}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       ...authHeaders()
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    timeoutMs: 60000
   });
   return parseApiResponse(response);
 }
@@ -123,4 +128,9 @@ function authHeaders() {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatNetworkStatus(status) {
+  if (!status.activeProxyUrl) return `direct, timeout=${status.timeoutMs}ms`;
+  return `proxy=${status.activeProxyUrl}, timeout=${status.timeoutMs}ms`;
 }

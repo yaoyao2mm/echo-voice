@@ -73,14 +73,35 @@ cat > .env <<'EOF'
 ECHO_RELAY_URL=https://echo.554119401.xyz
 ECHO_TOKEN=a-long-random-secret
 ECHO_CODEX_WORKSPACES=echo=/Users/john/workspace/projects/echo,metio=/Users/john/workspace/projects/metio
+ECHO_PROXY_URL=system
 EOF
 
 npm run desktop:mac -- install
 npm run desktop:mac -- status
+npm run desktop:mac -- doctor
 npm run desktop:mac -- logs
 ```
 
-Other commands: `start`, `stop`, `restart`, `uninstall`, `print-env`.
+Other commands: `start`, `stop`, `restart`, `doctor`, `uninstall`, `print-env`.
+
+### VPN And Proxy
+
+Internet relay mode is VPN-friendly by design: the phone and the Mac both make outbound HTTPS requests to the public relay, so they do not need to be on the same LAN.
+
+For VPN clients that expose a local HTTP/mixed proxy, set:
+
+```bash
+ECHO_PROXY_URL=system
+```
+
+On macOS this makes the desktop agent follow the current System Settings HTTP/HTTPS proxy. You can also pin a proxy explicitly, for example `ECHO_PROXY_URL=http://127.0.0.1:7897`. SOCKS-only proxy URLs are not supported directly; expose an HTTP or mixed proxy port instead.
+
+After changing network settings, restart and run the doctor:
+
+```bash
+npm run desktop:mac -- restart
+npm run desktop:mac -- doctor
+```
 
 Open `https://voice.example.com/?token=a-long-random-secret` on the phone. See [docs/internet-deploy.md](docs/internet-deploy.md) for Nginx, systemd, and HTTPS notes.
 

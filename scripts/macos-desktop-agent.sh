@@ -21,6 +21,7 @@ Commands:
   restart     Restart the desktop agent
   status      Show launchd status and recent logs
   logs        Follow desktop agent logs
+  doctor      Check relay reachability through the same network/proxy settings
   uninstall   Stop and remove the launchd service
   print-env   Print loaded desktop-agent environment
 
@@ -33,6 +34,7 @@ Required values:
 
 Useful values:
   ECHO_CODEX_WORKSPACES=echo=/Users/john/workspace/projects/echo
+  ECHO_PROXY_URL=system
   INSERT_MODE=paste
 EOF
 }
@@ -46,10 +48,37 @@ ensure_macos() {
 
 load_env() {
   if [[ -f "$ENV_FILE" ]]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "$ENV_FILE"
-    set +a
+    local parsed_env
+    parsed_env="$(node - "$ENV_FILE" <<'NODE'
+const fs = require("node:fs");
+const dotenv = require("dotenv");
+
+const wanted = [
+  "ECHO_RELAY_URL",
+  "ECHO_TOKEN",
+  "ECHO_CODEX_WORKSPACES",
+  "ECHO_CODEX_ENABLED",
+  "ECHO_CODEX_COMMAND",
+  "ECHO_CODEX_SANDBOX",
+  "INSERT_MODE",
+  "ECHO_PROXY_URL",
+  "ECHO_NO_PROXY",
+  "ECHO_HTTP_TIMEOUT_MS",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY"
+];
+
+const file = process.argv[2];
+const parsed = dotenv.parse(fs.readFileSync(file));
+for (const key of wanted) {
+  if (Object.prototype.hasOwnProperty.call(parsed, key)) {
+    console.log(`export ${key}=${JSON.stringify(parsed[key])}`);
+  }
+}
+NODE
+)"
+    eval "$parsed_env"
   fi
 
   : "${ECHO_RELAY_URL:=}"
@@ -59,6 +88,12 @@ load_env() {
   : "${ECHO_CODEX_COMMAND:=codex}"
   : "${ECHO_CODEX_SANDBOX:=workspace-write}"
   : "${INSERT_MODE:=paste}"
+  : "${ECHO_PROXY_URL:=}"
+  : "${ECHO_NO_PROXY:=localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.local}"
+  : "${ECHO_HTTP_TIMEOUT_MS:=60000}"
+  : "${HTTP_PROXY:=}"
+  : "${HTTPS_PROXY:=}"
+  : "${NO_PROXY:=}"
 }
 
 require_config() {
@@ -146,6 +181,12 @@ $(env_entry "ECHO_CODEX_ENABLED" "$ECHO_CODEX_ENABLED")
 $(env_entry "ECHO_CODEX_COMMAND" "$ECHO_CODEX_COMMAND")
 $(env_entry "ECHO_CODEX_SANDBOX" "$ECHO_CODEX_SANDBOX")
 $(env_entry "INSERT_MODE" "$INSERT_MODE")
+$(env_entry "ECHO_PROXY_URL" "$ECHO_PROXY_URL")
+$(env_entry "ECHO_NO_PROXY" "$ECHO_NO_PROXY")
+$(env_entry "ECHO_HTTP_TIMEOUT_MS" "$ECHO_HTTP_TIMEOUT_MS")
+$(env_entry "HTTP_PROXY" "$HTTP_PROXY")
+$(env_entry "HTTPS_PROXY" "$HTTPS_PROXY")
+$(env_entry "NO_PROXY" "$NO_PROXY")
   </dict>
 
   <key>RunAtLoad</key>
@@ -215,7 +256,7 @@ status_service() {
   echo "Service: $LABEL"
   echo "Plist:   $PLIST"
   echo
-  launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null | sed -n '1,80p' || echo "Not loaded."
+  launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null | redact_sensitive | sed -n '1,80p' || echo "Not loaded."
   echo
   echo "Recent stdout:"
   tail -n 20 "$OUT_LOG" 2>/dev/null || true
@@ -229,6 +270,11 @@ follow_logs() {
   mkdir -p "$LOG_DIR"
   touch "$OUT_LOG" "$ERR_LOG"
   tail -f "$OUT_LOG" "$ERR_LOG"
+}
+
+doctor_network() {
+  load_env
+  node "$ROOT_DIR/scripts/network-doctor.js"
 }
 
 uninstall_service() {
@@ -248,8 +294,32 @@ ECHO_CODEX_ENABLED=$ECHO_CODEX_ENABLED
 ECHO_CODEX_COMMAND=$ECHO_CODEX_COMMAND
 ECHO_CODEX_SANDBOX=$ECHO_CODEX_SANDBOX
 INSERT_MODE=$INSERT_MODE
+ECHO_PROXY_URL=${ECHO_PROXY_URL:+$(mask_proxy "$ECHO_PROXY_URL")}
+ECHO_NO_PROXY=$ECHO_NO_PROXY
+ECHO_HTTP_TIMEOUT_MS=$ECHO_HTTP_TIMEOUT_MS
 ROOT_DIR=$ROOT_DIR
 EOF
+}
+
+mask_proxy() {
+  node -e '
+const value = process.argv[1] || "";
+try {
+  const url = new URL(value);
+  if (url.username) url.username = "<user>";
+  if (url.password) url.password = "<password>";
+  console.log(url.toString());
+} catch {
+  console.log(value);
+}
+' "$1"
+}
+
+redact_sensitive() {
+  sed -E \
+    -e 's/(ECHO_TOKEN => ).+/\1<set>/' \
+    -e 's/((OPENAI|LLM|METIO|VOLCENGINE)[A-Z0-9_]*API_KEY => ).+/\1<set>/' \
+    -e 's#((HTTP|HTTPS)_PROXY => https?://)[^/@]+@#\1<credentials>@#'
 }
 
 main() {
@@ -260,6 +330,7 @@ main() {
     restart) restart_service ;;
     status) status_service ;;
     logs) follow_logs ;;
+    doctor) doctor_network ;;
     uninstall) uninstall_service ;;
     print-env) print_env ;;
     -h|--help|help|"") usage ;;

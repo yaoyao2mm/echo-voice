@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { config } from "../config.js";
+import { buildProxyEnv } from "./http.js";
 
 export function publicWorkspaces() {
   return config.codex.workspaces.map((workspace) => ({
@@ -32,7 +33,7 @@ export async function runCodexJob(job, hooks = {}) {
     const child = spawn(config.codex.command, args, {
       cwd: workspace.path,
       stdio: ["pipe", "pipe", "pipe"],
-      env: process.env
+      env: buildProxyEnv(process.env)
     });
 
     let stdoutBuffer = "";
