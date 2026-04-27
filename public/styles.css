@@ -48,6 +48,12 @@ textarea {
   padding: 8px 2px 18px;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 h1 {
   margin: 0;
   font-size: 24px;
@@ -69,6 +75,17 @@ p {
   background: var(--surface);
   color: var(--ink);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+}
+
+.top-pair-button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 13px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 740;
+  white-space: nowrap;
 }
 
 .compose,
@@ -94,8 +111,14 @@ p {
 
 .pairing-panel h2 {
   margin: 0;
-  font-size: 20px;
+  font-size: 24px;
   line-height: 1.2;
+}
+
+.pairing-status {
+  min-height: 20px;
+  color: var(--accent-dark);
+  font-weight: 680;
 }
 
 .scanner-frame {
@@ -117,8 +140,15 @@ p {
 .pairing-actions,
 .pairing-input-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
   gap: 8px;
+}
+
+.pairing-actions {
+  grid-template-columns: 1fr 0.72fr;
+}
+
+.pairing-input-row {
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .pairing-actions button,
@@ -126,6 +156,11 @@ p {
   min-height: 46px;
   border-radius: 8px;
   font-weight: 740;
+}
+
+.pairing-actions .primary {
+  min-height: 54px;
+  font-size: 17px;
 }
 
 .pairing-actions .primary {

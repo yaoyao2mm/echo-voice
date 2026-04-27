@@ -8,8 +8,10 @@ if (tokenFromUrl) {
 
 const elements = {
   statusText: document.querySelector("#statusText"),
+  openPairingButton: document.querySelector("#openPairingButton"),
   refreshStatus: document.querySelector("#refreshStatus"),
   pairingPanel: document.querySelector("#pairingPanel"),
+  pairingStatus: document.querySelector("#pairingStatus"),
   pairingVideo: document.querySelector("#pairingVideo"),
   pairingInput: document.querySelector("#pairingInput"),
   scanPairingButton: document.querySelector("#scanPairingButton"),
@@ -48,6 +50,7 @@ let pairingStream = null;
 let pairingScanActive = false;
 let pairingScanBusy = false;
 
+elements.openPairingButton.addEventListener("click", () => showPairingPanel({ focus: true }));
 elements.refreshStatus.addEventListener("click", refreshStatus);
 elements.scanPairingButton.addEventListener("click", startPairingScanner);
 elements.stopScanButton.addEventListener("click", stopPairingScanner);
@@ -80,22 +83,52 @@ if (token) {
 
 async function bootAuthenticated() {
   updateAuthView();
-  await refreshStatus();
+  await refreshStatus({ silentAuthFailure: true });
+  if (!token) return;
   await loadHistory();
+  if (!token) return;
   await refreshCodex();
   if (!codexTimer) codexTimer = window.setInterval(refreshCodex, 3500);
 }
 
-function updateAuthView() {
+function updateAuthView(message = "") {
   const paired = Boolean(token);
   elements.pairingPanel.hidden = paired;
+  elements.openPairingButton.hidden = paired;
+  elements.refreshStatus.hidden = !paired;
   for (const node of elements.authenticated) node.hidden = !paired;
   if (!paired) {
     elements.statusText.textContent = "等待配对";
+    elements.pairingStatus.textContent = message || "如果你是直接打开这个网页，请先扫桌面端显示的二维码。";
   }
 }
 
-async function refreshStatus() {
+function showPairingPanel({ focus = false } = {}) {
+  updateAuthView();
+  if (focus) {
+    elements.pairingPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    elements.scanPairingButton.focus({ preventScroll: true });
+  }
+}
+
+function enterPairing(message = "配对已失效，请重新扫描桌面端二维码。") {
+  localStorage.removeItem("echoToken");
+  token = "";
+  if (codexTimer) {
+    window.clearInterval(codexTimer);
+    codexTimer = null;
+  }
+  stopPairingScanner();
+  updateAuthView(message);
+}
+
+function handleAuthError(error, message) {
+  if (error.status !== 401) return false;
+  enterPairing(message);
+  return true;
+}
+
+async function refreshStatus(options = {}) {
   if (!token) {
     updateAuthView();
     return;
@@ -115,25 +148,25 @@ async function refreshStatus() {
     elements.statusText.textContent = `${effectiveStt} · ${refine} · ${relay}`;
     if (status.codex) renderCodexStatus(status.codex);
   } catch (error) {
-    if (error.status === 401) {
-      localStorage.removeItem("echoToken");
-      token = "";
-      updateAuthView();
-      toast("配对已失效，请重新扫码");
+    if (handleAuthError(error, "当前浏览器没有有效配对，请扫描桌面端二维码。")) {
+      if (!options.silentAuthFailure) {
+        elements.pairingStatus.textContent = "当前浏览器没有有效配对，请扫描桌面端二维码。";
+      }
     } else {
-      elements.statusText.textContent = token ? "连接失败" : "等待配对";
+      elements.statusText.textContent = "连接失败";
       toast(error.message);
     }
   }
 }
 
 async function startPairingScanner() {
+  showPairingPanel();
   if (!window.isSecureContext) {
     toast("扫码需要 HTTPS 或 localhost 安全上下文");
     return;
   }
   if (!("BarcodeDetector" in window)) {
-    toast("当前浏览器不支持扫码，请使用 Android Chrome 或粘贴配对链接");
+    elements.pairingStatus.textContent = "当前浏览器不支持网页扫码，请使用 Android Chrome，或粘贴桌面端配对链接。";
     return;
   }
 
@@ -147,11 +180,13 @@ async function startPairingScanner() {
     elements.pairingVideo.srcObject = pairingStream;
     await elements.pairingVideo.play();
     pairingScanActive = true;
+    elements.pairingStatus.textContent = "正在扫描桌面端二维码...";
     elements.scanPairingButton.hidden = true;
     elements.stopScanButton.hidden = false;
     scanPairingFrame(detector);
   } catch (error) {
     stopPairingScanner();
+    elements.pairingStatus.textContent = "相机没有启动，请检查浏览器相机权限，或粘贴配对链接。";
     toast(error.message);
   }
 }
@@ -187,12 +222,13 @@ function stopPairingScanner() {
   elements.pairingVideo.srcObject = null;
   elements.scanPairingButton.hidden = false;
   elements.stopScanButton.hidden = true;
+  if (!token) elements.pairingStatus.textContent ||= "如果你是直接打开这个网页，请先扫桌面端显示的二维码。";
 }
 
 async function pairFromInput() {
   const nextToken = extractPairingToken(elements.pairingInput.value);
   if (!nextToken) {
-    toast("没有找到配对 token");
+    elements.pairingStatus.textContent = "没有找到配对 token，请粘贴完整配对链接或 token。";
     return;
   }
   await completePairing(nextToken);
@@ -216,8 +252,8 @@ async function completePairing(nextToken) {
   localStorage.setItem("echoToken", token);
   stopPairingScanner();
   elements.pairingInput.value = "";
-  toast("配对成功");
   await bootAuthenticated();
+  if (token) toast("配对成功");
 }
 
 async function toggleRecording() {
@@ -354,7 +390,9 @@ async function submitAudio(blob) {
     await loadHistory();
     toast("已整理");
   } catch (error) {
-    toast(error.message);
+    if (!handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
+      toast(error.message);
+    }
   } finally {
     setBusy(false);
   }
@@ -380,7 +418,9 @@ async function refineCurrentText() {
     await loadHistory();
     toast("已更新");
   } catch (error) {
-    toast(error.message);
+    if (!handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
+      toast(error.message);
+    }
   } finally {
     setBusy(false);
   }
@@ -410,7 +450,9 @@ async function sendToCursor() {
     const result = await apiPost("/api/insert", { text });
     toast(result.message || "已发送");
   } catch (error) {
-    toast(error.message);
+    if (!handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
+      toast(error.message);
+    }
   } finally {
     setBusy(false);
   }
@@ -424,6 +466,7 @@ async function refreshCodex() {
     renderCodexStatus(data);
     await loadCodexJobs();
   } catch (error) {
+    if (handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) return;
     elements.codexStatusText.textContent = "Codex 未连接";
     elements.codexProject.innerHTML = "";
     if (error.message && !error.message.includes("relay mode")) toast(error.message);
@@ -472,7 +515,9 @@ async function sendToCodex() {
     await loadCodexJobs();
     await showCodexJob(data.job.id);
   } catch (error) {
-    toast(error.message);
+    if (!handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
+      toast(error.message);
+    }
   } finally {
     elements.sendCodexButton.disabled = false;
   }
@@ -522,7 +567,8 @@ async function loadHistory() {
       wrapper.append(button);
       elements.history.append(wrapper);
     }
-  } catch {
+  } catch (error) {
+    handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。");
     elements.history.innerHTML = "";
   }
 }
@@ -546,8 +592,8 @@ function authHeaders() {
 
 function ensurePaired() {
   if (token) return true;
-  updateAuthView();
-  toast("请先扫码配对");
+  updateAuthView("请先扫码配对。");
+  showPairingPanel({ focus: true });
   return false;
 }
 

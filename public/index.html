@@ -14,21 +14,25 @@
           <h1>Echo Voice</h1>
           <p id="statusText">连接中</p>
         </div>
-        <button id="refreshStatus" class="icon-button" type="button" title="刷新状态" aria-label="刷新状态">
-          ↻
-        </button>
+        <div class="topbar-actions">
+          <button id="openPairingButton" class="top-pair-button" type="button" hidden>扫码配对</button>
+          <button id="refreshStatus" class="icon-button" type="button" title="刷新状态" aria-label="刷新状态">
+            ↻
+          </button>
+        </div>
       </header>
 
       <section id="pairingPanel" class="pairing-panel" hidden>
         <div>
           <h2>扫码配对</h2>
           <p>打开 Echo Desktop 的概览页，扫描「手机扫码配对」二维码。</p>
+          <p id="pairingStatus" class="pairing-status" role="status"></p>
         </div>
         <div class="scanner-frame">
           <video id="pairingVideo" playsinline muted></video>
         </div>
         <div class="pairing-actions">
-          <button id="scanPairingButton" class="primary" type="button">扫描桌面二维码</button>
+          <button id="scanPairingButton" class="primary" type="button">打开相机扫码</button>
           <button id="stopScanButton" class="secondary" type="button" hidden>停止扫描</button>
         </div>
         <label class="field-label" for="pairingInput">或粘贴配对链接</label>

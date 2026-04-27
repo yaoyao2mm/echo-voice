@@ -1,9 +1,21 @@
+self.ECHO_CACHE = "echo-voice-v2";
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open("echo-voice-v1").then((cache) =>
+    caches.open(self.ECHO_CACHE).then((cache) =>
       cache.addAll(["/", "/styles.css", "/app.js", "/manifest.webmanifest"])
     )
   );
+  self.skipWaiting();
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches.keys().then((names) =>
+      Promise.all(names.filter((name) => name !== self.ECHO_CACHE).map((name) => caches.delete(name)))
+    )
+  );
+  self.clients.claim();
 });
 
 self.addEventListener("fetch", (event) => {
