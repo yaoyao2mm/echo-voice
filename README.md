@@ -101,6 +101,8 @@ open "dist/Echo Voice.app"
 
 `desktop:mac -- settings` uses the native window when it is installed, and falls back to the local browser page otherwise. The UI can update relay, VPN/proxy, local model, STT, and Codex workspace settings without editing `.env` directly.
 
+The native window also installs a menu bar item. Closing the settings window hides it instead of quitting, and the menu bar item can reopen settings, start/stop/restart the desktop agent, run the network doctor, and open agent logs.
+
 In internet relay mode, phone-side refinement runs on the relay server. The desktop settings page can test that live relay refinement path, but changing local model fields only affects local mode and local diagnostics. The desktop-side model fields that matter during relay mode are the Codex settings (`ECHO_CODEX_MODEL`, `ECHO_CODEX_PROFILE`, and workspace/sandbox options), because those control the local `codex exec` process.
 
 ### VPN And Proxy
