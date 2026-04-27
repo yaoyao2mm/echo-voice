@@ -1,0 +1,13 @@
+{
+  "name": "echo-voice-desktop-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Native desktop shell for Echo Voice settings and local agent management.",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "node start.cjs"
+  },
+  "devDependencies": {
+    "electron": "^41.3.0"
+  }
+}

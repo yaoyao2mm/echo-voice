@@ -284,7 +284,14 @@ doctor_network() {
 
 open_settings() {
   load_env
-  node "$ROOT_DIR/scripts/desktop-settings.js" --open
+  if [[ -x "$ROOT_DIR/desktop-app/node_modules/.bin/electron" ]]; then
+    npm --prefix "$ROOT_DIR/desktop-app" start
+  else
+    echo "Native settings app is not installed yet."
+    echo "Run: npm run desktop:app:install"
+    echo "Opening browser fallback for now."
+    node "$ROOT_DIR/scripts/desktop-settings.js" --open
+  fi
 }
 
 uninstall_service() {

@@ -157,7 +157,9 @@ app.get("*", (req, res) => {
 });
 
 const server = app.listen(port, host, () => {
-  const url = `http://${host}:${port}/?key=${settingsKey}`;
+  const address = server.address();
+  const actualPort = typeof address === "object" && address ? address.port : port;
+  const url = `http://${host}:${actualPort}/?key=${settingsKey}`;
   console.log("Echo Voice desktop settings is running.");
   console.log(url);
   if (process.argv.includes("--open")) openBrowser(url);

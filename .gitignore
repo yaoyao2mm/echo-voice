@@ -1,4 +1,5 @@
 node_modules/
+dist/
 .env
 npm-debug.log*
 .echo-server.log
