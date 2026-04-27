@@ -14,7 +14,7 @@
       </div>
       <div class="topActions">
         <button type="button" id="networkTest">测试网络</button>
-        <button type="button" id="refineTest">测试后处理</button>
+        <button type="button" id="refineTest">测试实际后处理</button>
         <button type="button" id="restartAgent">重启桌面端</button>
       </div>
     </header>
@@ -23,7 +23,7 @@
       <nav class="sidebar" aria-label="Settings sections">
         <button type="button" class="tab active" data-tab="connection">连接</button>
         <button type="button" class="tab" data-tab="network">VPN</button>
-        <button type="button" class="tab" data-tab="refine">后处理模型</button>
+        <button type="button" class="tab" data-tab="refine">本机模型</button>
         <button type="button" class="tab" data-tab="stt">语音识别</button>
         <button type="button" class="tab" data-tab="codex">Codex</button>
       </nav>
@@ -33,6 +33,9 @@
           <div class="sectionHeader">
             <h2>连接</h2>
             <button type="submit">保存配置</button>
+          </div>
+          <div class="notice">
+            互联网 relay 模式下，手机端后处理发生在服务器；桌面端负责拉取任务、粘贴文本和执行本地 Codex。
           </div>
           <div class="grid">
             <label>
@@ -83,8 +86,11 @@
 
         <section class="panel" data-panel="refine">
           <div class="sectionHeader">
-            <h2>后处理模型</h2>
+            <h2>本机模型</h2>
             <button type="submit">保存配置</button>
+          </div>
+          <div class="notice">
+            这里的后处理配置只影响本机 local 模式和本机测试。若手机连接的是公网 relay，实际后处理模型由服务器配置决定。
           </div>
           <div class="grid">
             <label>
@@ -142,6 +148,9 @@
             <h2>语音识别</h2>
             <button type="submit">保存配置</button>
           </div>
+          <div class="notice">
+            服务器端录音转写由 relay 服务器配置决定；浏览器语音输入和本机 local 模式不依赖这些服务器 STT 设置。
+          </div>
           <div class="grid">
             <label>
               Provider
@@ -193,6 +202,9 @@
           <div class="sectionHeader">
             <h2>Codex</h2>
             <button type="submit">保存配置</button>
+          </div>
+          <div class="notice">
+            这些是桌面端真正使用的模型配置：它们控制本机 Codex CLI 在你的项目目录里用哪个模型、profile 和 sandbox 执行任务。
           </div>
           <div class="grid">
             <label class="switch">

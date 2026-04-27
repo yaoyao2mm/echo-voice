@@ -142,7 +142,8 @@ function formatState(state) {
     `env: ${state.envFile}`,
     `relay: ${valueOf(fields, "ECHO_RELAY_URL") || "-"}`,
     `proxy: ${valueOf(fields, "ECHO_PROXY_URL") || "direct"}`,
-    `refine: ${valueOf(fields, "POSTPROCESS_PROVIDER") || "auto"}`,
+    `postprocess: ${state.meta?.postprocessScope || "local"}`,
+    `local refine: ${valueOf(fields, "POSTPROCESS_PROVIDER") || "auto"}`,
     `codex: ${valueOf(fields, "ECHO_CODEX_ENABLED") || "true"}`
   ];
   return lines.join("\n");

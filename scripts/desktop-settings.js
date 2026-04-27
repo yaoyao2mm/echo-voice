@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import dotenv from "dotenv";
+import { httpFetch } from "../src/lib/http.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -96,7 +97,8 @@ app.get("/api/state", async (req, res) => {
       meta: {
         platform: process.platform,
         settingsHost: host,
-        settingsPort: port
+        settingsPort: port,
+        postprocessScope: env.ECHO_RELAY_URL ? "relay server" : "local desktop"
       }
     });
   } catch (error) {
@@ -133,17 +135,8 @@ app.post("/api/test/refine", async (req, res) => {
     const sample =
       String(req.body?.text || "").trim() ||
       "嗯我想把这个语音输入法需求整理成适合 Codex 执行的任务，不要太啰嗦。";
-    const code = `
-      import { getRefineStatus, refineTranscript } from "./src/lib/refine.js";
-      const status = getRefineStatus();
-      const refined = await refineTranscript({
-        rawText: ${JSON.stringify(sample)},
-        mode: "chat",
-        contextHint: "桌面端模型配置页测试"
-      });
-      console.log(JSON.stringify({ status, refined }, null, 2));
-    `;
-    const result = await runNodeScript(["--input-type=module", "-e", code], 45000);
+    const env = await readEnv();
+    const result = env.ECHO_RELAY_URL ? await testRelayRefine(env, sample) : await testLocalRefine(sample);
     res.json({ ok: result.code === 0, ...result });
   } catch (error) {
     handleError(res, error);
@@ -307,6 +300,89 @@ async function runNodeScript(args, timeoutMs) {
   return runCommand(process.execPath, args, timeoutMs);
 }
 
+async function testLocalRefine(sample) {
+  const code = `
+    import { getRefineStatus, refineTranscript } from "./src/lib/refine.js";
+    const status = getRefineStatus();
+    const refined = await refineTranscript({
+      rawText: ${JSON.stringify(sample)},
+      mode: "chat",
+      contextHint: "桌面端模型配置页测试"
+    });
+    console.log(JSON.stringify({ scope: "local desktop", status, refined }, null, 2));
+  `;
+  return runNodeScript(["--input-type=module", "-e", code], 45000);
+}
+
+async function testRelayRefine(env, sample) {
+  if (!env.ECHO_TOKEN) {
+    return {
+      code: 1,
+      stdout: "",
+      stderr: "Missing ECHO_TOKEN for relay refine test."
+    };
+  }
+
+  try {
+    const statusResponse = await httpFetch(`${trimTrailingSlash(env.ECHO_RELAY_URL)}/api/status`, {
+      headers: {
+        "X-Echo-Token": env.ECHO_TOKEN
+      },
+      timeoutMs: 15000
+    });
+    const statusJson = await statusResponse.json().catch(() => ({}));
+    if (!statusResponse.ok) {
+      return {
+        code: statusResponse.status,
+        stdout: "",
+        stderr: `Relay status failed: ${statusResponse.status} ${statusJson.error || statusResponse.statusText}`
+      };
+    }
+
+    const refineResponse = await httpFetch(`${trimTrailingSlash(env.ECHO_RELAY_URL)}/api/refine`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Echo-Token": env.ECHO_TOKEN
+      },
+      body: JSON.stringify({
+        rawText: sample,
+        mode: "chat",
+        contextHint: "桌面端配置页测试实际 relay 后处理"
+      }),
+      timeoutMs: 45000
+    });
+    const refineJson = await refineResponse.json().catch(() => ({}));
+    if (!refineResponse.ok) {
+      return {
+        code: refineResponse.status,
+        stdout: "",
+        stderr: `Relay refine failed: ${refineResponse.status} ${refineJson.error || refineResponse.statusText}`
+      };
+    }
+
+    return {
+      code: 0,
+      stdout: JSON.stringify(
+        {
+          scope: "relay server",
+          status: statusJson.refine,
+          refined: refineJson.item?.refined || ""
+        },
+        null,
+        2
+      ),
+      stderr: ""
+    };
+  } catch (error) {
+    return {
+      code: 1,
+      stdout: "",
+      stderr: error.message
+    };
+  }
+}
+
 async function runCommand(command, args, timeoutMs) {
   const env = await readEnv();
   return new Promise((resolve) => {
@@ -333,6 +409,10 @@ async function runCommand(command, args, timeoutMs) {
 function openBrowser(url) {
   if (process.platform !== "darwin") return;
   execFile("open", [url], () => {});
+}
+
+function trimTrailingSlash(value) {
+  return String(value || "").replace(/\/+$/, "");
 }
 
 function redact(text, env = process.env) {
