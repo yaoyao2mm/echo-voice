@@ -110,6 +110,15 @@ LLM_API_KEY=sk-...
 LLM_MODEL=gpt-4.1-mini
 ```
 
+For Volcengine Ark Coding Plan refinement:
+
+```bash
+POSTPROCESS_PROVIDER=volcengine
+METIO_VOLCENGINE_CODING_API_KEY=ark-...
+METIO_VOLCENGINE_CODING_OPENAI_BASE_URL=https://ark.cn-beijing.volces.com/api/coding/v3
+METIO_VOLCENGINE_CODING_CHAT_MODEL=ark-code-latest
+```
+
 For local refinement through Ollama:
 
 ```bash

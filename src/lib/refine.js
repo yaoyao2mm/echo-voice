@@ -14,6 +14,7 @@ export function getRefineStatus() {
     provider,
     model: provider === "ollama" ? config.refine.ollamaModel : config.refine.llmModel,
     openaiCompatibleConfigured: Boolean(config.refine.llmApiKey),
+    volcengineConfigured: config.refine.volcengineConfigured,
     ollamaBaseUrl: config.refine.ollamaBaseUrl
   };
 }
@@ -40,10 +41,12 @@ export async function refineTranscript({ rawText, mode = "chat", contextHint = "
 }
 
 function resolveRefineProvider() {
+  if (config.refine.provider === "volcengine") return config.refine.llmApiKey ? "volcengine" : "rules";
   if (config.refine.provider === "openai") return config.refine.llmApiKey ? "openai" : "rules";
   if (config.refine.provider === "ollama") return "ollama";
   if (config.refine.provider === "rules") return "rules";
   if (config.refine.provider === "none") return "none";
+  if (config.refine.volcengineConfigured) return "volcengine";
   if (config.refine.llmApiKey) return "openai";
   return "rules";
 }

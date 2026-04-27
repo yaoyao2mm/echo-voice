@@ -6,6 +6,20 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const runtimeToken = crypto.randomBytes(6).toString("hex");
+const postprocessProvider = process.env.POSTPROCESS_PROVIDER || "auto";
+const volcengineCodingApiKey =
+  process.env.METIO_VOLCENGINE_CODING_API_KEY ||
+  process.env.VOLCENGINE_CODING_API_KEY ||
+  "";
+const volcengineCodingBaseUrl = trimTrailingSlash(
+  process.env.METIO_VOLCENGINE_CODING_OPENAI_BASE_URL ||
+    process.env.VOLCENGINE_CODING_OPENAI_BASE_URL ||
+    "https://ark.cn-beijing.volces.com/api/coding/v3"
+);
+const volcengineCodingModel =
+  process.env.METIO_VOLCENGINE_CODING_CHAT_MODEL ||
+  process.env.VOLCENGINE_CODING_CHAT_MODEL ||
+  "ark-code-latest";
 
 export const config = {
   host: process.env.ECHO_HOST || "0.0.0.0",
@@ -31,10 +45,13 @@ export const config = {
   },
 
   refine: {
-    provider: process.env.POSTPROCESS_PROVIDER || "auto",
-    llmBaseUrl: trimTrailingSlash(process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1"),
-    llmApiKey: process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || "",
-    llmModel: process.env.LLM_MODEL || "gpt-4.1-mini",
+    provider: postprocessProvider,
+    llmBaseUrl: resolveRefineBaseUrl(),
+    llmApiKey: resolveRefineApiKey(),
+    llmModel: resolveRefineModel(),
+    volcengineConfigured: Boolean(volcengineCodingApiKey),
+    volcengineBaseUrl: volcengineCodingBaseUrl,
+    volcengineModel: volcengineCodingModel,
     ollamaBaseUrl: trimTrailingSlash(process.env.OLLAMA_BASE_URL || "http://127.0.0.1:11434"),
     ollamaModel: process.env.OLLAMA_MODEL || "qwen3:4b"
   },
@@ -55,6 +72,31 @@ export const config = {
 
 function trimTrailingSlash(value) {
   return value.replace(/\/+$/, "");
+}
+
+function resolveRefineBaseUrl() {
+  if (postprocessProvider === "volcengine") return volcengineCodingBaseUrl;
+  if (postprocessProvider === "auto" && !hasExplicitOpenAiCompatibleRefineKey() && volcengineCodingApiKey) {
+    return volcengineCodingBaseUrl;
+  }
+  return trimTrailingSlash(process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || volcengineCodingBaseUrl || "https://api.openai.com/v1");
+}
+
+function resolveRefineApiKey() {
+  if (postprocessProvider === "volcengine") return volcengineCodingApiKey;
+  return process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || volcengineCodingApiKey || "";
+}
+
+function resolveRefineModel() {
+  if (postprocessProvider === "volcengine") return volcengineCodingModel;
+  if (postprocessProvider === "auto" && !hasExplicitOpenAiCompatibleRefineKey() && volcengineCodingApiKey) {
+    return volcengineCodingModel;
+  }
+  return process.env.LLM_MODEL || (volcengineCodingApiKey ? volcengineCodingModel : "gpt-4.1-mini");
+}
+
+function hasExplicitOpenAiCompatibleRefineKey() {
+  return Boolean(process.env.LLM_API_KEY || process.env.OPENAI_API_KEY);
 }
 
 function parseWorkspaces(value) {
