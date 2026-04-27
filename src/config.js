@@ -10,6 +10,7 @@ const postprocessProvider = process.env.POSTPROCESS_PROVIDER || "auto";
 const volcengineCodingApiKey =
   process.env.METIO_VOLCENGINE_CODING_API_KEY ||
   process.env.VOLCENGINE_CODING_API_KEY ||
+  (postprocessProvider === "volcengine" ? process.env.LLM_API_KEY || process.env.OPENAI_API_KEY : "") ||
   "";
 const volcengineCodingBaseUrl = trimTrailingSlash(
   process.env.METIO_VOLCENGINE_CODING_OPENAI_BASE_URL ||
