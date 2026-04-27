@@ -1,0 +1,274 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_NAME="Echo Voice Desktop Agent"
+LABEL="xyz.554119401.echo.desktop-agent"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+LOG_DIR="$HOME/Library/Logs/EchoVoice"
+OUT_LOG="$LOG_DIR/desktop-agent.out.log"
+ERR_LOG="$LOG_DIR/desktop-agent.err.log"
+ENV_FILE="$ROOT_DIR/.env"
+
+usage() {
+  cat <<EOF
+Usage: scripts/macos-desktop-agent.sh <command>
+
+Commands:
+  install     Create/update the macOS launchd service
+  start       Start the desktop agent
+  stop        Stop the desktop agent
+  restart     Restart the desktop agent
+  status      Show launchd status and recent logs
+  logs        Follow desktop agent logs
+  uninstall   Stop and remove the launchd service
+  print-env   Print loaded desktop-agent environment
+
+The service reads configuration from:
+  $ENV_FILE
+
+Required values:
+  ECHO_RELAY_URL=https://echo.554119401.xyz
+  ECHO_TOKEN=...
+
+Useful values:
+  ECHO_CODEX_WORKSPACES=echo=/Users/john/workspace/projects/echo
+  INSERT_MODE=paste
+EOF
+}
+
+ensure_macos() {
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    echo "This helper is for macOS launchd only." >&2
+    exit 1
+  fi
+}
+
+load_env() {
+  if [[ -f "$ENV_FILE" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+    set +a
+  fi
+
+  : "${ECHO_RELAY_URL:=}"
+  : "${ECHO_TOKEN:=}"
+  : "${ECHO_CODEX_WORKSPACES:=$ROOT_DIR}"
+  : "${ECHO_CODEX_ENABLED:=true}"
+  : "${ECHO_CODEX_COMMAND:=codex}"
+  : "${ECHO_CODEX_SANDBOX:=workspace-write}"
+  : "${INSERT_MODE:=paste}"
+}
+
+require_config() {
+  load_env
+  local missing=0
+
+  if [[ -z "$ECHO_RELAY_URL" ]]; then
+    echo "Missing ECHO_RELAY_URL in $ENV_FILE" >&2
+    missing=1
+  fi
+
+  if [[ -z "$ECHO_TOKEN" ]]; then
+    echo "Missing ECHO_TOKEN in $ENV_FILE" >&2
+    missing=1
+  fi
+
+  if [[ "$missing" -ne 0 ]]; then
+    cat >&2 <<EOF
+
+Create $ENV_FILE with at least:
+
+ECHO_RELAY_URL=https://echo.554119401.xyz
+ECHO_TOKEN=your-pairing-token
+ECHO_CODEX_WORKSPACES=echo=/Users/john/workspace/projects/echo
+EOF
+    exit 1
+  fi
+}
+
+node_path() {
+  command -v node
+}
+
+agent_args_json() {
+  local node_bin
+  node_bin="$(node_path)"
+  printf '    <string>%s</string>\n' "$node_bin"
+  printf '    <string>%s</string>\n' "$ROOT_DIR/src/desktop-agent.js"
+}
+
+env_entry() {
+  local key="$1"
+  local value="$2"
+  printf '    <key>%s</key>\n' "$key"
+  printf '    <string>%s</string>\n' "$(xml_escape "$value")"
+}
+
+xml_escape() {
+  local value="$1"
+  value="${value//&/&amp;}"
+  value="${value//</&lt;}"
+  value="${value//>/&gt;}"
+  value="${value//\"/&quot;}"
+  value="${value//\'/&apos;}"
+  printf '%s' "$value"
+}
+
+write_plist() {
+  require_config
+  mkdir -p "$HOME/Library/LaunchAgents" "$LOG_DIR"
+
+  cat > "$PLIST" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>$LABEL</string>
+
+  <key>ProgramArguments</key>
+  <array>
+$(agent_args_json)
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>$(xml_escape "$ROOT_DIR")</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+$(env_entry "PATH" "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+$(env_entry "ECHO_RELAY_URL" "$ECHO_RELAY_URL")
+$(env_entry "ECHO_TOKEN" "$ECHO_TOKEN")
+$(env_entry "ECHO_CODEX_WORKSPACES" "$ECHO_CODEX_WORKSPACES")
+$(env_entry "ECHO_CODEX_ENABLED" "$ECHO_CODEX_ENABLED")
+$(env_entry "ECHO_CODEX_COMMAND" "$ECHO_CODEX_COMMAND")
+$(env_entry "ECHO_CODEX_SANDBOX" "$ECHO_CODEX_SANDBOX")
+$(env_entry "INSERT_MODE" "$INSERT_MODE")
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>$(xml_escape "$OUT_LOG")</string>
+  <key>StandardErrorPath</key>
+  <string>$(xml_escape "$ERR_LOG")</string>
+</dict>
+</plist>
+EOF
+
+  plutil -lint "$PLIST" >/dev/null
+}
+
+bootout() {
+  launchctl bootout "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true
+  launchctl bootout "gui/$(id -u)" "$PLIST" >/dev/null 2>&1 || true
+}
+
+bootstrap() {
+  launchctl bootstrap "gui/$(id -u)" "$PLIST"
+}
+
+kickstart() {
+  launchctl kickstart -k "gui/$(id -u)/$LABEL"
+}
+
+install_service() {
+  ensure_macos
+  write_plist
+  bootout
+  bootstrap
+  echo "$APP_NAME installed and started."
+  echo "Logs: $OUT_LOG"
+}
+
+start_service() {
+  ensure_macos
+  if [[ ! -f "$PLIST" ]]; then
+    write_plist
+    bootstrap
+  else
+    kickstart
+  fi
+  echo "$APP_NAME started."
+}
+
+stop_service() {
+  ensure_macos
+  bootout
+  echo "$APP_NAME stopped."
+}
+
+restart_service() {
+  ensure_macos
+  write_plist
+  bootout
+  bootstrap
+  echo "$APP_NAME restarted."
+}
+
+status_service() {
+  ensure_macos
+  echo "Service: $LABEL"
+  echo "Plist:   $PLIST"
+  echo
+  launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null | sed -n '1,80p' || echo "Not loaded."
+  echo
+  echo "Recent stdout:"
+  tail -n 20 "$OUT_LOG" 2>/dev/null || true
+  echo
+  echo "Recent stderr:"
+  tail -n 20 "$ERR_LOG" 2>/dev/null || true
+}
+
+follow_logs() {
+  ensure_macos
+  mkdir -p "$LOG_DIR"
+  touch "$OUT_LOG" "$ERR_LOG"
+  tail -f "$OUT_LOG" "$ERR_LOG"
+}
+
+uninstall_service() {
+  ensure_macos
+  bootout
+  rm -f "$PLIST"
+  echo "$APP_NAME uninstalled. Logs are still in $LOG_DIR."
+}
+
+print_env() {
+  load_env
+  cat <<EOF
+ECHO_RELAY_URL=$ECHO_RELAY_URL
+ECHO_TOKEN=${ECHO_TOKEN:+<set>}
+ECHO_CODEX_WORKSPACES=$ECHO_CODEX_WORKSPACES
+ECHO_CODEX_ENABLED=$ECHO_CODEX_ENABLED
+ECHO_CODEX_COMMAND=$ECHO_CODEX_COMMAND
+ECHO_CODEX_SANDBOX=$ECHO_CODEX_SANDBOX
+INSERT_MODE=$INSERT_MODE
+ROOT_DIR=$ROOT_DIR
+EOF
+}
+
+main() {
+  case "${1:-}" in
+    install) install_service ;;
+    start) start_service ;;
+    stop) stop_service ;;
+    restart) restart_service ;;
+    status) status_service ;;
+    logs) follow_logs ;;
+    uninstall) uninstall_service ;;
+    print-env) print_env ;;
+    -h|--help|help|"") usage ;;
+    *)
+      echo "Unknown command: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"

@@ -66,6 +66,22 @@ ECHO_CODEX_WORKSPACES=echo=/Users/john/workspace/projects/echo,metio=/Users/john
 npm run desktop
 ```
 
+On macOS, you can manage the desktop agent with launchd:
+
+```bash
+cat > .env <<'EOF'
+ECHO_RELAY_URL=https://echo.554119401.xyz
+ECHO_TOKEN=a-long-random-secret
+ECHO_CODEX_WORKSPACES=echo=/Users/john/workspace/projects/echo,metio=/Users/john/workspace/projects/metio
+EOF
+
+npm run desktop:mac -- install
+npm run desktop:mac -- status
+npm run desktop:mac -- logs
+```
+
+Other commands: `start`, `stop`, `restart`, `uninstall`, `print-env`.
+
 Open `https://voice.example.com/?token=a-long-random-secret` on the phone. See [docs/internet-deploy.md](docs/internet-deploy.md) for Nginx, systemd, and HTTPS notes.
 
 ## Model Setup

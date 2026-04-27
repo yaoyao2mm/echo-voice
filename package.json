@@ -16,6 +16,7 @@
     "start": "node src/server.js",
     "relay": "node src/server.js --relay",
     "desktop": "node src/desktop-agent.js",
+    "desktop:mac": "bash scripts/macos-desktop-agent.sh",
     "dev": "node --watch src/server.js",
     "android:usb": "node scripts/adb-reverse.js"
   },
