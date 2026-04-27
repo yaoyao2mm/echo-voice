@@ -77,12 +77,15 @@ ECHO_PROXY_URL=system
 EOF
 
 npm run desktop:mac -- install
+npm run desktop:mac -- settings
 npm run desktop:mac -- status
 npm run desktop:mac -- doctor
 npm run desktop:mac -- logs
 ```
 
-Other commands: `start`, `stop`, `restart`, `doctor`, `uninstall`, `print-env`.
+Other commands: `start`, `stop`, `restart`, `settings`, `doctor`, `uninstall`, `print-env`.
+
+The settings command opens a local desktop configuration page at `127.0.0.1`. It can update relay, VPN/proxy, model, STT, and Codex workspace settings without editing `.env` directly.
 
 ### VPN And Proxy
 

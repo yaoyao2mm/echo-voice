@@ -117,6 +117,7 @@ ECHO_PROXY_URL=system npm run desktop
 For macOS launchd installs, put `ECHO_PROXY_URL=system` in `.env`, then run:
 
 ```bash
+npm run desktop:mac -- settings
 npm run desktop:mac -- restart
 npm run desktop:mac -- doctor
 ```

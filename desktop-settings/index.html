@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Echo Desktop Settings</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Echo Desktop Settings</h1>
+        <p id="envPath">Loading...</p>
+      </div>
+      <div class="topActions">
+        <button type="button" id="networkTest">测试网络</button>
+        <button type="button" id="refineTest">测试后处理</button>
+        <button type="button" id="restartAgent">重启桌面端</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <nav class="sidebar" aria-label="Settings sections">
+        <button type="button" class="tab active" data-tab="connection">连接</button>
+        <button type="button" class="tab" data-tab="network">VPN</button>
+        <button type="button" class="tab" data-tab="refine">后处理模型</button>
+        <button type="button" class="tab" data-tab="stt">语音识别</button>
+        <button type="button" class="tab" data-tab="codex">Codex</button>
+      </nav>
+
+      <form id="settingsForm" class="content">
+        <section class="panel active" data-panel="connection">
+          <div class="sectionHeader">
+            <h2>连接</h2>
+            <button type="submit">保存配置</button>
+          </div>
+          <div class="grid">
+            <label>
+              Relay URL
+              <input data-key="ECHO_RELAY_URL" autocomplete="off" />
+            </label>
+            <label>
+              Pairing Token
+              <input data-key="ECHO_TOKEN" data-secret="true" type="password" autocomplete="new-password" />
+              <span class="secretState" data-secret-state="ECHO_TOKEN"></span>
+              <span class="inlineCheck"><input type="checkbox" data-clear-secret="ECHO_TOKEN" /> 清空</span>
+            </label>
+            <label>
+              插入模式
+              <select data-key="INSERT_MODE">
+                <option value="paste">paste</option>
+                <option value="copy">copy</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section class="panel" data-panel="network">
+          <div class="sectionHeader">
+            <h2>VPN</h2>
+            <button type="submit">保存配置</button>
+          </div>
+          <div class="grid">
+            <label>
+              Proxy
+              <input data-key="ECHO_PROXY_URL" list="proxyOptions" autocomplete="off" />
+              <datalist id="proxyOptions">
+                <option value=""></option>
+                <option value="system"></option>
+                <option value="http://127.0.0.1:7897"></option>
+              </datalist>
+            </label>
+            <label>
+              NO_PROXY
+              <input data-key="ECHO_NO_PROXY" autocomplete="off" />
+            </label>
+            <label>
+              Timeout ms
+              <input data-key="ECHO_HTTP_TIMEOUT_MS" type="number" min="1000" max="300000" step="1000" />
+            </label>
+          </div>
+        </section>
+
+        <section class="panel" data-panel="refine">
+          <div class="sectionHeader">
+            <h2>后处理模型</h2>
+            <button type="submit">保存配置</button>
+          </div>
+          <div class="grid">
+            <label>
+              Provider
+              <select data-key="POSTPROCESS_PROVIDER">
+                <option value="auto">auto</option>
+                <option value="volcengine">volcengine</option>
+                <option value="openai">openai</option>
+                <option value="ollama">ollama</option>
+                <option value="rules">rules</option>
+                <option value="none">none</option>
+              </select>
+            </label>
+            <label>
+              Volcengine API Key
+              <input data-key="METIO_VOLCENGINE_CODING_API_KEY" data-secret="true" type="password" autocomplete="new-password" />
+              <span class="secretState" data-secret-state="METIO_VOLCENGINE_CODING_API_KEY"></span>
+              <span class="inlineCheck"><input type="checkbox" data-clear-secret="METIO_VOLCENGINE_CODING_API_KEY" /> 清空</span>
+            </label>
+            <label>
+              Volcengine Base URL
+              <input data-key="METIO_VOLCENGINE_CODING_OPENAI_BASE_URL" autocomplete="off" />
+            </label>
+            <label>
+              Volcengine Model
+              <input data-key="METIO_VOLCENGINE_CODING_CHAT_MODEL" autocomplete="off" />
+            </label>
+            <label>
+              LLM API Key
+              <input data-key="LLM_API_KEY" data-secret="true" type="password" autocomplete="new-password" />
+              <span class="secretState" data-secret-state="LLM_API_KEY"></span>
+              <span class="inlineCheck"><input type="checkbox" data-clear-secret="LLM_API_KEY" /> 清空</span>
+            </label>
+            <label>
+              LLM Base URL
+              <input data-key="LLM_BASE_URL" autocomplete="off" />
+            </label>
+            <label>
+              LLM Model
+              <input data-key="LLM_MODEL" autocomplete="off" />
+            </label>
+            <label>
+              Ollama URL
+              <input data-key="OLLAMA_BASE_URL" autocomplete="off" />
+            </label>
+            <label>
+              Ollama Model
+              <input data-key="OLLAMA_MODEL" autocomplete="off" />
+            </label>
+          </div>
+        </section>
+
+        <section class="panel" data-panel="stt">
+          <div class="sectionHeader">
+            <h2>语音识别</h2>
+            <button type="submit">保存配置</button>
+          </div>
+          <div class="grid">
+            <label>
+              Provider
+              <select data-key="STT_PROVIDER">
+                <option value="auto">auto</option>
+                <option value="openai">openai</option>
+                <option value="local">local</option>
+                <option value="none">none</option>
+              </select>
+            </label>
+            <label>
+              Language
+              <input data-key="STT_LANGUAGE" autocomplete="off" />
+            </label>
+            <label class="wide">
+              Prompt
+              <textarea data-key="STT_PROMPT" rows="4"></textarea>
+            </label>
+            <label>
+              OpenAI API Key
+              <input data-key="OPENAI_API_KEY" data-secret="true" type="password" autocomplete="new-password" />
+              <span class="secretState" data-secret-state="OPENAI_API_KEY"></span>
+              <span class="inlineCheck"><input type="checkbox" data-clear-secret="OPENAI_API_KEY" /> 清空</span>
+            </label>
+            <label>
+              OpenAI Base URL
+              <input data-key="OPENAI_BASE_URL" autocomplete="off" />
+            </label>
+            <label>
+              Transcribe Model
+              <input data-key="OPENAI_TRANSCRIBE_MODEL" autocomplete="off" />
+            </label>
+            <label>
+              Local STT URL
+              <input data-key="LOCAL_STT_URL" autocomplete="off" />
+            </label>
+            <label>
+              File Field
+              <input data-key="LOCAL_STT_FILE_FIELD" autocomplete="off" />
+            </label>
+            <label>
+              Local STT Model
+              <input data-key="LOCAL_STT_MODEL" autocomplete="off" />
+            </label>
+          </div>
+        </section>
+
+        <section class="panel" data-panel="codex">
+          <div class="sectionHeader">
+            <h2>Codex</h2>
+            <button type="submit">保存配置</button>
+          </div>
+          <div class="grid">
+            <label class="switch">
+              <input data-key="ECHO_CODEX_ENABLED" type="checkbox" />
+              <span>启用 Mobile Codex Remote</span>
+            </label>
+            <label class="wide">
+              Workspaces
+              <textarea data-key="ECHO_CODEX_WORKSPACES" rows="5"></textarea>
+            </label>
+            <label>
+              Command
+              <input data-key="ECHO_CODEX_COMMAND" autocomplete="off" />
+            </label>
+            <label>
+              Sandbox
+              <select data-key="ECHO_CODEX_SANDBOX">
+                <option value="workspace-write">workspace-write</option>
+                <option value="read-only">read-only</option>
+                <option value="danger-full-access">danger-full-access</option>
+              </select>
+            </label>
+            <label>
+              Model
+              <input data-key="ECHO_CODEX_MODEL" autocomplete="off" />
+            </label>
+            <label>
+              Profile
+              <input data-key="ECHO_CODEX_PROFILE" autocomplete="off" />
+            </label>
+            <label>
+              Timeout ms
+              <input data-key="ECHO_CODEX_TIMEOUT_MS" type="number" min="10000" max="7200000" step="10000" />
+            </label>
+          </div>
+        </section>
+      </form>
+
+      <aside class="outputPanel">
+        <div class="sectionHeader compact">
+          <h2>状态</h2>
+          <button type="button" id="reloadState">刷新</button>
+        </div>
+        <pre id="output">Ready.</pre>
+      </aside>
+    </main>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

@@ -21,6 +21,7 @@ Commands:
   restart     Restart the desktop agent
   status      Show launchd status and recent logs
   logs        Follow desktop agent logs
+  settings    Open the local desktop settings page
   doctor      Check relay reachability through the same network/proxy settings
   uninstall   Stop and remove the launchd service
   print-env   Print loaded desktop-agent environment
@@ -66,7 +67,9 @@ const wanted = [
   "ECHO_HTTP_TIMEOUT_MS",
   "HTTP_PROXY",
   "HTTPS_PROXY",
-  "NO_PROXY"
+  "NO_PROXY",
+  "ECHO_SETTINGS_HOST",
+  "ECHO_SETTINGS_PORT"
 ];
 
 const file = process.argv[2];
@@ -94,6 +97,8 @@ NODE
   : "${HTTP_PROXY:=}"
   : "${HTTPS_PROXY:=}"
   : "${NO_PROXY:=}"
+  : "${ECHO_SETTINGS_HOST:=127.0.0.1}"
+  : "${ECHO_SETTINGS_PORT:=3891}"
 }
 
 require_config() {
@@ -277,6 +282,11 @@ doctor_network() {
   node "$ROOT_DIR/scripts/network-doctor.js"
 }
 
+open_settings() {
+  load_env
+  node "$ROOT_DIR/scripts/desktop-settings.js" --open
+}
+
 uninstall_service() {
   ensure_macos
   bootout
@@ -297,6 +307,8 @@ INSERT_MODE=$INSERT_MODE
 ECHO_PROXY_URL=${ECHO_PROXY_URL:+$(mask_proxy "$ECHO_PROXY_URL")}
 ECHO_NO_PROXY=$ECHO_NO_PROXY
 ECHO_HTTP_TIMEOUT_MS=$ECHO_HTTP_TIMEOUT_MS
+ECHO_SETTINGS_HOST=$ECHO_SETTINGS_HOST
+ECHO_SETTINGS_PORT=$ECHO_SETTINGS_PORT
 ROOT_DIR=$ROOT_DIR
 EOF
 }
@@ -330,6 +342,7 @@ main() {
     restart) restart_service ;;
     status) status_service ;;
     logs) follow_logs ;;
+    settings) open_settings ;;
     doctor) doctor_network ;;
     uninstall) uninstall_service ;;
     print-env) print_env ;;
