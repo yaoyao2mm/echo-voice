@@ -4,8 +4,11 @@ const form = document.querySelector("#settingsForm");
 const output = document.querySelector("#output");
 const envPath = document.querySelector("#envPath");
 const healthGrid = document.querySelector("#healthGrid");
+const pairingQr = document.querySelector("#pairingQr");
 const tabs = document.querySelectorAll(".tab");
 const panels = document.querySelectorAll(".panel");
+
+let pairingUrl = "";
 
 if (!settingsKey) {
   writeOutput("Missing local settings key.", true);
@@ -33,6 +36,8 @@ function bindEvents() {
   document.querySelector("#restartAgent").addEventListener("click", () => runAction("/api/desktop/restart", "Restarting desktop agent..."));
   document.querySelector("#reloadState").addEventListener("click", loadState);
   document.querySelector("#refreshHealth").addEventListener("click", loadHealth);
+  document.querySelector("#refreshPairingQr").addEventListener("click", loadPairing);
+  document.querySelector("#copyPairingUrl").addEventListener("click", copyPairingUrl);
 }
 
 function showPanel(name) {
@@ -46,10 +51,36 @@ async function loadState() {
     envPath.textContent = state.envFile;
     fillForm(state.fields);
     renderHealth(state.health);
+    await loadPairing();
     writeOutput(formatState(state));
   } catch (error) {
     writeOutput(error.message, true);
   }
+}
+
+async function loadPairing() {
+  if (!pairingQr) return;
+  try {
+    pairingQr.textContent = "Loading...";
+    const pairing = await apiGet("/api/pairing");
+    pairingUrl = pairing.mobileUrl;
+    pairingQr.innerHTML = pairing.qrSvg;
+  } catch (error) {
+    pairingUrl = "";
+    pairingQr.textContent = error.message;
+  }
+}
+
+async function copyPairingUrl() {
+  if (!pairingUrl) {
+    await loadPairing();
+  }
+  if (!pairingUrl) {
+    writeOutput("Pairing URL is not available.", true);
+    return;
+  }
+  await navigator.clipboard.writeText(pairingUrl);
+  writeOutput("Pairing URL copied.");
 }
 
 async function loadHealth() {
@@ -201,6 +232,7 @@ async function saveConfig() {
     writeOutput("Saving...");
     const result = await apiPost("/api/config", { values, clearSecrets });
     fillForm(result.fields);
+    await loadPairing();
     writeOutput("Saved. Restart the desktop agent for running services to pick up the new config.");
   } catch (error) {
     writeOutput(error.message, true);

@@ -40,6 +40,9 @@ set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 cd "$ROOT_DIR"
 if [[ ! -x "$ROOT_DIR/desktop-app/node_modules/.bin/electron" ]]; then
+  if [[ ! -d "$ROOT_DIR/node_modules/qrcode" ]]; then
+    npm install
+  fi
   npm run desktop:app:install
 fi
 exec npm run desktop:app

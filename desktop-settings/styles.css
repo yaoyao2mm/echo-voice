@@ -179,6 +179,55 @@ button[type="submit"]:hover,
   gap: 12px;
 }
 
+.pairingPanel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 16px;
+}
+
+.pairingPanel h3 {
+  margin: 0 0 6px;
+  font-size: 16px;
+  line-height: 1.3;
+}
+
+.pairingPanel p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.pairingActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.qrBox {
+  display: grid;
+  place-items: center;
+  min-height: 164px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+}
+
+.qrBox svg {
+  display: block;
+  width: 156px;
+  height: 156px;
+}
+
 .healthItem {
   display: grid;
   gap: 8px;
@@ -381,6 +430,10 @@ pre {
   }
 
   .healthGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .pairingPanel {
     grid-template-columns: 1fr;
   }
 

@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import dotenv from "dotenv";
+import QRCode from "qrcode";
 import { httpFetch } from "../src/lib/http.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -149,6 +150,32 @@ app.post("/api/desktop/restart", async (req, res) => {
   try {
     const result = await runCommand("bash", ["scripts/macos-desktop-agent.sh", "restart"], 20000);
     res.json({ ok: result.code === 0, ...result });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.get("/api/pairing", async (req, res) => {
+  try {
+    const env = await readEnv();
+    const mobileUrl = buildMobileUrl(env);
+    if (!mobileUrl) {
+      return res.status(400).json({ error: "Set ECHO_RELAY_URL and ECHO_TOKEN before pairing." });
+    }
+    const qrSvg = await QRCode.toString(mobileUrl, {
+      type: "svg",
+      margin: 1,
+      width: 260,
+      color: {
+        dark: "#17202a",
+        light: "#ffffff"
+      }
+    });
+    res.json({
+      ok: true,
+      mobileUrl,
+      qrSvg
+    });
   } catch (error) {
     handleError(res, error);
   }
@@ -583,6 +610,13 @@ function openBrowser(url) {
 
 function trimTrailingSlash(value) {
   return String(value || "").replace(/\/+$/, "");
+}
+
+function buildMobileUrl(env) {
+  if (!env.ECHO_RELAY_URL || !env.ECHO_TOKEN) return "";
+  const url = new URL(trimTrailingSlash(env.ECHO_RELAY_URL));
+  url.searchParams.set("token", env.ECHO_TOKEN);
+  return url.toString();
 }
 
 function redact(text, env = process.env) {

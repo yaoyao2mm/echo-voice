@@ -35,6 +35,17 @@
             <h2>概览</h2>
             <button type="button" id="refreshHealth">刷新状态</button>
           </div>
+          <div class="pairingPanel">
+            <div>
+              <h3>手机扫码配对</h3>
+              <p>扫码会打开带配对 token 的手机端页面。</p>
+              <div class="pairingActions">
+                <button type="button" id="copyPairingUrl">复制链接</button>
+                <button type="button" id="refreshPairingQr">刷新二维码</button>
+              </div>
+            </div>
+            <div class="qrBox" id="pairingQr">Loading...</div>
+          </div>
           <div id="healthGrid" class="healthGrid"></div>
         </section>
 

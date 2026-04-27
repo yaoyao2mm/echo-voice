@@ -111,6 +111,8 @@ The native window also installs a menu bar item. Closing the settings window hid
 
 The Overview tab checks the relay config, launchd agent, Accessibility permission, clipboard command, Codex CLI, and allowlisted workspaces. On macOS, grant Accessibility permission if auto-paste reports `needs permission`.
 
+The Overview tab also shows a pairing QR code. Scan it from the phone to open the mobile UI with the pairing token already attached, so the phone page no longer needs a manually pasted token.
+
 In internet relay mode, phone-side refinement runs on the relay server. The desktop settings page can test that live relay refinement path, but changing local model fields only affects local mode and local diagnostics. The desktop-side model fields that matter during relay mode are the Codex settings (`ECHO_CODEX_MODEL`, `ECHO_CODEX_PROFILE`, and workspace/sandbox options), because those control the local `codex exec` process.
 
 ### VPN And Proxy
