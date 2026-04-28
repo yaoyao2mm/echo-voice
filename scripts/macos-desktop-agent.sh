@@ -61,6 +61,9 @@ const wanted = [
   "ECHO_CODEX_ENABLED",
   "ECHO_CODEX_COMMAND",
   "ECHO_CODEX_SANDBOX",
+  "ECHO_CODEX_MODEL",
+  "ECHO_CODEX_PROFILE",
+  "ECHO_CODEX_TIMEOUT_MS",
   "INSERT_MODE",
   "ECHO_PROXY_URL",
   "ECHO_NO_PROXY",
@@ -90,6 +93,9 @@ NODE
   : "${ECHO_CODEX_ENABLED:=true}"
   : "${ECHO_CODEX_COMMAND:=codex}"
   : "${ECHO_CODEX_SANDBOX:=workspace-write}"
+  : "${ECHO_CODEX_MODEL:=}"
+  : "${ECHO_CODEX_PROFILE:=}"
+  : "${ECHO_CODEX_TIMEOUT_MS:=1800000}"
   : "${INSERT_MODE:=paste}"
   : "${ECHO_PROXY_URL:=}"
   : "${ECHO_NO_PROXY:=localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.local}"
@@ -99,6 +105,11 @@ NODE
   : "${NO_PROXY:=}"
   : "${ECHO_SETTINGS_HOST:=127.0.0.1}"
   : "${ECHO_SETTINGS_PORT:=3891}"
+  : "${USER:=$(id -un)}"
+  : "${LOGNAME:=$USER}"
+  : "${SHELL:=/bin/zsh}"
+  : "${CODEX_HOME:=$HOME/.codex}"
+  : "${LANG:=en_US.UTF-8}"
 }
 
 require_config() {
@@ -179,12 +190,21 @@ $(agent_args_json)
   <key>EnvironmentVariables</key>
   <dict>
 $(env_entry "PATH" "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+$(env_entry "HOME" "$HOME")
+$(env_entry "USER" "$USER")
+$(env_entry "LOGNAME" "$LOGNAME")
+$(env_entry "SHELL" "$SHELL")
+$(env_entry "CODEX_HOME" "$CODEX_HOME")
+$(env_entry "LANG" "$LANG")
 $(env_entry "ECHO_RELAY_URL" "$ECHO_RELAY_URL")
 $(env_entry "ECHO_TOKEN" "$ECHO_TOKEN")
 $(env_entry "ECHO_CODEX_WORKSPACES" "$ECHO_CODEX_WORKSPACES")
 $(env_entry "ECHO_CODEX_ENABLED" "$ECHO_CODEX_ENABLED")
 $(env_entry "ECHO_CODEX_COMMAND" "$ECHO_CODEX_COMMAND")
 $(env_entry "ECHO_CODEX_SANDBOX" "$ECHO_CODEX_SANDBOX")
+$(env_entry "ECHO_CODEX_MODEL" "$ECHO_CODEX_MODEL")
+$(env_entry "ECHO_CODEX_PROFILE" "$ECHO_CODEX_PROFILE")
+$(env_entry "ECHO_CODEX_TIMEOUT_MS" "$ECHO_CODEX_TIMEOUT_MS")
 $(env_entry "INSERT_MODE" "$INSERT_MODE")
 $(env_entry "ECHO_PROXY_URL" "$ECHO_PROXY_URL")
 $(env_entry "ECHO_NO_PROXY" "$ECHO_NO_PROXY")
@@ -310,6 +330,9 @@ ECHO_CODEX_WORKSPACES=$ECHO_CODEX_WORKSPACES
 ECHO_CODEX_ENABLED=$ECHO_CODEX_ENABLED
 ECHO_CODEX_COMMAND=$ECHO_CODEX_COMMAND
 ECHO_CODEX_SANDBOX=$ECHO_CODEX_SANDBOX
+ECHO_CODEX_MODEL=$ECHO_CODEX_MODEL
+ECHO_CODEX_PROFILE=$ECHO_CODEX_PROFILE
+ECHO_CODEX_TIMEOUT_MS=$ECHO_CODEX_TIMEOUT_MS
 INSERT_MODE=$INSERT_MODE
 ECHO_PROXY_URL=${ECHO_PROXY_URL:+$(mask_proxy "$ECHO_PROXY_URL")}
 ECHO_NO_PROXY=$ECHO_NO_PROXY

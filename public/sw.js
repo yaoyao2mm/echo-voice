@@ -1,9 +1,9 @@
-self.ECHO_CACHE = "echo-voice-v5";
+self.ECHO_CACHE = "echo-voice-v6";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(self.ECHO_CACHE).then((cache) =>
-      cache.addAll(["/", "/styles.css?v=5", "/app.js?v=5", "/manifest.webmanifest?v=5"])
+      cache.addAll(["/", "/styles.css?v=6", "/app.js?v=6", "/manifest.webmanifest?v=6"])
     )
   );
   self.skipWaiting();

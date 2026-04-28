@@ -42,6 +42,7 @@ const elements = {
   copyButton: document.querySelector("#copyButton"),
   sendButton: document.querySelector("#sendButton"),
   codexStatusText: document.querySelector("#codexStatusText"),
+  codexRuntimeText: document.querySelector("#codexRuntimeText"),
   refreshCodex: document.querySelector("#refreshCodex"),
   codexProject: document.querySelector("#codexProject"),
   codexPrompt: document.querySelector("#codexPrompt"),
@@ -674,6 +675,10 @@ function renderCodexStatus(codex) {
   elements.codexStatusText.textContent = codex.agentOnline
     ? `桌面 agent 在线 · ${workspaces.length} 个项目`
     : "等待桌面 agent";
+  const runtime = codex.runtime || {};
+  elements.codexRuntimeText.textContent = codex.agentOnline
+    ? `${runtime.command || "codex"} · ${runtime.model || "Codex 默认模型"} · ${runtime.sandbox || "workspace-write"}`
+    : "请先启动桌面端";
 
   const selected = localStorage.getItem("echoCodexProject") || elements.codexProject.value;
   elements.codexProject.innerHTML = "";
@@ -687,6 +692,7 @@ function renderCodexStatus(codex) {
   if (elements.codexProject.value) {
     localStorage.setItem("echoCodexProject", elements.codexProject.value);
   }
+  elements.sendCodexButton.disabled = !codex.agentOnline || !elements.codexProject.value;
 }
 
 function useFinalForCodex() {
@@ -737,24 +743,46 @@ async function loadCodexJobs() {
     wrapper.className = "codex-job";
     const button = document.createElement("button");
     button.type = "button";
-    button.innerHTML = `<strong>${escapeHtml(job.status)} · ${escapeHtml(job.projectId)}</strong>${escapeHtml(job.prompt.slice(0, 140))}`;
+    button.innerHTML = `<strong>${escapeHtml(statusLabel(job.status))} · ${escapeHtml(job.projectId)}</strong><span>${escapeHtml(job.prompt.slice(0, 140))}</span>`;
     button.addEventListener("click", () => showCodexJob(job.id));
     wrapper.append(button);
     elements.codexJobs.append(wrapper);
   }
 }
 
+function statusLabel(status) {
+  return {
+    queued: "排队中",
+    running: "运行中",
+    completed: "已完成",
+    failed: "失败"
+  }[status] || status || "未知";
+}
+
 async function showCodexJob(id) {
   const data = await apiGet(`/api/codex/jobs/${encodeURIComponent(id)}`);
   const job = data.job;
+  const errorText = humanizeCodexError(job.error);
   const lines = [
     `# ${job.status} · ${job.projectId}`,
-    job.error ? `ERROR: ${job.error}` : "",
+    errorText ? `ERROR: ${errorText}` : "",
     job.finalMessage ? `\nFinal:\n${job.finalMessage}` : "",
     "\nEvents:",
     ...(job.events || []).slice(-80).map((event) => `${event.at || ""} ${event.type || ""}\n${event.text || ""}`)
   ].filter(Boolean);
   elements.codexLog.textContent = lines.join("\n\n");
+}
+
+function humanizeCodexError(error) {
+  const text = String(error || "").trim();
+  if (!text) return "";
+  if (/requires a newer version of Codex|Please upgrade to the latest app or CLI/i.test(text)) {
+    return `${text}\n\n处理方式：在桌面端设置里把 Codex 模型固定为当前 CLI 支持的模型，或升级 Codex CLI。`;
+  }
+  if (/ENOENT|No such file or directory/i.test(text)) {
+    return `${text}\n\n处理方式：检查桌面端 Codex command，必要时填入 codex 的绝对路径。`;
+  }
+  return text;
 }
 
 async function loadHistory() {

@@ -306,7 +306,8 @@ app.post("/api/agent/codex/next", async (req, res) => {
     const job = await waitForCodexJob({
       waitMs: Number(req.query.wait || req.body.wait || 25000),
       agent: {
-        workspaces: req.body.workspaces || []
+        workspaces: req.body.workspaces || [],
+        runtime: req.body.runtime || {}
       }
     });
     res.json({ job });

@@ -509,6 +509,11 @@ textarea:focus {
   margin-top: 18px;
 }
 
+.codex-runtime {
+  min-height: 18px;
+  color: #4b5a5d;
+}
+
 .section-head {
   display: flex;
   align-items: center;
@@ -552,6 +557,12 @@ textarea:focus {
   display: block;
   margin-bottom: 4px;
   font-size: 12px;
+}
+
+.codex-job span {
+  display: block;
+  color: var(--muted);
+  line-height: 1.45;
 }
 
 .codex-log {

@@ -1,5 +1,5 @@
 import { config } from "./config.js";
-import { publicWorkspaces, runCodexJob } from "./lib/codexRunner.js";
+import { publicCodexRuntime, publicWorkspaces, runCodexJob } from "./lib/codexRunner.js";
 import { describeHttpNetwork, formatFetchError, httpFetch } from "./lib/http.js";
 import { insertText } from "./lib/paste.js";
 
@@ -19,6 +19,10 @@ console.log(`Insert mode: ${config.insertMode}`);
 console.log(`Network: ${formatNetworkStatus(describeHttpNetwork(config.relayUrl))}`);
 console.log(`Codex remote: ${config.codex.enabled ? "enabled" : "disabled"}`);
 if (config.codex.enabled) {
+  const runtime = publicCodexRuntime();
+  console.log(`  command: ${runtime.command}`);
+  console.log(`  model: ${runtime.model || "Codex default"}`);
+  console.log(`  sandbox: ${runtime.sandbox}`);
   for (const workspace of publicWorkspaces()) {
     console.log(`  ${workspace.id}: ${workspace.path}`);
   }
@@ -95,7 +99,8 @@ async function pollNextCodexJob() {
       ...authHeaders()
     },
     body: JSON.stringify({
-      workspaces: publicWorkspaces()
+      workspaces: publicWorkspaces(),
+      runtime: publicCodexRuntime()
     }),
     timeoutMs: 35000
   });

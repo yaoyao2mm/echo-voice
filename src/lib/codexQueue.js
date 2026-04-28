@@ -7,6 +7,7 @@ const jobs = [];
 let activeJob = null;
 let lastAgentSeenAt = "";
 let agentWorkspaces = [];
+let agentRuntime = {};
 
 export function updateCodexAgent(input = {}) {
   lastAgentSeenAt = new Date().toISOString();
@@ -18,6 +19,15 @@ export function updateCodexAgent(input = {}) {
         path: String(workspace.path || "").trim()
       }))
       .filter((workspace) => workspace.id && workspace.path);
+  }
+  if (input.runtime && typeof input.runtime === "object") {
+    agentRuntime = {
+      command: String(input.runtime.command || "").trim(),
+      sandbox: String(input.runtime.sandbox || "").trim(),
+      model: String(input.runtime.model || "").trim(),
+      profile: String(input.runtime.profile || "").trim(),
+      timeoutMs: Number(input.runtime.timeoutMs || 0) || null
+    };
   }
 }
 
@@ -31,6 +41,7 @@ export function codexStatus() {
       label: workspace.label,
       path: workspace.path
     })),
+    runtime: agentRuntime,
     queued: queuedJobs.length,
     active: activeJob ? summarizeJob(activeJob) : null,
     recent: jobs.slice(0, 10).map(summarizeJob)
