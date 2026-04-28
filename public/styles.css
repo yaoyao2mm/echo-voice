@@ -1,11 +1,11 @@
 :root {
   color-scheme: light;
-  --bg: #f6f2ea;
-  --surface: #fffdf8;
-  --surface-2: #e9f0ed;
+  --bg: #eef3f4;
+  --surface: #ffffff;
+  --surface-2: #e7eff0;
   --ink: #172124;
   --muted: #667173;
-  --line: #d8d6cc;
+  --line: #d4dee0;
   --accent: #1f6f68;
   --accent-dark: #154f4a;
   --danger: #b43d31;
@@ -16,11 +16,15 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
   color: var(--ink);
-  background: linear-gradient(180deg, #f8f5ef 0%, var(--bg) 100%);
+  background: linear-gradient(180deg, #f7faf9 0%, var(--bg) 100%);
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
     "Microsoft YaHei", sans-serif;
@@ -111,7 +115,8 @@ p {
 
 .compose,
 .editor,
-.history-section {
+.history-section,
+.workspace-view {
   margin-top: 10px;
 }
 
@@ -130,6 +135,35 @@ p {
 .auth-panel[hidden],
 .pairing-panel[hidden] {
   display: none;
+}
+
+.workspace-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin: 2px 0 12px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(12px);
+}
+
+.workspace-tab {
+  min-height: 42px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #485457;
+  font-weight: 740;
+}
+
+.workspace-tab.active {
+  background: var(--accent);
+  color: #fff;
 }
 
 .auth-panel h2,
@@ -245,7 +279,7 @@ p {
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #ebe7dc;
+  background: #e8eef0;
 }
 
 .mode {
@@ -413,7 +447,7 @@ textarea:focus {
 
 .pane.primary textarea {
   min-height: 178px;
-  background: #fffefa;
+  background: #fbfefd;
 }
 
 .actions {
@@ -428,7 +462,7 @@ textarea:focus {
   margin: 0 auto;
   padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
   border-top: 1px solid var(--line);
-  background: rgba(246, 242, 234, 0.94);
+  background: rgba(238, 243, 244, 0.94);
   backdrop-filter: blur(14px);
 }
 
@@ -453,6 +487,17 @@ textarea:focus {
   border: 1px solid var(--line);
   background: var(--surface);
   color: var(--ink);
+}
+
+.wide-button {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 740;
 }
 
 .history {

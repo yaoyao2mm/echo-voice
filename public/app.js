@@ -29,6 +29,9 @@ const elements = {
   stopScanButton: document.querySelector("#stopScanButton"),
   savePairingButton: document.querySelector("#savePairingButton"),
   authenticated: Array.from(document.querySelectorAll("[data-authenticated]")),
+  workspaceTabs: document.querySelector("#workspaceTabs"),
+  viewTabs: Array.from(document.querySelectorAll(".workspace-tab")),
+  viewPanels: Array.from(document.querySelectorAll("[data-view-panel]")),
   modes: Array.from(document.querySelectorAll(".mode")),
   contextHint: document.querySelector("#contextHint"),
   recordButton: document.querySelector("#recordButton"),
@@ -41,6 +44,8 @@ const elements = {
   codexStatusText: document.querySelector("#codexStatusText"),
   refreshCodex: document.querySelector("#refreshCodex"),
   codexProject: document.querySelector("#codexProject"),
+  codexPrompt: document.querySelector("#codexPrompt"),
+  useFinalForCodexButton: document.querySelector("#useFinalForCodexButton"),
   sendCodexButton: document.querySelector("#sendCodexButton"),
   codexJobs: document.querySelector("#codexJobs"),
   codexLog: document.querySelector("#codexLog"),
@@ -60,6 +65,7 @@ let codexTimer = null;
 let pairingStream = null;
 let pairingScanActive = false;
 let pairingScanBusy = false;
+let activeView = localStorage.getItem("echoActiveView") || "compose";
 
 elements.loginForm.addEventListener("submit", login);
 elements.logoutButton.addEventListener("click", logout);
@@ -73,10 +79,15 @@ elements.refineButton.addEventListener("click", refineCurrentText);
 elements.copyButton.addEventListener("click", copyFinalText);
 elements.sendButton.addEventListener("click", sendToCursor);
 elements.refreshCodex.addEventListener("click", refreshCodex);
+elements.useFinalForCodexButton.addEventListener("click", useFinalForCodex);
 elements.sendCodexButton.addEventListener("click", sendToCodex);
 elements.codexProject.addEventListener("change", () => {
   localStorage.setItem("echoCodexProject", elements.codexProject.value);
 });
+
+for (const button of elements.viewTabs) {
+  button.addEventListener("click", () => setActiveView(button.dataset.view));
+}
 
 for (const button of elements.modes) {
   button.addEventListener("click", () => {
@@ -144,7 +155,30 @@ function updateAuthView(message = "") {
   if (!paired) {
     elements.statusText.textContent = "等待配对";
     elements.pairingStatus.textContent = message || "如果你是直接打开这个网页，请先扫桌面端显示的二维码。";
+    return;
   }
+
+  setActiveView(activeView, { skipStorage: true });
+}
+
+function setActiveView(view, options = {}) {
+  activeView = ["compose", "codex", "history"].includes(view) ? view : "compose";
+  if (!options.skipStorage) localStorage.setItem("echoActiveView", activeView);
+
+  for (const button of elements.viewTabs) {
+    const selected = button.dataset.view === activeView;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-selected", selected ? "true" : "false");
+  }
+
+  const showWorkspace = isLoggedIn() && Boolean(token);
+  for (const panel of elements.viewPanels) {
+    panel.hidden = !showWorkspace || panel.dataset.viewPanel !== activeView;
+  }
+
+  if (!showWorkspace) return;
+  if (activeView === "codex") refreshCodex();
+  if (activeView === "history") loadHistory();
 }
 
 async function loadAuthConfig() {
@@ -655,13 +689,23 @@ function renderCodexStatus(codex) {
   }
 }
 
+function useFinalForCodex() {
+  const text = elements.finalText.value.trim() || elements.rawText.value.trim();
+  if (!text) {
+    toast("输入页还没有可使用的文本");
+    return;
+  }
+  elements.codexPrompt.value = text;
+  toast("已填入 Codex 任务");
+}
+
 async function sendToCodex() {
   if (!ensurePaired()) return;
 
-  const prompt = elements.finalText.value.trim() || elements.rawText.value.trim();
+  const prompt = elements.codexPrompt.value.trim();
   const projectId = elements.codexProject.value;
   if (!prompt) {
-    toast("没有可交给 Codex 的任务");
+    toast("请先填写 Codex 任务");
     return;
   }
   if (!projectId) {
@@ -725,7 +769,10 @@ async function loadHistory() {
       const button = document.createElement("button");
       button.type = "button";
       button.textContent = item.refined || item.raw || "";
-      button.addEventListener("click", () => applyItem(item));
+      button.addEventListener("click", () => {
+        applyItem(item);
+        setActiveView("compose");
+      });
       wrapper.append(button);
       elements.history.append(wrapper);
     }

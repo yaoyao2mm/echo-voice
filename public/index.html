@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Echo Voice</title>
-    <link rel="manifest" href="/manifest.webmanifest?v=4" />
-    <link rel="stylesheet" href="/styles.css?v=4" />
+    <link rel="manifest" href="/manifest.webmanifest?v=5" />
+    <link rel="stylesheet" href="/styles.css?v=5" />
   </head>
   <body>
     <main class="shell">
@@ -18,7 +18,7 @@
           <span id="userBadge" class="user-badge" hidden></span>
           <button id="logoutButton" class="top-logout-button" type="button" hidden>退出</button>
           <button id="openPairingButton" class="top-pair-button" type="button" hidden>扫码配对</button>
-          <button id="refreshStatus" class="icon-button" type="button" title="刷新状态" aria-label="刷新状态">
+          <button id="refreshStatus" class="icon-button" type="button" title="刷新状态" aria-label="刷新状态" hidden>
             ↻
           </button>
         </div>
@@ -59,47 +59,55 @@
         </div>
       </section>
 
-      <section class="compose" data-authenticated>
-        <div class="mode-row" role="tablist" aria-label="处理模式">
-          <button class="mode active" data-mode="chat" type="button">AI 指令</button>
-          <button class="mode" data-mode="formal" type="button">正式文本</button>
-          <button class="mode" data-mode="bullet" type="button">要点</button>
-          <button class="mode" data-mode="email" type="button">消息</button>
-          <button class="mode" data-mode="verbatim" type="button">原话</button>
-        </div>
-
-        <label class="field-label" for="contextHint">上下文</label>
-        <textarea id="contextHint" class="context" rows="2" placeholder="例如：这是发给 coding agent 的需求；保留技术名词；语气要直接。"></textarea>
-
-        <div class="recorder">
-          <button id="recordButton" class="record-button" type="button" aria-label="开始录音">
-            <span id="recordDot"></span>
-            <span id="recordLabel">按下说话</span>
-          </button>
-          <div class="meters" aria-hidden="true">
-            <span></span><span></span><span></span><span></span><span></span><span></span>
-          </div>
-        </div>
-      </section>
-
-      <section class="editor" data-authenticated>
-        <div class="pane">
-          <div class="pane-title">原始转写</div>
-          <textarea id="rawText" rows="6" placeholder="录音完成后显示"></textarea>
-        </div>
-        <div class="pane primary">
-          <div class="pane-title">整理后</div>
-          <textarea id="finalText" rows="8" placeholder="可以在发送前继续编辑"></textarea>
-        </div>
-      </section>
-
-      <nav class="actions" aria-label="操作" data-authenticated>
-        <button id="refineButton" class="secondary" type="button">重新整理</button>
-        <button id="copyButton" class="secondary" type="button">复制</button>
-        <button id="sendButton" class="primary" type="button">发送到光标</button>
+      <nav id="workspaceTabs" class="workspace-tabs" aria-label="工作区" data-authenticated hidden>
+        <button class="workspace-tab active" data-view="compose" type="button">输入</button>
+        <button class="workspace-tab" data-view="codex" type="button">Codex</button>
+        <button class="workspace-tab" data-view="history" type="button">历史</button>
       </nav>
 
-      <section class="codex-section" data-authenticated>
+      <section id="composeView" class="workspace-view compose-view" data-view-panel="compose" data-authenticated hidden>
+        <section class="compose">
+          <div class="mode-row" role="tablist" aria-label="处理模式">
+            <button class="mode active" data-mode="chat" type="button">AI 指令</button>
+            <button class="mode" data-mode="formal" type="button">正式文本</button>
+            <button class="mode" data-mode="bullet" type="button">要点</button>
+            <button class="mode" data-mode="email" type="button">消息</button>
+            <button class="mode" data-mode="verbatim" type="button">原话</button>
+          </div>
+
+          <label class="field-label" for="contextHint">上下文</label>
+          <textarea id="contextHint" class="context" rows="2" placeholder="例如：这是发给 coding agent 的需求；保留技术名词；语气要直接。"></textarea>
+
+          <div class="recorder">
+            <button id="recordButton" class="record-button" type="button" aria-label="开始录音">
+              <span id="recordDot"></span>
+              <span id="recordLabel">按下说话</span>
+            </button>
+            <div class="meters" aria-hidden="true">
+              <span></span><span></span><span></span><span></span><span></span><span></span>
+            </div>
+          </div>
+        </section>
+
+        <section class="editor">
+          <div class="pane">
+            <div class="pane-title">原始转写</div>
+            <textarea id="rawText" rows="6" placeholder="录音完成后显示"></textarea>
+          </div>
+          <div class="pane primary">
+            <div class="pane-title">整理后</div>
+            <textarea id="finalText" rows="8" placeholder="可以在发送前继续编辑"></textarea>
+          </div>
+        </section>
+
+        <nav class="actions" aria-label="输入操作">
+          <button id="refineButton" class="secondary" type="button">重新整理</button>
+          <button id="copyButton" class="secondary" type="button">复制</button>
+          <button id="sendButton" class="primary" type="button">发送到光标</button>
+        </nav>
+      </section>
+
+      <section id="codexView" class="workspace-view codex-section" data-view-panel="codex" data-authenticated hidden>
         <div class="section-head">
           <div>
             <div class="pane-title">本机 Codex</div>
@@ -111,17 +119,20 @@
         </div>
         <label class="field-label" for="codexProject">项目</label>
         <select id="codexProject" class="select"></select>
-        <button id="sendCodexButton" class="codex-submit" type="button">交给本机 Codex</button>
+        <label class="field-label" for="codexPrompt">任务</label>
+        <textarea id="codexPrompt" rows="8" placeholder="写下要交给本机 Codex 的任务。"></textarea>
+        <button id="useFinalForCodexButton" class="secondary wide-button" type="button">使用整理后文本</button>
+        <button id="sendCodexButton" class="codex-submit" type="button">发送给 Codex</button>
         <div id="codexJobs" class="codex-jobs"></div>
         <pre id="codexLog" class="codex-log"></pre>
       </section>
 
-      <section class="history-section" data-authenticated>
+      <section id="historyView" class="workspace-view history-section" data-view-panel="history" data-authenticated hidden>
         <div class="pane-title">最近</div>
         <div id="history" class="history"></div>
       </section>
     </main>
 
-    <script src="/app.js?v=4" type="module"></script>
+    <script src="/app.js?v=5" type="module"></script>
   </body>
 </html>
