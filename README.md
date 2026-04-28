@@ -192,7 +192,7 @@ If server-side STT is not configured, Android Chrome can fall back to the browse
 
 The agent copies the final text to the system clipboard and then simulates paste:
 
-- macOS: `pbcopy` plus AppleScript `Cmd+V`; requires Accessibility permission for the terminal/app.
+- macOS: `pbcopy` plus a small Swift paste helper, with AppleScript as a fallback. Requires Accessibility permission for the helper, node process, or app that sends the paste keystroke.
 - Windows: PowerShell clipboard plus `Ctrl+V` SendKeys.
 - Linux: `wl-copy` or `xclip`/`xsel`, then `xdotool` or `wtype` when available.
 

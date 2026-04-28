@@ -509,14 +509,23 @@ async function checkAccessibility() {
     return { ok: true, status: "not required", detail: "Accessibility permission is only required for macOS auto-paste." };
   }
 
+  const helper = await runCommand("swift", [path.join(rootDir, "scripts/macos-paste-helper.swift"), "--check"], 8000);
+  if (helper.code === 0) {
+    return {
+      ok: true,
+      status: "enabled",
+      detail: "Echo paste helper can send paste keystrokes."
+    };
+  }
+
   const result = await runCommand("osascript", ["-e", 'tell application "System Events" to get UI elements enabled'], 5000);
   const enabled = result.code === 0 && result.stdout.trim() === "true";
   return {
     ok: enabled,
-    status: enabled ? "enabled" : "needs permission",
+    status: enabled ? "partial" : "needs permission",
     detail: enabled
-      ? "System Events can send paste keystrokes."
-      : "Grant Accessibility permission to the terminal, Electron app, or launchd-run node process used by Echo."
+      ? "Accessibility is enabled, but the paste helper is not trusted yet. Grant Accessibility permission if auto-paste still fails."
+      : "Grant Accessibility permission to the Echo paste helper, /opt/homebrew/bin/node, or /usr/bin/osascript."
   };
 }
 

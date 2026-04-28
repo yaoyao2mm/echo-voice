@@ -210,6 +210,19 @@ app.post("/api/insert", async (req, res) => {
   }
 });
 
+app.get("/api/agent/ping", (req, res) => {
+  if (config.mode !== "relay") {
+    return res.status(400).json({ error: "Agent ping is only available in relay mode." });
+  }
+
+  res.json({
+    ok: true,
+    mode: config.mode,
+    refine: getRefineStatus(),
+    relay: relayStatus()
+  });
+});
+
 app.get("/api/agent/next", async (req, res) => {
   try {
     if (config.mode !== "relay") {

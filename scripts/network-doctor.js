@@ -13,11 +13,13 @@ if (!process.env.ECHO_TOKEN) {
   fail("Missing ECHO_TOKEN. The doctor uses the same token as the desktop agent.");
 }
 
-const statusUrl = new URL("/api/status", targetBase);
-const network = describeHttpNetwork(statusUrl);
+const baseUrl = new URL(targetBase);
+const authConfigUrl = new URL("/api/auth/config", baseUrl);
+const agentPingUrl = new URL("/api/agent/ping", baseUrl);
+const network = describeHttpNetwork(agentPingUrl);
 
 console.log("Echo Voice network doctor");
-console.log(`Target: ${statusUrl.origin}`);
+console.log(`Target: ${agentPingUrl.origin}`);
 console.log(`Proxy:  ${network.activeProxyUrl || network.proxyMode}`);
 console.log(`NO_PROXY: ${network.noProxy}`);
 console.log(`Timeout: ${network.timeoutMs}ms`);
@@ -27,7 +29,7 @@ if (process.platform === "darwin") {
 }
 
 try {
-  const addresses = await dns.lookup(statusUrl.hostname, { all: true });
+  const addresses = await dns.lookup(agentPingUrl.hostname, { all: true });
   console.log(`DNS: ${addresses.map((item) => item.address).join(", ") || "no result"}`);
 } catch (error) {
   console.log(`DNS: failed (${error.message})`);
@@ -35,7 +37,15 @@ try {
 
 try {
   const startedAt = Date.now();
-  const response = await httpFetch(statusUrl, {
+  const authResponse = await httpFetch(authConfigUrl, {
+    timeoutMs: 15000
+  });
+  const authJson = await authResponse.json().catch(() => ({}));
+  if (!authResponse.ok) {
+    fail(`Auth config replied HTTP ${authResponse.status}: ${authJson.error || authResponse.statusText}`);
+  }
+
+  const response = await httpFetch(agentPingUrl, {
     headers: {
       "X-Echo-Token": config.token
     },
@@ -48,6 +58,7 @@ try {
   }
 
   console.log(`Relay: ok in ${Date.now() - startedAt}ms`);
+  console.log(`Web auth: ${authJson.enabled ? "enabled" : "disabled"}`);
   console.log(`Mode: ${json.mode || "unknown"}`);
   if (json.refine?.provider) {
     console.log(`Refine: ${json.refine.provider} / ${json.refine.model || "unknown model"}`);

@@ -6,6 +6,7 @@ const queuedJobs = [];
 const completedJobs = [];
 let activeJob = null;
 let lastDesktopSeenAt = "";
+const maxAttempts = 3;
 
 export function relayStatus() {
   return {
@@ -32,7 +33,8 @@ export function enqueueInsertJob(text) {
   const job = {
     id: crypto.randomUUID(),
     text: value,
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    attempts: 0
   };
 
   queuedJobs.push(job);
@@ -44,8 +46,9 @@ export async function waitForInsertJob(waitMs = 25000) {
   markDesktopSeen();
   reclaimStaleActiveJob();
 
-  if (queuedJobs.length > 0 && !activeJob) {
-    activeJob = queuedJobs.shift();
+  const readyIndex = nextReadyJobIndex();
+  if (readyIndex >= 0 && !activeJob) {
+    activeJob = queuedJobs.splice(readyIndex, 1)[0];
     activeJob.deliveredAt = new Date().toISOString();
     return activeJob;
   }
@@ -57,10 +60,11 @@ export async function waitForInsertJob(waitMs = 25000) {
     }, Math.max(1000, Math.min(waitMs, 30000)));
 
     function handleJob() {
-      if (activeJob || queuedJobs.length === 0) return;
+      const index = nextReadyJobIndex();
+      if (activeJob || index < 0) return;
       clearTimeout(timeout);
       events.off("job", handleJob);
-      activeJob = queuedJobs.shift();
+      activeJob = queuedJobs.splice(index, 1)[0];
       activeJob.deliveredAt = new Date().toISOString();
       resolve(activeJob);
     }
@@ -95,16 +99,37 @@ export function failInsertJob(id, errorMessage) {
     return false;
   }
 
+  const attempts = (activeJob.attempts || 0) + 1;
+  if (attempts >= maxAttempts) {
+    completedJobs.unshift({
+      ...activeJob,
+      attempts,
+      failedAt: new Date().toISOString(),
+      error: errorMessage
+    });
+    completedJobs.splice(50);
+    activeJob = null;
+    if (queuedJobs.length > 0) events.emit("job");
+    return true;
+  }
+
+  const retryAt = new Date(Date.now() + attempts * 3000).toISOString();
   queuedJobs.unshift({
     id: activeJob.id,
     text: activeJob.text,
     createdAt: activeJob.createdAt,
+    attempts,
     lastError: errorMessage,
-    retryAt: new Date().toISOString()
+    retryAt
   });
   activeJob = null;
-  events.emit("job");
+  setTimeout(() => events.emit("job"), attempts * 3000);
   return true;
+}
+
+function nextReadyJobIndex() {
+  const now = Date.now();
+  return queuedJobs.findIndex((job) => !job.retryAt || Date.parse(job.retryAt) <= now);
 }
 
 function isDesktopOnline() {
@@ -120,6 +145,7 @@ function reclaimStaleActiveJob() {
     id: activeJob.id,
     text: activeJob.text,
     createdAt: activeJob.createdAt,
+    attempts: activeJob.attempts || 0,
     lastError: "Desktop agent did not acknowledge the job in time.",
     retryAt: new Date().toISOString()
   });

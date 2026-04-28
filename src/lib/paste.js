@@ -1,6 +1,13 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs/promises";
 import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { config } from "../config.js";
+
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+const macPasteHelperSource = path.resolve(moduleDir, "../../scripts/macos-paste-helper.swift");
+const macPasteHelperBinary = path.join(config.dataDir, "macos-paste-helper");
 
 export async function insertText(text) {
   const value = String(text || "");
@@ -18,7 +25,7 @@ export async function insertText(text) {
 
   const platform = os.platform();
   if (platform === "darwin") {
-    await run("osascript", ["-e", 'tell application "System Events" to keystroke "v" using command down']);
+    await pasteMac();
     return { mode: "paste", pasted: true, message: "Text pasted with Cmd+V." };
   }
 
@@ -46,6 +53,62 @@ export async function insertText(text) {
     pasted: false,
     message: "Text copied to clipboard. Install xdotool or wtype to auto-paste on Linux."
   };
+}
+
+async function pasteMac() {
+  const errors = [];
+
+  try {
+    await runMacPasteHelper();
+    return;
+  } catch (error) {
+    errors.push(error.message);
+  }
+
+  try {
+    await run("osascript", ["-e", 'tell application "System Events" to keystroke "v" using command down']);
+    return;
+  } catch (error) {
+    errors.push(error.message);
+  }
+
+  throw new Error(`macOS auto-paste failed. ${formatMacPasteErrors(errors)}`);
+}
+
+async function runMacPasteHelper() {
+  await ensureMacPasteHelper();
+  await run(macPasteHelperBinary);
+}
+
+async function ensureMacPasteHelper() {
+  await fs.mkdir(config.dataDir, { recursive: true });
+
+  if (!(await shouldBuildMacPasteHelper())) return;
+  const swiftc = await firstAvailable(["swiftc"]);
+  if (!swiftc) {
+    throw new Error("swiftc is not available to build the macOS paste helper.");
+  }
+  await run(swiftc, [macPasteHelperSource, "-o", macPasteHelperBinary]);
+  await fs.chmod(macPasteHelperBinary, 0o755);
+}
+
+async function shouldBuildMacPasteHelper() {
+  try {
+    const [source, binary] = await Promise.all([
+      fs.stat(macPasteHelperSource),
+      fs.stat(macPasteHelperBinary)
+    ]);
+    return source.mtimeMs > binary.mtimeMs;
+  } catch {
+    return true;
+  }
+}
+
+function formatMacPasteErrors(errors) {
+  const detail = errors.filter(Boolean).join(" | ");
+  const permissionHint =
+    "Grant Accessibility permission to the Echo paste helper, /opt/homebrew/bin/node, or /usr/bin/osascript, then restart the desktop agent.";
+  return [detail, permissionHint].filter(Boolean).join(" ");
 }
 
 async function setClipboard(text) {
