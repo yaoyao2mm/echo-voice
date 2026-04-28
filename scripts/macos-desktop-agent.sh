@@ -22,6 +22,8 @@ Commands:
   status      Show launchd status and recent logs
   logs        Follow desktop agent logs
   settings    Open the local desktop settings page
+  paste-helper
+              Install/check the stable macOS paste helper and open permissions if needed
   doctor      Check relay reachability through the same network/proxy settings
   uninstall   Stop and remove the launchd service
   print-env   Print loaded desktop-agent environment
@@ -302,6 +304,43 @@ doctor_network() {
   node "$ROOT_DIR/scripts/network-doctor.js"
 }
 
+check_paste_helper() {
+  ensure_macos
+  set +e
+  (
+    cd "$ROOT_DIR"
+    node --input-type=module - <<'NODE'
+import process from "node:process";
+import { checkMacPasteHelperPermission, ensureMacPasteHelper, macPasteHelperPaths } from "./src/lib/paste.js";
+
+await ensureMacPasteHelper();
+const paths = macPasteHelperPaths();
+console.log(`Helper app: ${paths.app}`);
+try {
+  await checkMacPasteHelperPermission();
+  console.log("Accessibility: trusted");
+} catch (error) {
+  console.log("Accessibility: needs permission");
+  console.log(error.message);
+  process.exitCode = 2;
+}
+NODE
+  )
+  local code=$?
+  set -e
+  if [[ "$code" -eq 2 ]]; then
+    local helper_app="$HOME/Applications/Echo Paste Helper.app"
+    open -R "$helper_app" >/dev/null 2>&1 || true
+    open 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility' >/dev/null 2>&1 || true
+    cat <<EOF
+
+Add or enable Echo Paste Helper.app in Accessibility, then run:
+  npm run desktop:mac -- restart
+EOF
+  fi
+  return "$code"
+}
+
 open_settings() {
   load_env
   if [[ -x "$ROOT_DIR/desktop-app/node_modules/.bin/electron" ]]; then
@@ -373,6 +412,7 @@ main() {
     status) status_service ;;
     logs) follow_logs ;;
     settings) open_settings ;;
+    paste-helper) check_paste_helper ;;
     doctor) doctor_network ;;
     uninstall) uninstall_service ;;
     print-env) print_env ;;

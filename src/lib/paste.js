@@ -82,11 +82,11 @@ async function runMacPasteHelper() {
   await run(macPasteHelperBinary);
 }
 
-async function ensureMacPasteHelper() {
+export async function ensureMacPasteHelper({ rebuild = false } = {}) {
+  if (!rebuild && (await hasValidMacPasteHelper())) return;
+
   await fs.mkdir(path.dirname(macPasteHelperBinary), { recursive: true });
   await fs.writeFile(macPasteHelperInfoPlist, macPasteHelperPlist(), "utf8");
-
-  if (!(await shouldBuildMacPasteHelper())) return;
   const swiftc = await firstAvailable(["swiftc"]);
   if (!swiftc) {
     throw new Error("swiftc is not available to build the macOS paste helper.");
@@ -96,15 +96,26 @@ async function ensureMacPasteHelper() {
   await run("codesign", ["--force", "--deep", "--sign", "-", macPasteHelperApp]).catch(() => {});
 }
 
-async function shouldBuildMacPasteHelper() {
+export async function checkMacPasteHelperPermission() {
+  await ensureMacPasteHelper();
+  await run(macPasteHelperBinary, ["--check"]);
+}
+
+export function macPasteHelperPaths() {
+  return {
+    app: macPasteHelperApp,
+    binary: macPasteHelperBinary,
+    infoPlist: macPasteHelperInfoPlist
+  };
+}
+
+async function hasValidMacPasteHelper() {
   try {
-    const [source, binary] = await Promise.all([
-      fs.stat(macPasteHelperSource),
-      fs.stat(macPasteHelperBinary)
-    ]);
-    return source.mtimeMs > binary.mtimeMs;
-  } catch {
+    await fs.access(macPasteHelperBinary);
+    await run("codesign", ["--verify", "--deep", "--strict", macPasteHelperApp]);
     return true;
+  } catch {
+    return false;
   }
 }
 

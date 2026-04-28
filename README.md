@@ -114,6 +114,14 @@ The native window also installs a menu bar item. Closing the settings window hid
 
 The Overview tab checks the relay config, launchd agent, Accessibility permission, clipboard command, Codex CLI, and allowlisted workspaces. On macOS, grant Accessibility permission if auto-paste reports `needs permission`.
 
+You can check the paste helper directly:
+
+```bash
+npm run desktop:mac -- paste-helper
+```
+
+The helper app lives at `~/Applications/Echo Paste Helper.app` with the stable bundle id `xyz.554119401.echo.paste-helper`. Echo reuses the existing signed helper at runtime; it does not rebuild it just because the source file changed, since rebuilding an ad-hoc signed helper can make macOS treat it as a different Accessibility client.
+
 The Overview tab also shows a pairing QR code. Scan it from the phone to open the mobile UI with the pairing token already attached, so the phone page no longer needs a manually pasted token.
 
 If web login is enabled, the phone page asks for the configured user before it accepts the paired token. Browser users send both a login session and the pairing token; desktop agents still authenticate with `ECHO_TOKEN` only.
@@ -192,7 +200,7 @@ If server-side STT is not configured, Android Chrome can fall back to the browse
 
 The agent copies the final text to the system clipboard and then simulates paste:
 
-- macOS: `pbcopy` plus a small Swift paste helper, with AppleScript as a fallback. Requires Accessibility permission for the helper, node process, or app that sends the paste keystroke.
+- macOS: `pbcopy` plus a small Swift paste helper, with AppleScript as a fallback. Requires Accessibility permission for `~/Applications/Echo Paste Helper.app`.
 - Windows: PowerShell clipboard plus `Ctrl+V` SendKeys.
 - Linux: `wl-copy` or `xclip`/`xsel`, then `xdotool` or `wtype` when available.
 
