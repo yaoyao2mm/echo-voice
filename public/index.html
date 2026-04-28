@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Echo Voice</title>
-    <link rel="manifest" href="/manifest.webmanifest?v=6" />
-    <link rel="stylesheet" href="/styles.css?v=6" />
+    <link rel="manifest" href="/manifest.webmanifest?v=7" />
+    <link rel="stylesheet" href="/styles.css?v=7" />
   </head>
   <body>
     <main class="shell">
@@ -90,14 +90,14 @@
         </section>
 
         <section class="editor">
-          <div class="pane">
-            <div class="pane-title">原始转写</div>
-            <textarea id="rawText" rows="6" placeholder="录音完成后显示"></textarea>
-          </div>
           <div class="pane primary">
             <div class="pane-title">整理后</div>
             <textarea id="finalText" rows="8" placeholder="可以在发送前继续编辑"></textarea>
           </div>
+          <details class="raw-details">
+            <summary>原始转写</summary>
+            <textarea id="rawText" rows="5" placeholder="录音完成后显示"></textarea>
+          </details>
         </section>
 
         <nav class="actions" aria-label="输入操作">
@@ -122,10 +122,18 @@
         <select id="codexProject" class="select"></select>
         <label class="field-label" for="codexPrompt">任务</label>
         <textarea id="codexPrompt" rows="8" placeholder="写下要交给本机 Codex 的任务。"></textarea>
-        <button id="useFinalForCodexButton" class="secondary wide-button" type="button">使用整理后文本</button>
-        <button id="sendCodexButton" class="codex-submit" type="button">发送给 Codex</button>
+        <div class="codex-actions">
+          <button id="useFinalForCodexButton" class="secondary" type="button">使用整理后文本</button>
+          <button id="sendCodexButton" class="codex-submit" type="button">发送给 Codex</button>
+        </div>
         <div id="codexJobs" class="codex-jobs"></div>
-        <pre id="codexLog" class="codex-log"></pre>
+        <section id="codexJobDetail" class="codex-job-detail" hidden>
+          <div id="codexRunSummary" class="codex-run-summary"></div>
+          <details class="run-log">
+            <summary>运行日志</summary>
+            <pre id="codexLog" class="codex-log"></pre>
+          </details>
+        </section>
       </section>
 
       <section id="historyView" class="workspace-view history-section" data-view-panel="history" data-authenticated hidden>
@@ -134,6 +142,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=6" type="module"></script>
+    <script src="/app.js?v=7" type="module"></script>
   </body>
 </html>

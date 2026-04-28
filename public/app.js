@@ -49,6 +49,8 @@ const elements = {
   useFinalForCodexButton: document.querySelector("#useFinalForCodexButton"),
   sendCodexButton: document.querySelector("#sendCodexButton"),
   codexJobs: document.querySelector("#codexJobs"),
+  codexJobDetail: document.querySelector("#codexJobDetail"),
+  codexRunSummary: document.querySelector("#codexRunSummary"),
   codexLog: document.querySelector("#codexLog"),
   history: document.querySelector("#history")
 };
@@ -67,6 +69,7 @@ let pairingStream = null;
 let pairingScanActive = false;
 let pairingScanBusy = false;
 let activeView = localStorage.getItem("echoActiveView") || "compose";
+let selectedCodexJobId = "";
 
 elements.loginForm.addEventListener("submit", login);
 elements.logoutButton.addEventListener("click", logout);
@@ -737,16 +740,35 @@ async function sendToCodex() {
 
 async function loadCodexJobs() {
   const data = await apiGet("/api/codex/jobs");
+  const jobs = data.items.slice(0, 8);
   elements.codexJobs.innerHTML = "";
-  for (const job of data.items.slice(0, 8)) {
-    const wrapper = document.createElement("div");
-    wrapper.className = "codex-job";
+  if (jobs.length === 0) {
+    elements.codexJobs.innerHTML = `<div class="empty-state">还没有 Codex 任务</div>`;
+    elements.codexJobDetail.hidden = true;
+    return;
+  }
+
+  if (!selectedCodexJobId || !jobs.some((job) => job.id === selectedCodexJobId)) {
+    selectedCodexJobId = jobs[0].id;
+  }
+
+  for (const job of jobs) {
     const button = document.createElement("button");
     button.type = "button";
-    button.innerHTML = `<strong>${escapeHtml(statusLabel(job.status))} · ${escapeHtml(job.projectId)}</strong><span>${escapeHtml(job.prompt.slice(0, 140))}</span>`;
+    button.dataset.jobId = job.id;
+    button.className = "codex-job";
+    button.classList.toggle("active", job.id === selectedCodexJobId);
+    button.innerHTML = `
+      <span class="status-pill ${escapeHtml(job.status)}">${escapeHtml(statusLabel(job.status))}</span>
+      <strong>${escapeHtml(job.projectId)} · ${escapeHtml(formatRelativeTime(job.completedAt || job.startedAt || job.createdAt))}</strong>
+      <span>${escapeHtml(jobPreview(job))}</span>
+    `;
     button.addEventListener("click", () => showCodexJob(job.id));
-    wrapper.append(button);
-    elements.codexJobs.append(wrapper);
+    elements.codexJobs.append(button);
+  }
+
+  if (selectedCodexJobId) {
+    await showCodexJob(selectedCodexJobId, { keepSelection: true });
   }
 }
 
@@ -759,10 +781,27 @@ function statusLabel(status) {
   }[status] || status || "未知";
 }
 
-async function showCodexJob(id) {
+async function showCodexJob(id, options = {}) {
+  selectedCodexJobId = id;
+  if (!options.keepSelection) {
+    for (const button of elements.codexJobs.querySelectorAll(".codex-job")) {
+      button.classList.toggle("active", button.dataset.jobId === id);
+    }
+  }
   const data = await apiGet(`/api/codex/jobs/${encodeURIComponent(id)}`);
   const job = data.job;
   const errorText = humanizeCodexError(job.error);
+  elements.codexJobDetail.hidden = false;
+  elements.codexRunSummary.innerHTML = `
+    <div class="run-summary-head">
+      <span class="status-pill ${escapeHtml(job.status)}">${escapeHtml(statusLabel(job.status))}</span>
+      <strong>${escapeHtml(job.projectId)}</strong>
+      <span>${escapeHtml(formatRelativeTime(job.completedAt || job.startedAt || job.createdAt))}</span>
+    </div>
+    <div class="run-prompt">${escapeHtml(job.prompt || "")}</div>
+    ${errorText ? `<div class="run-error">${escapeHtml(errorText)}</div>` : ""}
+    ${job.finalMessage ? `<div class="run-final">${escapeHtml(job.finalMessage)}</div>` : ""}
+  `;
   const lines = [
     `# ${job.status} · ${job.projectId}`,
     errorText ? `ERROR: ${errorText}` : "",
@@ -771,6 +810,25 @@ async function showCodexJob(id) {
     ...(job.events || []).slice(-80).map((event) => `${event.at || ""} ${event.type || ""}\n${event.text || ""}`)
   ].filter(Boolean);
   elements.codexLog.textContent = lines.join("\n\n");
+}
+
+function jobPreview(job) {
+  if (job.error) return humanizeCodexError(job.error).split("\n")[0].slice(0, 140);
+  if (job.finalMessage) return job.finalMessage.slice(0, 140);
+  return job.prompt.slice(0, 140);
+}
+
+function formatRelativeTime(value) {
+  if (!value) return "刚刚";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "刚刚";
+  const seconds = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
+  if (seconds < 60) return "刚刚";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  return date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
 }
 
 function humanizeCodexError(error) {

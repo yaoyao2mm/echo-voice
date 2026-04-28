@@ -442,11 +442,33 @@ textarea:focus {
 .editor {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 4px;
+  gap: 10px;
 }
 
 .pane.primary textarea {
   min-height: 178px;
+  background: #fbfefd;
+}
+
+.raw-details {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  overflow: hidden;
+}
+
+.raw-details summary {
+  min-height: 44px;
+  padding: 12px;
+  color: #374245;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 740;
+}
+
+.raw-details textarea {
+  border-width: 1px 0 0;
+  border-radius: 0;
   background: #fbfefd;
 }
 
@@ -489,17 +511,6 @@ textarea:focus {
   color: var(--ink);
 }
 
-.wide-button {
-  width: 100%;
-  min-height: 44px;
-  margin-top: 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--ink);
-  font-weight: 740;
-}
-
 .history {
   display: grid;
   gap: 8px;
@@ -522,14 +533,28 @@ textarea:focus {
 }
 
 .codex-submit {
-  width: 100%;
   min-height: 48px;
-  margin-top: 10px;
   border: 0;
   border-radius: 8px;
   background: #214f7a;
   color: #fff;
   font-weight: 760;
+}
+
+.codex-actions {
+  display: grid;
+  grid-template-columns: 0.9fr 1.1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.codex-actions .secondary {
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 740;
 }
 
 .codex-jobs {
@@ -539,23 +564,25 @@ textarea:focus {
 }
 
 .codex-job {
+  position: relative;
+  display: grid;
+  gap: 6px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 10px;
+  padding: 11px;
   background: var(--surface);
-}
-
-.codex-job button {
   width: 100%;
-  border: 0;
-  background: transparent;
   color: var(--ink);
   text-align: left;
 }
 
+.codex-job.active {
+  border-color: rgba(31, 111, 104, 0.7);
+  box-shadow: 0 0 0 3px rgba(31, 111, 104, 0.1);
+}
+
 .codex-job strong {
   display: block;
-  margin-bottom: 4px;
   font-size: 12px;
 }
 
@@ -565,18 +592,120 @@ textarea:focus {
   line-height: 1.45;
 }
 
+.status-pill {
+  width: fit-content;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: #e8eef0;
+  color: #344145;
+  font-size: 11px;
+  font-weight: 780;
+}
+
+.status-pill.running {
+  background: #e8f2ff;
+  color: #214f7a;
+}
+
+.status-pill.completed {
+  background: #e8f5ef;
+  color: #1f6f49;
+}
+
+.status-pill.failed {
+  background: #faebe8;
+  color: var(--danger);
+}
+
+.status-pill.queued {
+  background: #f2f0e8;
+  color: #74632a;
+}
+
+.codex-job-detail {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.codex-run-summary {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.run-summary-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.run-summary-head strong {
+  color: var(--ink);
+}
+
+.run-prompt,
+.run-final,
+.run-error {
+  border-radius: 8px;
+  padding: 10px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.run-prompt {
+  background: #f5f8f8;
+  color: #344145;
+}
+
+.run-final {
+  background: #eaf5f0;
+  color: #183b2c;
+}
+
+.run-error {
+  background: #faebe8;
+  color: var(--danger);
+}
+
+.run-log {
+  border-top: 1px solid var(--line);
+}
+
+.run-log summary {
+  padding: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 740;
+}
+
 .codex-log {
   min-height: 160px;
   max-height: 320px;
   overflow: auto;
-  margin: 12px 0 0;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0;
   padding: 12px;
   background: #101819;
   color: #e9f0ed;
   white-space: pre-wrap;
   line-height: 1.5;
+}
+
+.empty-state {
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  color: var(--muted);
+  text-align: center;
 }
 
 .history-item {
@@ -615,8 +744,7 @@ textarea:focus {
   }
 
   .editor {
-    grid-template-columns: 1fr 1.15fr;
-    gap: 12px;
+    grid-template-columns: 1fr;
   }
 }
 
