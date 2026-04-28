@@ -311,7 +311,12 @@ check_paste_helper() {
     cd "$ROOT_DIR"
     node --input-type=module - <<'NODE'
 import process from "node:process";
-import { checkMacPasteHelperPermission, ensureMacPasteHelper, macPasteHelperPaths } from "./src/lib/paste.js";
+import {
+  checkMacPasteHelperPermission,
+  ensureMacPasteHelper,
+  macPasteHelperPaths,
+  requestMacPasteHelperPermission
+} from "./src/lib/paste.js";
 
 await ensureMacPasteHelper();
 const paths = macPasteHelperPaths();
@@ -322,7 +327,13 @@ try {
 } catch (error) {
   console.log("Accessibility: needs permission");
   console.log(error.message);
-  process.exitCode = 2;
+  try {
+    await requestMacPasteHelperPermission();
+    await checkMacPasteHelperPermission();
+    console.log("Accessibility: trusted");
+  } catch {
+    process.exitCode = 2;
+  }
 }
 NODE
   )

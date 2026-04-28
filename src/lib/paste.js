@@ -10,6 +10,7 @@ const macPasteHelperSource = path.resolve(moduleDir, "../../scripts/macos-paste-
 const macPasteHelperApp = path.join(os.homedir(), "Applications", "Echo Paste Helper.app");
 const macPasteHelperBinary = path.join(macPasteHelperApp, "Contents", "MacOS", "Echo Paste Helper");
 const macPasteHelperInfoPlist = path.join(macPasteHelperApp, "Contents", "Info.plist");
+const macPasteHelperVersion = "3";
 
 export async function insertText(text) {
   const value = String(text || "");
@@ -58,28 +59,20 @@ export async function insertText(text) {
 }
 
 async function pasteMac() {
-  const errors = [];
-
   try {
     await runMacPasteHelper();
     return;
   } catch (error) {
-    errors.push(error.message);
+    throw new Error(`macOS auto-paste failed. ${formatMacPasteErrors([error.message])}`);
   }
-
-  try {
-    await run("osascript", ["-e", 'tell application "System Events" to keystroke "v" using command down']);
-    return;
-  } catch (error) {
-    errors.push(error.message);
-  }
-
-  throw new Error(`macOS auto-paste failed. ${formatMacPasteErrors(errors)}`);
 }
 
 async function runMacPasteHelper() {
   await ensureMacPasteHelper();
-  await run(macPasteHelperBinary);
+  const status = await runMacPasteHelperApp();
+  if (status !== "pasted") {
+    throw new Error(`Echo paste helper returned ${status || "no status"}.`);
+  }
 }
 
 export async function ensureMacPasteHelper({ rebuild = false } = {}) {
@@ -98,7 +91,18 @@ export async function ensureMacPasteHelper({ rebuild = false } = {}) {
 
 export async function checkMacPasteHelperPermission() {
   await ensureMacPasteHelper();
-  await run(macPasteHelperBinary, ["--check"]);
+  const status = await runMacPasteHelperApp(["--check"]);
+  if (status !== "trusted") {
+    throw new Error(`Echo paste helper returned ${status || "no status"}.`);
+  }
+}
+
+export async function requestMacPasteHelperPermission() {
+  await ensureMacPasteHelper();
+  const status = await runMacPasteHelperApp(["--request-permission", "--check"], { timeoutMs: 60000 });
+  if (status !== "trusted") {
+    throw new Error(`Echo paste helper returned ${status || "no status"}.`);
+  }
 }
 
 export function macPasteHelperPaths() {
@@ -112,11 +116,44 @@ export function macPasteHelperPaths() {
 async function hasValidMacPasteHelper() {
   try {
     await fs.access(macPasteHelperBinary);
+    const plist = await fs.readFile(macPasteHelperInfoPlist, "utf8");
+    if (!plist.includes(`<string>${macPasteHelperVersion}</string>`)) return false;
     await run("codesign", ["--verify", "--deep", "--strict", macPasteHelperApp]);
     return true;
   } catch {
     return false;
   }
+}
+
+async function runMacPasteHelperApp(args = [], options = {}) {
+  const statusFile = path.join(
+    os.tmpdir(),
+    `echo-paste-helper-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.status`
+  );
+  await fs.rm(statusFile, { force: true }).catch(() => {});
+  await run("open", ["-g", "-j", "-n", macPasteHelperApp, "--args", ...args, "--status-file", statusFile]);
+
+  try {
+    return await waitForStatusFile(statusFile, options.timeoutMs || 7000);
+  } finally {
+    await fs.rm(statusFile, { force: true }).catch(() => {});
+  }
+}
+
+async function waitForStatusFile(file, timeoutMs) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      return (await fs.readFile(file, "utf8")).trim();
+    } catch {
+      await sleep(100);
+    }
+  }
+  throw new Error("Echo paste helper did not report a result in time.");
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function formatMacPasteErrors(errors) {
@@ -144,7 +181,7 @@ function macPasteHelperPlist() {
   <key>CFBundleShortVersionString</key>
   <string>1.0</string>
   <key>CFBundleVersion</key>
-  <string>1</string>
+  <string>${macPasteHelperVersion}</string>
   <key>LSMinimumSystemVersion</key>
   <string>12.0</string>
   <key>LSUIElement</key>

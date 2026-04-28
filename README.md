@@ -122,6 +122,8 @@ npm run desktop:mac -- paste-helper
 
 The helper app lives at `~/Applications/Echo Paste Helper.app` with the stable bundle id `xyz.554119401.echo.paste-helper`. Echo reuses the existing signed helper at runtime; it does not rebuild it just because the source file changed, since rebuilding an ad-hoc signed helper can make macOS treat it as a different Accessibility client.
 
+Normal paste attempts do not request macOS permission or fall back to AppleScript prompts. If permission is missing, Echo leaves the text on the clipboard and reports the helper error; run the explicit helper check above to request permission once.
+
 The Overview tab also shows a pairing QR code. Scan it from the phone to open the mobile UI with the pairing token already attached, so the phone page no longer needs a manually pasted token.
 
 If web login is enabled, the phone page asks for the configured user before it accepts the paired token. Browser users send both a login session and the pairing token; desktop agents still authenticate with `ECHO_TOKEN` only.
