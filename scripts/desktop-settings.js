@@ -2,6 +2,7 @@
 import crypto from "node:crypto";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
@@ -509,7 +510,9 @@ async function checkAccessibility() {
     return { ok: true, status: "not required", detail: "Accessibility permission is only required for macOS auto-paste." };
   }
 
-  const helper = await runCommand("swift", [path.join(rootDir, "scripts/macos-paste-helper.swift"), "--check"], 8000);
+  const helperApp = path.join(os.homedir(), "Applications", "Echo Paste Helper.app");
+  const helperBinary = path.join(helperApp, "Contents", "MacOS", "Echo Paste Helper");
+  const helper = await runCommand(helperBinary, ["--check"], 8000);
   if (helper.code === 0) {
     return {
       ok: true,
@@ -524,8 +527,8 @@ async function checkAccessibility() {
     ok: enabled,
     status: enabled ? "partial" : "needs permission",
     detail: enabled
-      ? "Accessibility is enabled, but the paste helper is not trusted yet. Grant Accessibility permission if auto-paste still fails."
-      : "Grant Accessibility permission to the Echo paste helper, /opt/homebrew/bin/node, or /usr/bin/osascript."
+      ? `Accessibility is enabled, but ${helperApp} is not trusted yet. Grant Accessibility permission if auto-paste still fails.`
+      : `Grant Accessibility permission to ${helperApp}.`
   };
 }
 

@@ -7,7 +7,9 @@ import { config } from "../config.js";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const macPasteHelperSource = path.resolve(moduleDir, "../../scripts/macos-paste-helper.swift");
-const macPasteHelperBinary = path.join(config.dataDir, "macos-paste-helper");
+const macPasteHelperApp = path.join(os.homedir(), "Applications", "Echo Paste Helper.app");
+const macPasteHelperBinary = path.join(macPasteHelperApp, "Contents", "MacOS", "Echo Paste Helper");
+const macPasteHelperInfoPlist = path.join(macPasteHelperApp, "Contents", "Info.plist");
 
 export async function insertText(text) {
   const value = String(text || "");
@@ -81,7 +83,8 @@ async function runMacPasteHelper() {
 }
 
 async function ensureMacPasteHelper() {
-  await fs.mkdir(config.dataDir, { recursive: true });
+  await fs.mkdir(path.dirname(macPasteHelperBinary), { recursive: true });
+  await fs.writeFile(macPasteHelperInfoPlist, macPasteHelperPlist(), "utf8");
 
   if (!(await shouldBuildMacPasteHelper())) return;
   const swiftc = await firstAvailable(["swiftc"]);
@@ -90,6 +93,7 @@ async function ensureMacPasteHelper() {
   }
   await run(swiftc, [macPasteHelperSource, "-o", macPasteHelperBinary]);
   await fs.chmod(macPasteHelperBinary, 0o755);
+  await run("codesign", ["--force", "--deep", "--sign", "-", macPasteHelperApp]).catch(() => {});
 }
 
 async function shouldBuildMacPasteHelper() {
@@ -107,8 +111,36 @@ async function shouldBuildMacPasteHelper() {
 function formatMacPasteErrors(errors) {
   const detail = errors.filter(Boolean).join(" | ");
   const permissionHint =
-    "Grant Accessibility permission to the Echo paste helper, /opt/homebrew/bin/node, or /usr/bin/osascript, then restart the desktop agent.";
+    `Grant Accessibility permission to ${macPasteHelperApp}, then restart the desktop agent.`;
   return [detail, permissionHint].filter(Boolean).join(" ");
+}
+
+function macPasteHelperPlist() {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key>
+  <string>Echo Paste Helper</string>
+  <key>CFBundleIdentifier</key>
+  <string>xyz.554119401.echo.paste-helper</string>
+  <key>CFBundleName</key>
+  <string>Echo Paste Helper</string>
+  <key>CFBundleDisplayName</key>
+  <string>Echo Paste Helper</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>12.0</string>
+  <key>LSUIElement</key>
+  <true/>
+</dict>
+</plist>
+`;
 }
 
 async function setClipboard(text) {
