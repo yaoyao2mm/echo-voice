@@ -21,6 +21,9 @@ const network = describeHttpNetwork(agentPingUrl);
 console.log("Echo Voice network doctor");
 console.log(`Target: ${agentPingUrl.origin}`);
 console.log(`Proxy:  ${network.activeProxyUrl || network.proxyMode}`);
+if (network.proxyFallbackDirect) {
+  console.log("Proxy fallback: direct when the local system proxy is unreachable");
+}
 console.log(`NO_PROXY: ${network.noProxy}`);
 console.log(`Timeout: ${network.timeoutMs}ms`);
 

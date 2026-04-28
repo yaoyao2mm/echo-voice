@@ -137,5 +137,6 @@ function sleep(ms) {
 
 function formatNetworkStatus(status) {
   if (!status.activeProxyUrl) return `direct, timeout=${status.timeoutMs}ms`;
-  return `proxy=${status.activeProxyUrl}, timeout=${status.timeoutMs}ms`;
+  const fallback = status.proxyFallbackDirect ? ", direct fallback=on" : "";
+  return `proxy=${status.activeProxyUrl}${fallback}, timeout=${status.timeoutMs}ms`;
 }

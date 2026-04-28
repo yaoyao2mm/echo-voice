@@ -69,7 +69,7 @@ ECHO_CODEX_WORKSPACES=echo=/Users/john/workspace/projects/echo,metio=/Users/john
 npm run desktop
 ```
 
-On macOS, you can manage the desktop agent with launchd:
+On macOS, the preferred path is the native `Echo Voice.app`. It opens the settings window, adds a menu bar item, and can run the desktop agent itself without installing a LaunchAgent:
 
 ```bash
 cat > .env <<'EOF'
@@ -79,28 +79,20 @@ ECHO_CODEX_WORKSPACES=echo=/Users/john/workspace/projects/echo,metio=/Users/john
 ECHO_PROXY_URL=system
 EOF
 
-npm run desktop:mac -- install
-npm run desktop:mac -- settings
+npm run desktop:mac:app
+npm run desktop:mac -- app
 npm run desktop:mac -- status
 npm run desktop:mac -- doctor
 npm run desktop:mac -- logs
 ```
 
-Other commands: `start`, `stop`, `restart`, `settings`, `doctor`, `uninstall`, `print-env`.
-
-For a native desktop settings window, install the lightweight Electron shell once:
+If you have already built the app, open it again with:
 
 ```bash
-npm run desktop:app:install
-npm run desktop:app
+npm run desktop:mac -- app
 ```
 
-To create a double-clickable macOS launcher:
-
-```bash
-npm run desktop:mac:app
-open "dist/Echo Voice.app"
-```
+LaunchAgent is still available as a legacy/background option. Other commands: `app`, `start`, `stop`, `restart`, `settings`, `doctor`, `uninstall`, `print-env`.
 
 To create a local DMG from that launcher:
 
@@ -108,11 +100,11 @@ To create a local DMG from that launcher:
 npm run desktop:mac:dmg
 ```
 
-`desktop:mac -- settings` uses the native window when it is installed, and falls back to the local browser page otherwise. The UI can update relay, VPN/proxy, local model, STT, and Codex workspace settings without editing `.env` directly.
+`desktop:mac -- settings` uses `Echo Voice.app` when it exists, uses the development Electron shell when installed, and falls back to the local browser page otherwise. The UI can update relay, VPN/proxy, local model, STT, and Codex workspace settings without editing `.env` directly.
 
-The native window also installs a menu bar item. Closing the settings window hides it instead of quitting, and the menu bar item can reopen settings, start/stop/restart the desktop agent, run the network doctor, and open agent logs.
+The native window also installs a menu bar item. Closing the settings window hides it instead of quitting, and the menu bar item can reopen settings, start/stop/restart the app-managed agent, switch off the legacy LaunchAgent, run the network doctor, and open logs.
 
-The Overview tab checks the relay config, launchd agent, Accessibility permission, clipboard command, Codex CLI, and allowlisted workspaces. On macOS, grant Accessibility permission if auto-paste reports `needs permission`.
+The Overview tab checks the relay config, app-managed or launchd agent, Accessibility permission, clipboard command, Codex CLI, and allowlisted workspaces. On macOS, grant Accessibility permission if auto-paste reports `needs permission`.
 
 You can check the paste helper directly:
 
@@ -140,7 +132,7 @@ For VPN clients that expose a local HTTP/mixed proxy, set:
 ECHO_PROXY_URL=system
 ```
 
-On macOS this makes the desktop agent follow the current System Settings HTTP/HTTPS proxy. You can also pin a proxy explicitly, for example `ECHO_PROXY_URL=http://127.0.0.1:7897`. SOCKS-only proxy URLs are not supported directly; expose an HTTP or mixed proxy port instead.
+On macOS this makes the desktop agent follow the current System Settings HTTP/HTTPS proxy. If that system proxy points to a local port that is currently unreachable, Echo falls back to direct HTTPS by default; set `ECHO_PROXY_FALLBACK_DIRECT=false` to disable that behavior. You can also pin a proxy explicitly, for example `ECHO_PROXY_URL=http://127.0.0.1:7897`. SOCKS-only proxy URLs are not supported directly; expose an HTTP or mixed proxy port instead.
 
 After changing network settings, restart and run the doctor:
 

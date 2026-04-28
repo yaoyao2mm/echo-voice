@@ -2,13 +2,13 @@
 import crypto from "node:crypto";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import dotenv from "dotenv";
 import QRCode from "qrcode";
 import { httpFetch } from "../src/lib/http.js";
+import { checkMacPasteHelperPermission, macPasteHelperPaths } from "../src/lib/paste.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -33,6 +33,7 @@ const fields = [
   { key: "INSERT_MODE", section: "connection", type: "choice", choices: ["paste", "copy"] },
 
   { key: "ECHO_PROXY_URL", section: "network", type: "text" },
+  { key: "ECHO_PROXY_FALLBACK_DIRECT", section: "network", type: "boolean", defaultValue: "true" },
   { key: "ECHO_NO_PROXY", section: "network", type: "text" },
   { key: "ECHO_HTTP_TIMEOUT_MS", section: "network", type: "number", min: 1000, max: 300000 },
 
@@ -248,7 +249,7 @@ async function readEnvContent() {
 function toPublicFields(env) {
   const output = {};
   for (const field of fields) {
-    const value = env[field.key] ?? "";
+    const value = env[field.key] ?? field.defaultValue ?? "";
     output[field.key] = field.type === "secret" ? { value: "", secret: true, set: Boolean(value) } : { value };
   }
   return output;
@@ -491,17 +492,45 @@ async function buildHealth(env) {
 
 async function checkAgentStatus() {
   if (process.platform !== "darwin") {
-    return { ok: false, status: "unsupported", detail: "Agent status check is implemented for macOS launchd." };
+    const appAgent = await findDesktopAgentProcess();
+    return appAgent || { ok: false, status: "unsupported", detail: "Agent status check is implemented for macOS and app-managed agents." };
   }
 
   const result = await runCommand("launchctl", ["print", `gui/${process.getuid()}/xyz.554119401.echo.desktop-agent`], 5000);
   const state = result.stdout.match(/state = ([^\n]+)/)?.[1]?.trim() || "";
   const pid = result.stdout.match(/\bpid = (\d+)/)?.[1] || "";
   const ok = result.code === 0 && state === "running";
+  if (ok) {
+    return {
+      ok: true,
+      status: "running",
+      detail: `LaunchAgent pid ${pid || "unknown"}`
+    };
+  }
+
+  const appAgent = await findDesktopAgentProcess();
+  if (appAgent) return appAgent;
+
   return {
-    ok,
-    status: ok ? "running" : "not running",
-    detail: ok ? `pid ${pid || "unknown"}` : result.stderr || result.stdout || "LaunchAgent is not loaded."
+    ok: false,
+    status: "not running",
+    detail: result.stderr || result.stdout || "No LaunchAgent or app-managed agent is running."
+  };
+}
+
+async function findDesktopAgentProcess() {
+  const result = await runCommand("ps", ["-axo", "pid=,ppid=,args="], 5000);
+  if (result.code !== 0) return null;
+  const normalizedRoot = rootDir.replaceAll("\\", "/");
+  const line = result.stdout
+    .split(/\r?\n/)
+    .find((item) => item.replaceAll("\\", "/").includes(`${normalizedRoot}/src/desktop-agent.js`));
+  if (!line) return null;
+  const pid = line.trim().match(/^(\d+)/)?.[1] || "unknown";
+  return {
+    ok: true,
+    status: "running",
+    detail: `app-managed pid ${pid}`
   };
 }
 
@@ -510,26 +539,21 @@ async function checkAccessibility() {
     return { ok: true, status: "not required", detail: "Accessibility permission is only required for macOS auto-paste." };
   }
 
-  const helperApp = path.join(os.homedir(), "Applications", "Echo Paste Helper.app");
-  const helperBinary = path.join(helperApp, "Contents", "MacOS", "Echo Paste Helper");
-  const helper = await runCommand(helperBinary, ["--check"], 8000);
-  if (helper.code === 0) {
+  const helper = macPasteHelperPaths();
+  try {
+    await checkMacPasteHelperPermission();
     return {
       ok: true,
       status: "enabled",
       detail: "Echo paste helper can send paste keystrokes."
     };
+  } catch (error) {
+    return {
+      ok: false,
+      status: "needs permission",
+      detail: `${error.message} Grant Accessibility permission to ${helper.app}.`
+    };
   }
-
-  const result = await runCommand("osascript", ["-e", 'tell application "System Events" to get UI elements enabled'], 5000);
-  const enabled = result.code === 0 && result.stdout.trim() === "true";
-  return {
-    ok: enabled,
-    status: enabled ? "partial" : "needs permission",
-    detail: enabled
-      ? `Accessibility is enabled, but ${helperApp} is not trusted yet. Grant Accessibility permission if auto-paste still fails.`
-      : `Grant Accessibility permission to ${helperApp}.`
-  };
 }
 
 async function checkCodex(env) {

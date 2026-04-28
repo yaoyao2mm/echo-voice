@@ -4,10 +4,14 @@ set -euo pipefail
 APP_NAME="Echo Voice Desktop Agent"
 LABEL="xyz.554119401.echo.desktop-agent"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+APP_DIR="$ROOT_DIR/dist/Echo Voice.app"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$HOME/Library/Logs/EchoVoice"
 OUT_LOG="$LOG_DIR/desktop-agent.out.log"
 ERR_LOG="$LOG_DIR/desktop-agent.err.log"
+APP_LOG="$LOG_DIR/desktop-app.log"
+APP_OUT_LOG="$LOG_DIR/desktop-agent-app.out.log"
+APP_ERR_LOG="$LOG_DIR/desktop-agent-app.err.log"
 ENV_FILE="$ROOT_DIR/.env"
 
 usage() {
@@ -21,6 +25,7 @@ Commands:
   restart     Restart the desktop agent
   status      Show launchd status and recent logs
   logs        Follow desktop agent logs
+  app         Build/open Echo Voice.app, which can manage the app agent itself
   settings    Open the local desktop settings page
   paste-helper
               Install/check the stable macOS paste helper and open permissions if needed
@@ -68,6 +73,7 @@ const wanted = [
   "ECHO_CODEX_TIMEOUT_MS",
   "INSERT_MODE",
   "ECHO_PROXY_URL",
+  "ECHO_PROXY_FALLBACK_DIRECT",
   "ECHO_NO_PROXY",
   "ECHO_HTTP_TIMEOUT_MS",
   "HTTP_PROXY",
@@ -100,6 +106,7 @@ NODE
   : "${ECHO_CODEX_TIMEOUT_MS:=1800000}"
   : "${INSERT_MODE:=paste}"
   : "${ECHO_PROXY_URL:=}"
+  : "${ECHO_PROXY_FALLBACK_DIRECT:=true}"
   : "${ECHO_NO_PROXY:=localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.local}"
   : "${ECHO_HTTP_TIMEOUT_MS:=60000}"
   : "${HTTP_PROXY:=}"
@@ -209,6 +216,7 @@ $(env_entry "ECHO_CODEX_PROFILE" "$ECHO_CODEX_PROFILE")
 $(env_entry "ECHO_CODEX_TIMEOUT_MS" "$ECHO_CODEX_TIMEOUT_MS")
 $(env_entry "INSERT_MODE" "$INSERT_MODE")
 $(env_entry "ECHO_PROXY_URL" "$ECHO_PROXY_URL")
+$(env_entry "ECHO_PROXY_FALLBACK_DIRECT" "$ECHO_PROXY_FALLBACK_DIRECT")
 $(env_entry "ECHO_NO_PROXY" "$ECHO_NO_PROXY")
 $(env_entry "ECHO_HTTP_TIMEOUT_MS" "$ECHO_HTTP_TIMEOUT_MS")
 $(env_entry "HTTP_PROXY" "$HTTP_PROXY")
@@ -283,20 +291,33 @@ status_service() {
   echo "Service: $LABEL"
   echo "Plist:   $PLIST"
   echo
+  echo "App-managed agent:"
+  find_app_agent_process || true
+  echo
+  echo "LaunchAgent:"
   launchctl print "gui/$(id -u)/$LABEL" 2>/dev/null | redact_sensitive | sed -n '1,80p' || echo "Not loaded."
   echo
-  echo "Recent stdout:"
+  echo "Recent app stdout:"
+  tail -n 20 "$APP_OUT_LOG" 2>/dev/null || true
+  echo
+  echo "Recent app stderr:"
+  tail -n 20 "$APP_ERR_LOG" 2>/dev/null || true
+  echo
+  echo "Recent app shell:"
+  tail -n 20 "$APP_LOG" 2>/dev/null || true
+  echo
+  echo "Recent LaunchAgent stdout:"
   tail -n 20 "$OUT_LOG" 2>/dev/null || true
   echo
-  echo "Recent stderr:"
+  echo "Recent LaunchAgent stderr:"
   tail -n 20 "$ERR_LOG" 2>/dev/null || true
 }
 
 follow_logs() {
   ensure_macos
   mkdir -p "$LOG_DIR"
-  touch "$OUT_LOG" "$ERR_LOG"
-  tail -f "$OUT_LOG" "$ERR_LOG"
+  touch "$OUT_LOG" "$ERR_LOG" "$APP_LOG" "$APP_OUT_LOG" "$APP_ERR_LOG"
+  tail -f "$APP_LOG" "$APP_OUT_LOG" "$APP_ERR_LOG" "$OUT_LOG" "$ERR_LOG"
 }
 
 doctor_network() {
@@ -354,6 +375,11 @@ EOF
 
 open_settings() {
   load_env
+  if [[ -d "$APP_DIR" ]]; then
+    open_app
+    return
+  fi
+
   if [[ -x "$ROOT_DIR/desktop-app/node_modules/.bin/electron" ]]; then
     npm --prefix "$ROOT_DIR/desktop-app" start
   else
@@ -361,6 +387,32 @@ open_settings() {
     echo "Run: npm run desktop:app:install"
     echo "Opening browser fallback for now."
     node "$ROOT_DIR/scripts/desktop-settings.js" --open
+  fi
+}
+
+open_app() {
+  ensure_macos
+  if [[ ! -d "$APP_DIR" ]]; then
+    "$ROOT_DIR/scripts/macos-create-app.sh"
+  fi
+  env -u ELECTRON_RUN_AS_NODE open "$APP_DIR"
+  echo "Echo Voice.app opened."
+}
+
+find_app_agent_process() {
+  local line
+  line="$(
+    ps -axo pid=,ppid=,command= | awk -v script="$ROOT_DIR/src/desktop-agent.js" '
+      index($0, script) > 0 && $0 !~ /awk -v script/ {
+        print $0
+        exit
+      }
+    '
+  )"
+  if [[ -n "$line" ]]; then
+    echo "$line"
+  else
+    echo "Not running."
   fi
 }
 
@@ -385,6 +437,7 @@ ECHO_CODEX_PROFILE=$ECHO_CODEX_PROFILE
 ECHO_CODEX_TIMEOUT_MS=$ECHO_CODEX_TIMEOUT_MS
 INSERT_MODE=$INSERT_MODE
 ECHO_PROXY_URL=${ECHO_PROXY_URL:+$(mask_proxy "$ECHO_PROXY_URL")}
+ECHO_PROXY_FALLBACK_DIRECT=$ECHO_PROXY_FALLBACK_DIRECT
 ECHO_NO_PROXY=$ECHO_NO_PROXY
 ECHO_HTTP_TIMEOUT_MS=$ECHO_HTTP_TIMEOUT_MS
 ECHO_SETTINGS_HOST=$ECHO_SETTINGS_HOST
@@ -422,6 +475,7 @@ main() {
     restart) restart_service ;;
     status) status_service ;;
     logs) follow_logs ;;
+    app) open_app ;;
     settings) open_settings ;;
     paste-helper) check_paste_helper ;;
     doctor) doctor_network ;;

@@ -12,16 +12,15 @@ export async function httpFetch(resource, options = {}) {
   const { timeoutMs = config.network.timeoutMs, ...fetchOptions } = options;
   const url = normalizeUrl(resource);
   const proxyUrl = resolveActiveProxyUrl(url);
+  const baseOptions = { ...fetchOptions };
 
-  if (proxyUrl) {
-    fetchOptions.dispatcher = proxyAgent(proxyUrl);
+  try {
+    return await fetch(resource, buildFetchOptions(baseOptions, timeoutMs, proxyUrl));
+  } catch (error) {
+    if (!shouldRetryDirect(error, proxyUrl)) throw error;
+
+    return fetch(resource, buildFetchOptions(baseOptions, timeoutMs, ""));
   }
-
-  if (!fetchOptions.signal && timeoutMs > 0) {
-    fetchOptions.signal = AbortSignal.timeout(timeoutMs);
-  }
-
-  return fetch(resource, fetchOptions);
 }
 
 export function describeHttpNetwork(target = config.relayUrl || config.publicUrl || "https://example.com") {
@@ -30,7 +29,8 @@ export function describeHttpNetwork(target = config.relayUrl || config.publicUrl
     proxyMode: config.network.proxyUrl || "direct",
     activeProxyUrl: redactProxyUrl(activeProxyUrl),
     noProxy: config.network.noProxy,
-    timeoutMs: config.network.timeoutMs
+    timeoutMs: config.network.timeoutMs,
+    proxyFallbackDirect: config.network.proxyUrl === "system" && config.network.proxyFallbackDirect
   };
 }
 
@@ -114,6 +114,35 @@ function proxyAgent(proxyUrl) {
     proxyAgents.set(proxyUrl, new ProxyAgent(proxyUrl));
   }
   return proxyAgents.get(proxyUrl);
+}
+
+function buildFetchOptions(baseOptions, timeoutMs, proxyUrl) {
+  const next = { ...baseOptions };
+  if (proxyUrl) {
+    next.dispatcher = proxyAgent(proxyUrl);
+  }
+
+  if (!baseOptions.signal && timeoutMs > 0) {
+    next.signal = AbortSignal.timeout(timeoutMs);
+  }
+
+  return next;
+}
+
+function shouldRetryDirect(error, proxyUrl) {
+  if (!proxyUrl || !config.network.proxyFallbackDirect) return false;
+  if (config.network.proxyUrl !== "system") return false;
+  if (!isLoopbackProxy(proxyUrl)) return false;
+  return isLikelyNetworkError(error);
+}
+
+function isLoopbackProxy(proxyUrl) {
+  try {
+    const hostname = new URL(proxyUrl).hostname.toLowerCase();
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === "[::1]";
+  } catch {
+    return false;
+  }
 }
 
 function validateProxyUrl(proxyUrl) {

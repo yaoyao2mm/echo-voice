@@ -51,7 +51,8 @@ export const config = {
       process.env.http_proxy ||
       "",
     noProxy: process.env.ECHO_NO_PROXY || process.env.NO_PROXY || process.env.no_proxy || defaultNoProxy,
-    timeoutMs: Number(process.env.ECHO_HTTP_TIMEOUT_MS || 60000)
+    timeoutMs: Number(process.env.ECHO_HTTP_TIMEOUT_MS || 60000),
+    proxyFallbackDirect: parseBoolean(process.env.ECHO_PROXY_FALLBACK_DIRECT, true)
   },
 
   stt: {
