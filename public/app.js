@@ -5,6 +5,7 @@ let token = tokenFromUrl || localStorage.getItem("echoToken") || "";
 let sessionToken = localStorage.getItem("echoSession") || "";
 let currentUser = readStoredUser();
 let authEnabled = true;
+const mobileRefineTimeoutMs = 10000;
 if (tokenFromUrl) {
   window.history.replaceState({}, "", window.location.pathname);
 }
@@ -483,12 +484,16 @@ async function sendToCodex() {
 
 async function refinePromptForCodex(rawText) {
   try {
-    const data = await apiPost("/api/refine", {
-      rawText,
-      mode: "chat",
-      contextHint: "手机端 Codex 任务输入",
-      includeHistory: false
-    });
+    const data = await apiPost(
+      "/api/refine",
+      {
+        rawText,
+        mode: "chat",
+        contextHint: "手机端 Codex 任务输入",
+        includeHistory: false
+      },
+      { timeoutMs: mobileRefineTimeoutMs }
+    );
     const refined = String(data.item?.refined || data.item?.raw || rawText).trim();
     if (refined) elements.codexPrompt.value = refined;
     return refined || rawText;
@@ -502,6 +507,7 @@ async function refinePromptForCodex(rawText) {
 function setComposerBusy(isBusy, label = "") {
   composerBusy = isBusy;
   if (label) elements.statusText.textContent = label;
+  elements.sendCodexButton.textContent = isBusy ? label || "处理中" : "发送";
   updateComposerAvailability();
   if (!isBusy) refreshStatus({ silentAuthFailure: true });
 }
@@ -686,16 +692,32 @@ async function apiGet(path) {
   return parseApiResponse(response);
 }
 
-async function apiPost(path, body) {
-  const response = await fetch(path, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders()
-    },
-    body: JSON.stringify(body)
-  });
-  return parseApiResponse(response);
+async function apiPost(path, body, options = {}) {
+  const controller = options.timeoutMs ? new AbortController() : null;
+  const timeout = controller
+    ? window.setTimeout(() => {
+        controller.abort();
+      }, options.timeoutMs)
+    : null;
+  try {
+    const response = await fetch(path, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders()
+      },
+      body: JSON.stringify(body),
+      signal: controller?.signal
+    });
+    return parseApiResponse(response);
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error("请求超时");
+    }
+    throw error;
+  } finally {
+    if (timeout) window.clearTimeout(timeout);
+  }
 }
 
 async function parseApiResponse(response) {
