@@ -83,6 +83,7 @@ const elements = {
   projectSheetStatus: document.querySelector("#projectSheetStatus"),
   projectSheetList: document.querySelector("#projectSheetList"),
   codexPrompt: document.querySelector("#codexPrompt"),
+  composer: document.querySelector(".composer"),
   postprocessToggle: document.querySelector("#postprocessToggle"),
   postprocessLabel: document.querySelector("#postprocessLabel"),
   newCodexSessionButton: document.querySelector("#newCodexSessionButton"),
@@ -368,6 +369,7 @@ function syncViewportMetrics() {
   if (elements.topbar) {
     document.documentElement.style.setProperty("--topbar-height", `${Math.round(elements.topbar.offsetHeight || 0)}px`);
   }
+  syncComposerMetrics();
 }
 
 function bindTopbarScrollState() {
@@ -441,6 +443,13 @@ function setTopbarCollapsed(collapsed) {
   if (topbarCollapsed === collapsed) return;
   topbarCollapsed = collapsed;
   document.body.classList.toggle("topbar-collapsed", collapsed);
+}
+
+function syncComposerMetrics() {
+  const composerHeight = Math.round(elements.composer?.offsetHeight || 0);
+  if (composerHeight > 0) {
+    document.documentElement.style.setProperty("--composer-height", `${composerHeight}px`);
+  }
 }
 
 function initRuntimeControls() {
@@ -791,6 +800,7 @@ function renderCodexStatus(codex) {
   }
   renderProjectPicker(codex.agentOnline);
   updateComposerAvailability();
+  syncComposerMetrics();
 }
 
 function openSessionSidebar() {
@@ -1125,6 +1135,7 @@ function setComposerBusy(isBusy, label = "") {
   if (label) elements.statusText.textContent = label;
   elements.sendCodexButton.textContent = isBusy ? label || "处理中" : composerActionLabel();
   updateComposerAvailability();
+  syncComposerMetrics();
   if (!isBusy) refreshStatus({ silentAuthFailure: true });
 }
 
@@ -1145,6 +1156,7 @@ function updateComposerAvailability() {
   elements.composerAttachmentButton.disabled = composerBusy;
   refreshComposerMeta();
   refreshTopbarProjectChip();
+  syncComposerMetrics();
 }
 
 function renderProjectPicker(agentOnline) {
