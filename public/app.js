@@ -64,6 +64,7 @@ const elements = {
   sessionSearch: document.querySelector("#sessionSearch"),
   showActiveSessionsButton: document.querySelector("#showActiveSessionsButton"),
   showArchivedSessionsButton: document.querySelector("#showArchivedSessionsButton"),
+  topbarProjectChip: document.querySelector(".topbar-project-chip"),
   sidebarUserMeta: document.querySelector("#sidebarUserMeta"),
   codexProject: document.querySelector("#codexProject"),
   codexPermissionMode: document.querySelector("#codexPermissionMode"),
@@ -103,7 +104,9 @@ let composerBusy = false;
 let codexAgentRuntime = {};
 let runtimePreferences = readStoredRuntimePreferences();
 let runtimeDirty = false;
-let lastTrackedScrollY = 0;
+let lastWindowScrollY = 0;
+let lastThreadScrollY = 0;
+let topbarScrollAccumulator = 0;
 let topbarCollapsed = false;
 
 bindViewportMetrics();
@@ -201,6 +204,7 @@ function updateAuthView(message = "") {
   elements.userBadge.textContent = loggedIn ? displayUser(currentUser) : "";
   renderUserCenter();
   for (const node of elements.authenticated) node.hidden = !showApp;
+  refreshTopbarProjectChip();
 
   if (!loggedIn) {
     elements.statusText.textContent = "等待登录";
@@ -352,44 +356,56 @@ function syncViewportMetrics() {
 }
 
 function bindTopbarScrollState() {
-  syncTopbarVisibility({ forceVisible: true });
+  resetTopbarScrollTracking({ forceVisible: true });
   window.addEventListener(
     "scroll",
     () => {
-      syncTopbarVisibility();
+      syncTopbarVisibility("window");
     },
     { passive: true }
   );
   elements.codexRunSummary?.addEventListener(
     "scroll",
     () => {
-      syncTopbarVisibility();
+      syncTopbarVisibility("thread");
     },
     { passive: true }
   );
 }
 
-function syncTopbarVisibility(options = {}) {
-  const currentY = currentScrollTop();
+function resetTopbarScrollTracking(options = {}) {
+  lastWindowScrollY = Math.max(window.scrollY || 0, 0);
+  lastThreadScrollY = elements.codexRunSummary?.scrollTop || 0;
+  topbarScrollAccumulator = 0;
+  if (options.forceVisible) {
+    setTopbarCollapsed(false);
+  }
+}
+
+function syncTopbarVisibility(source = "thread", options = {}) {
+  const currentY = source === "window" ? Math.max(window.scrollY || 0, 0) : elements.codexRunSummary?.scrollTop || 0;
+  const lastY = source === "window" ? lastWindowScrollY : lastThreadScrollY;
+  const delta = currentY - lastY;
+  if (source === "window") lastWindowScrollY = currentY;
+  else lastThreadScrollY = currentY;
   if (options.forceVisible || currentY <= 8 || elements.codexView.classList.contains("sessions-open")) {
-    lastTrackedScrollY = currentY;
+    topbarScrollAccumulator = 0;
     setTopbarCollapsed(false);
     return;
   }
-
-  const delta = currentY - lastTrackedScrollY;
-  if (delta >= 12) {
+  if (Math.abs(delta) < 1) return;
+  if (topbarScrollAccumulator && Math.sign(topbarScrollAccumulator) !== Math.sign(delta)) {
+    topbarScrollAccumulator = delta;
+  } else {
+    topbarScrollAccumulator += delta;
+  }
+  if (topbarScrollAccumulator >= 18) {
+    topbarScrollAccumulator = 0;
     setTopbarCollapsed(true);
-  } else if (delta <= -8) {
+  } else if (topbarScrollAccumulator <= -10) {
+    topbarScrollAccumulator = 0;
     setTopbarCollapsed(false);
   }
-  lastTrackedScrollY = currentY;
-}
-
-function currentScrollTop() {
-  const threadScrollTop = elements.codexRunSummary?.scrollTop || 0;
-  if (threadScrollTop > 0) return threadScrollTop;
-  return Math.max(window.scrollY || 0, 0);
 }
 
 function setTopbarCollapsed(collapsed) {
@@ -764,7 +780,7 @@ function closeSessionSidebar({ restoreFocus = true } = {}) {
   elements.sessionBackdrop.hidden = true;
   updateSessionSidebarToggle(false);
   syncBodySheetState();
-  syncTopbarVisibility({ forceVisible: currentScrollTop() <= 8 });
+  resetTopbarScrollTracking({ forceVisible: true });
   if (restoreFocus) {
     elements.toggleSessionsButton.focus({ preventScroll: true });
   }
@@ -802,7 +818,7 @@ async function setSessionArchiveView(archived) {
   renderEmptySessionDetail(
     archived
       ? { title: "归档", body: "归档会话只保留查看和恢复。" }
-      : { title: "新会话", body: "直接发送，开始新的 Codex 会话。" }
+      : { title: "新会话", body: "选择权限、模型和推理强度后直接发送。" }
   );
   await loadCodexJobs();
 }
@@ -821,8 +837,9 @@ function startNewCodexSession() {
   closeSessionSidebar({ restoreFocus: false });
   renderEmptySessionDetail({
     title: "新会话",
-    body: "选择工程、权限、模型和推理强度后直接发送。"
+    body: "选择权限、模型和推理强度后直接发送。"
   });
+  resetTopbarScrollTracking({ forceVisible: true });
   for (const button of elements.codexJobs.querySelectorAll(".conversation-item")) {
     button.classList.remove("active");
   }
@@ -934,6 +951,7 @@ function updateComposerAvailability() {
   elements.codexReasoningEffort.disabled = composerBusy;
   elements.codexPrompt.disabled = composerBusy;
   refreshComposerMeta();
+  refreshTopbarProjectChip();
 }
 
 function renderProjectPicker(agentOnline) {
@@ -950,6 +968,7 @@ function renderProjectPicker(agentOnline) {
     elements.projectSheetStatus.textContent = "";
     renderProjectSheetList();
     refreshActiveSessionHeader();
+    refreshTopbarProjectChip();
     return;
   }
 
@@ -966,6 +985,7 @@ function renderProjectPicker(agentOnline) {
   elements.projectSheetStatus.textContent = "";
   renderProjectSheetList();
   refreshActiveSessionHeader();
+  refreshTopbarProjectChip();
 }
 
 function renderProjectSheetList() {
@@ -1031,6 +1051,7 @@ function syncProjectPicker() {
     elements.composerProjectLabel.textContent = elements.projectPickerLabel.textContent;
   }
   elements.projectSidebarCard.classList.toggle("empty", !workspace);
+  refreshTopbarProjectChip();
   renderProjectSheetList();
   refreshActiveSessionHeader();
 }
@@ -1245,6 +1266,7 @@ async function showCodexJob(id, options = {}) {
   elements.codexLog.textContent = lines.join("\n\n");
   refreshActiveSessionHeader();
   updateComposerAvailability();
+  resetTopbarScrollTracking({ forceVisible: true });
 }
 
 function renderEmptySessionDetail({ title, body }) {
@@ -1266,6 +1288,7 @@ function renderEmptySessionDetail({ title, body }) {
     </div>
   `;
   refreshActiveSessionHeader();
+  resetTopbarScrollTracking({ forceVisible: true });
 }
 
 function renderApprovals(session) {
@@ -1514,14 +1537,14 @@ function sessionTime(session) {
 function refreshActiveSessionHeader() {
   const session = composingNewSession ? null : selectedCodexSession;
   const runtime = runtimeDirty ? currentRuntimeDraft() : session?.runtime || runtimePreferences;
-  const parts = [sessionProjectLabel(session?.projectId || elements.codexProject.value)];
+  const parts = [];
   const runtimeLabel = sessionRuntimeLabel(runtime);
   if (runtimeLabel) parts.push(runtimeLabel);
   if (session) {
     parts.push(session.archivedAt ? "已归档" : statusLabel(session.status));
     parts.push(formatRelativeTime(sessionTime(session)));
   }
-  elements.activeSessionMeta.textContent = parts.filter(Boolean).join(" · ") || "选择工程、权限、模型和推理强度后直接发送。";
+  elements.activeSessionMeta.textContent = parts.filter(Boolean).join(" · ") || "选择权限、模型和推理强度后直接发送。";
   refreshComposerMeta();
 }
 
@@ -1541,6 +1564,19 @@ function refreshComposerMeta() {
   const modeLabel = postprocessEnabled ? "后处理" : "原文";
   const lead = session ? "继续当前话题" : "发送后创建新话题";
   elements.composerActionsMeta.textContent = `${lead} · ${sessionProjectLabel(session?.projectId || elements.codexProject.value)} · ${runtimeLabel} · ${modeLabel}`;
+}
+
+function refreshTopbarProjectChip() {
+  if (!elements.topbarProjectChip) return;
+  const label = String(elements.composerProjectLabel?.textContent || "").trim();
+  const hide =
+    !isLoggedIn() ||
+    !token ||
+    !label ||
+    label === "选择项目" ||
+    label === "等待桌面 agent" ||
+    label === "还没有授权工程目录";
+  elements.topbarProjectChip.hidden = hide;
 }
 
 function formatRelativeTime(value) {

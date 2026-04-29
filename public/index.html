@@ -10,8 +10,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Echo Codex</title>
-    <link rel="manifest" href="/manifest.webmanifest?v=26" />
-    <link rel="stylesheet" href="/styles.css?v=26" />
+    <link rel="manifest" href="/manifest.webmanifest?v=28" />
+    <link rel="stylesheet" href="/styles.css?v=28" />
   </head>
   <body>
     <main class="shell">
@@ -32,6 +32,12 @@
           <div class="topbar-brand-copy">
             <h1>Echo Codex</h1>
             <p id="statusText">连接中</p>
+          </div>
+        </div>
+        <div class="topbar-actions" data-authenticated hidden>
+          <div class="topbar-project-chip" aria-label="当前工程">
+            <span class="topbar-project-kicker">工程</span>
+            <strong id="composerProjectLabel">等待桌面 agent</strong>
           </div>
         </div>
       </header>
@@ -149,7 +155,7 @@
           <section class="conversation-head">
             <div class="conversation-head-copy">
               <strong id="activeSessionTitle">新会话</strong>
-              <p id="activeSessionMeta" class="codex-runtime">选择工程、权限、模型和推理强度后直接发送。</p>
+              <p id="activeSessionMeta" class="codex-runtime">选择权限、模型和推理强度后直接发送。</p>
             </div>
           </section>
 
@@ -167,10 +173,6 @@
               <textarea id="codexPrompt" rows="7" placeholder="给 Codex 发消息，继续当前话题，或者开启新话题。"></textarea>
               <div class="composer-dock">
                 <div class="composer-toolbar" aria-label="当前会话配置">
-                  <div class="composer-inline-control composer-inline-project">
-                    <span class="composer-inline-kicker">工程</span>
-                    <strong id="composerProjectLabel">等待桌面 agent</strong>
-                  </div>
                   <label class="composer-inline-control composer-inline-select composer-inline-permission" for="codexPermissionMode">
                     <span class="composer-inline-kicker">权限</span>
                     <select id="codexPermissionMode" aria-label="选择权限模式"></select>
@@ -192,6 +194,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=26" type="module"></script>
+    <script src="/app.js?v=28" type="module"></script>
   </body>
 </html>
