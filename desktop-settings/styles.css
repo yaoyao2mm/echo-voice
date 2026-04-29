@@ -360,6 +360,85 @@ p,
   margin-top: 4px;
 }
 
+.workspaceManagerActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.workspaceSuggestions,
+.directoryBrowser {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  padding: 9px;
+}
+
+.workspaceSuggestions[hidden],
+.directoryBrowser[hidden] {
+  display: none;
+}
+
+.suggestionItem,
+.directoryItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 9px;
+}
+
+.suggestionTitle,
+.directoryTitle {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.suggestionMeta,
+.directoryMeta {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.directoryBrowserHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+#directoryPath {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.directoryEntries {
+  display: grid;
+  gap: 7px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.directoryActions,
+.workspaceRowActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
 .workspaceRows {
   display: grid;
   gap: 8px;
@@ -578,8 +657,20 @@ pre {
     flex-direction: column;
   }
 
-  .workspaceRow {
+  .workspaceManagerActions,
+  .directoryBrowserHeader {
+    justify-content: flex-start;
+  }
+
+  .workspaceRow,
+  .suggestionItem,
+  .directoryItem {
     grid-template-columns: 1fr;
+  }
+
+  .directoryActions,
+  .workspaceRowActions {
+    justify-content: flex-start;
   }
 
   .outputPanel {

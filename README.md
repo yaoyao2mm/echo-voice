@@ -107,7 +107,7 @@ The native window also installs a menu bar item. Closing the settings window hid
 
 The Overview tab checks the relay config, app-managed or launchd agent, Codex CLI, and allowlisted workspaces.
 
-The Codex tab has an engineering directory manager. Add one row per local project, give it a short project name, and save; after restarting the desktop agent, those project names appear in the phone UI as the selectable Codex working directories.
+The Codex tab has an engineering directory manager. Use "发现工程" to scan common local project folders, or "浏览目录" to pick a folder manually. After saving and restarting the desktop agent, those project names appear in the phone UI as the selectable Codex working directories.
 
 The Overview tab also shows a pairing QR code. Scan it from the phone to open the mobile UI with the pairing token already attached, so the phone page no longer needs a manually pasted token.
 

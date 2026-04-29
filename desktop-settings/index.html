@@ -193,7 +193,21 @@
                   <h3>工程目录</h3>
                   <p>这些目录会出现在手机端“项目”下拉框里。Codex 只会在这里授权的目录中执行。</p>
                 </div>
-                <button type="button" id="addWorkspace">添加目录</button>
+                <div class="workspaceManagerActions">
+                  <button type="button" id="discoverWorkspaces">发现工程</button>
+                  <button type="button" id="browseWorkspaceRoot">浏览目录</button>
+                  <button type="button" id="addWorkspace">手动添加</button>
+                </div>
+              </div>
+              <div id="workspaceSuggestions" class="workspaceSuggestions" hidden></div>
+              <div id="directoryBrowser" class="directoryBrowser" hidden>
+                <div class="directoryBrowserHeader">
+                  <button type="button" id="browseHome">Home</button>
+                  <button type="button" id="browseParent">上一级</button>
+                  <button type="button" id="selectCurrentDirectory">选择当前目录</button>
+                  <span id="directoryPath"></span>
+                </div>
+                <div id="directoryEntries" class="directoryEntries"></div>
               </div>
               <div id="workspaceRows" class="workspaceRows"></div>
               <textarea data-key="ECHO_CODEX_WORKSPACES" class="workspaceRaw" rows="4" aria-hidden="true" tabindex="-1"></textarea>

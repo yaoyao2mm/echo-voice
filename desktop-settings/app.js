@@ -7,11 +7,18 @@ const healthGrid = document.querySelector("#healthGrid");
 const pairingQr = document.querySelector("#pairingQr");
 const workspaceRows = document.querySelector("#workspaceRows");
 const workspaceRaw = document.querySelector('[data-key="ECHO_CODEX_WORKSPACES"]');
+const workspaceSuggestions = document.querySelector("#workspaceSuggestions");
+const directoryBrowser = document.querySelector("#directoryBrowser");
+const directoryEntries = document.querySelector("#directoryEntries");
+const directoryPath = document.querySelector("#directoryPath");
 const tabs = document.querySelectorAll(".tab");
 const panels = document.querySelectorAll(".panel");
 
 let pairingUrl = "";
 let workspaceHealthItems = [];
+let directoryBrowserPath = "";
+let directoryBrowserHome = "";
+let directoryTargetInput = null;
 
 if (!settingsKey) {
   writeOutput("Missing local settings key.", true);
@@ -42,6 +49,11 @@ function bindEvents() {
   document.querySelector("#refreshPairingQr").addEventListener("click", loadPairing);
   document.querySelector("#copyPairingUrl").addEventListener("click", copyPairingUrl);
   document.querySelector("#addWorkspace").addEventListener("click", () => addWorkspaceRow());
+  document.querySelector("#discoverWorkspaces").addEventListener("click", discoverWorkspaces);
+  document.querySelector("#browseWorkspaceRoot").addEventListener("click", () => openDirectoryBrowser());
+  document.querySelector("#browseHome").addEventListener("click", () => loadDirectory(directoryBrowserHome));
+  document.querySelector("#browseParent").addEventListener("click", () => loadDirectoryParent());
+  document.querySelector("#selectCurrentDirectory").addEventListener("click", () => chooseDirectory(directoryBrowserPath));
 }
 
 function showPanel(name) {
@@ -370,6 +382,14 @@ function addWorkspaceRow(item = {}) {
   });
   pathField.append(pathTitle, pathInput);
 
+  const actions = document.createElement("div");
+  actions.className = "workspaceRowActions";
+
+  const browseButton = document.createElement("button");
+  browseButton.type = "button";
+  browseButton.textContent = "浏览";
+  browseButton.addEventListener("click", () => openDirectoryBrowser(pathInput));
+
   const removeButton = document.createElement("button");
   removeButton.type = "button";
   removeButton.textContent = "删除";
@@ -377,12 +397,13 @@ function addWorkspaceRow(item = {}) {
     row.remove();
     if (!workspaceRows.querySelector(".workspaceRow")) workspaceRows.append(renderWorkspaceEmpty());
   });
+  actions.append(browseButton, removeButton);
 
   const status = document.createElement("div");
   status.className = "workspaceStatus";
   status.dataset.workspaceStatus = "true";
 
-  row.append(labelField, pathField, removeButton, status);
+  row.append(labelField, pathField, actions, status);
   workspaceRows.append(row);
   renderWorkspaceStatuses();
 }
@@ -438,6 +459,177 @@ function renderWorkspaceStatuses() {
     status.textContent = health.ok ? "目录存在，手机端可选择。" : health.detail || "目录不可用。";
     status.classList.add(health.ok ? "ok" : "bad");
   }
+}
+
+async function discoverWorkspaces() {
+  try {
+    workspaceSuggestions.hidden = false;
+    workspaceSuggestions.textContent = "正在发现工程...";
+    const data = await apiGet("/api/workspaces/suggestions");
+    renderWorkspaceSuggestions(data.items || []);
+    writeOutput(`Found ${(data.items || []).length} workspace suggestions.`);
+  } catch (error) {
+    workspaceSuggestions.hidden = false;
+    workspaceSuggestions.textContent = error.message;
+    writeOutput(error.message, true);
+  }
+}
+
+function renderWorkspaceSuggestions(items) {
+  workspaceSuggestions.replaceChildren();
+  workspaceSuggestions.hidden = false;
+  if (!items.length) {
+    const empty = document.createElement("div");
+    empty.className = "workspaceEmpty";
+    empty.textContent = "没有发现工程。可以用“浏览目录”手动选择。";
+    workspaceSuggestions.append(empty);
+    return;
+  }
+
+  for (const item of items) {
+    const root = document.createElement("div");
+    root.className = "suggestionItem";
+
+    const body = document.createElement("div");
+    const title = document.createElement("div");
+    title.className = "suggestionTitle";
+    title.textContent = item.label;
+    const meta = document.createElement("div");
+    meta.className = "suggestionMeta";
+    meta.textContent = [item.path, item.signals?.length ? item.signals.join(" · ") : "", item.alreadyConfigured ? "已添加" : ""]
+      .filter(Boolean)
+      .join("\n");
+    body.append(title, meta);
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = item.alreadyConfigured || hasWorkspacePath(item.path) ? "已添加" : "加入";
+    button.disabled = item.alreadyConfigured || hasWorkspacePath(item.path);
+    button.addEventListener("click", () => {
+      addWorkspaceRow({
+        label: uniqueWorkspaceLabel(item.label),
+        path: item.path
+      });
+      button.textContent = "已添加";
+      button.disabled = true;
+      writeOutput(`Added workspace: ${item.path}`);
+    });
+
+    root.append(body, button);
+    workspaceSuggestions.append(root);
+  }
+}
+
+async function openDirectoryBrowser(targetInput = null) {
+  directoryTargetInput = targetInput;
+  const start = targetInput?.value.trim() || firstWorkspaceParent() || "";
+  await loadDirectory(start);
+}
+
+async function loadDirectory(path) {
+  try {
+    directoryBrowser.hidden = false;
+    directoryEntries.textContent = "Loading...";
+    const data = await apiGet(`/api/system/directories?path=${encodeURIComponent(path || "")}`);
+    directoryBrowserPath = data.current;
+    directoryBrowserHome = data.home;
+    directoryPath.textContent = data.current;
+    renderDirectoryEntries(data.entries || []);
+  } catch (error) {
+    directoryEntries.textContent = error.message;
+    writeOutput(error.message, true);
+  }
+}
+
+function loadDirectoryParent() {
+  if (!directoryBrowserPath) return;
+  const parts = directoryBrowserPath.split("/").filter(Boolean);
+  if (parts.length === 0) return;
+  loadDirectory(`/${parts.slice(0, -1).join("/")}`);
+}
+
+function renderDirectoryEntries(entries) {
+  directoryEntries.replaceChildren();
+  if (!entries.length) {
+    const empty = document.createElement("div");
+    empty.className = "workspaceEmpty";
+    empty.textContent = "这个目录下面没有可进入的子目录。";
+    directoryEntries.append(empty);
+    return;
+  }
+
+  for (const entry of entries) {
+    const root = document.createElement("div");
+    root.className = "directoryItem";
+
+    const body = document.createElement("div");
+    const title = document.createElement("div");
+    title.className = "directoryTitle";
+    title.textContent = entry.name;
+    const meta = document.createElement("div");
+    meta.className = "directoryMeta";
+    meta.textContent = [entry.path, entry.signals?.length ? entry.signals.join(" · ") : ""].filter(Boolean).join("\n");
+    body.append(title, meta);
+
+    const actions = document.createElement("div");
+    actions.className = "directoryActions";
+    const enter = document.createElement("button");
+    enter.type = "button";
+    enter.textContent = "进入";
+    enter.addEventListener("click", () => loadDirectory(entry.path));
+    const choose = document.createElement("button");
+    choose.type = "button";
+    choose.textContent = "选择";
+    choose.addEventListener("click", () => chooseDirectory(entry.path));
+    actions.append(enter, choose);
+
+    root.append(body, actions);
+    directoryEntries.append(root);
+  }
+}
+
+function chooseDirectory(path) {
+  if (!path) return;
+  if (directoryTargetInput) {
+    directoryTargetInput.value = path;
+    const row = directoryTargetInput.closest(".workspaceRow");
+    const labelInput = row?.querySelector("[data-workspace-label]");
+    if (labelInput && !labelInput.value.trim()) labelInput.value = uniqueWorkspaceLabel(defaultWorkspaceLabel(path));
+  } else if (!hasWorkspacePath(path)) {
+    addWorkspaceRow({
+      label: uniqueWorkspaceLabel(defaultWorkspaceLabel(path)),
+      path
+    });
+  }
+  directoryBrowser.hidden = true;
+  renderWorkspaceStatuses();
+  writeOutput(`Selected workspace: ${path}`);
+}
+
+function firstWorkspaceParent() {
+  const first = workspaceRowsData().find((item) => item.path)?.path || "";
+  if (!first || !first.includes("/")) return "";
+  return first.split("/").slice(0, -1).join("/") || "/";
+}
+
+function hasWorkspacePath(path) {
+  const target = normalizePath(path);
+  return workspaceRowsData().some((item) => normalizePath(item.path) === target);
+}
+
+function uniqueWorkspaceLabel(label) {
+  const base = String(label || "workspace").trim() || "workspace";
+  const used = new Set(workspaceRowsData().map((item) => item.label.toLowerCase()).filter(Boolean));
+  if (!used.has(base.toLowerCase())) return base;
+  for (let index = 2; index < 100; index += 1) {
+    const next = `${base}-${index}`;
+    if (!used.has(next.toLowerCase())) return next;
+  }
+  return `${base}-${Date.now()}`;
+}
+
+function normalizePath(value) {
+  return String(value || "").trim().replace(/\/+$/g, "");
 }
 
 function defaultWorkspaceLabel(value) {

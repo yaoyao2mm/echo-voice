@@ -2,6 +2,7 @@
 import crypto from "node:crypto";
 import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
@@ -177,6 +178,29 @@ app.get("/api/desktop/health", async (req, res) => {
     res.json({
       ok: true,
       health: await buildHealth(env)
+    });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.get("/api/workspaces/suggestions", async (req, res) => {
+  try {
+    const env = await readEnv();
+    res.json({
+      ok: true,
+      items: await discoverWorkspaceSuggestions(env)
+    });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.get("/api/system/directories", async (req, res) => {
+  try {
+    res.json({
+      ok: true,
+      ...(await listDirectories(req.query.path))
     });
   } catch (error) {
     handleError(res, error);
@@ -559,6 +583,132 @@ async function checkWorkspaces(env) {
   };
 }
 
+async function discoverWorkspaceSuggestions(env) {
+  const configured = parseWorkspaceList(env.ECHO_CODEX_WORKSPACES || "");
+  const configuredPaths = new Set(configured.map((item) => path.resolve(expandHome(item.path))));
+  const roots = workspaceSearchRoots(configured);
+  const found = new Map();
+
+  for (const root of roots) {
+    const directories = await nearbyProjectDirectories(root);
+    for (const directory of directories) {
+      const item = await workspaceSuggestion(directory, configuredPaths);
+      if (!item) continue;
+      found.set(item.path, item);
+      if (found.size >= 80) break;
+    }
+    if (found.size >= 80) break;
+  }
+
+  return Array.from(found.values()).sort((a, b) => {
+    if (a.alreadyConfigured !== b.alreadyConfigured) return a.alreadyConfigured ? 1 : -1;
+    return a.label.localeCompare(b.label);
+  });
+}
+
+function workspaceSearchRoots(configured) {
+  const home = os.homedir();
+  const roots = [
+    ...configured.map((item) => path.dirname(path.resolve(expandHome(item.path)))),
+    path.join(home, "workspace", "projects"),
+    path.join(home, "workspace"),
+    path.join(home, "Projects"),
+    path.join(home, "Code"),
+    path.join(home, "Developer"),
+    rootDir
+  ];
+  return Array.from(new Set(roots.map((item) => path.resolve(expandHome(item)))));
+}
+
+async function nearbyProjectDirectories(root) {
+  const output = [];
+  const rootStat = await safeStat(root);
+  if (!rootStat?.isDirectory()) return output;
+
+  output.push(root);
+  const entries = await safeReadDir(root);
+  const childDirs = entries
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+    .slice(0, 120)
+    .map((entry) => path.join(root, entry.name));
+  output.push(...childDirs);
+
+  if (["workspace", "code", "projects", "developer"].includes(path.basename(root).toLowerCase())) {
+    for (const child of childDirs.slice(0, 40)) {
+      const grandchildren = await safeReadDir(child);
+      output.push(
+        ...grandchildren
+          .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+          .slice(0, 40)
+          .map((entry) => path.join(child, entry.name))
+      );
+    }
+  }
+
+  return Array.from(new Set(output));
+}
+
+async function workspaceSuggestion(directory, configuredPaths) {
+  const stat = await safeStat(directory);
+  if (!stat?.isDirectory()) return null;
+  const signals = await projectSignals(directory);
+  const alreadyConfigured = configuredPaths.has(path.resolve(directory));
+  if (!alreadyConfigured && signals.length === 0) return null;
+
+  return {
+    label: workspaceLabelFromPath(directory),
+    path: path.resolve(directory),
+    signals,
+    alreadyConfigured
+  };
+}
+
+async function projectSignals(directory) {
+  const markers = [
+    [".git", "git"],
+    ["package.json", "node"],
+    ["pnpm-lock.yaml", "pnpm"],
+    ["pyproject.toml", "python"],
+    ["Cargo.toml", "rust"],
+    ["go.mod", "go"],
+    ["README.md", "readme"]
+  ];
+  const signals = [];
+  for (const [file, label] of markers) {
+    if (await pathExists(path.join(directory, file))) signals.push(label);
+  }
+  return signals;
+}
+
+async function listDirectories(inputPath) {
+  const home = os.homedir();
+  let current = path.resolve(expandHome(String(inputPath || home)));
+  const stat = await safeStat(current);
+  if (!stat) current = home;
+  else if (!stat.isDirectory()) current = path.dirname(current);
+
+  const entries = (await safeReadDir(current))
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .slice(0, 180);
+
+  return {
+    current,
+    parent: path.dirname(current),
+    home,
+    entries: await Promise.all(
+      entries.map(async (entry) => {
+        const directory = path.join(current, entry.name);
+        return {
+          name: entry.name,
+          path: directory,
+          signals: await projectSignals(directory)
+        };
+      })
+    )
+  };
+}
+
 function parseWorkspaceList(value) {
   return String(value || "")
     .split(",")
@@ -573,10 +723,39 @@ function parseWorkspaceList(value) {
     });
 }
 
+function workspaceLabelFromPath(value) {
+  return path.basename(path.resolve(expandHome(value))) || "workspace";
+}
+
 function expandHome(value) {
   if (value === "~") return process.env.HOME || value;
   if (value.startsWith("~/")) return path.join(process.env.HOME || "", value.slice(2));
   return value;
+}
+
+async function safeStat(value) {
+  try {
+    return await fs.stat(value);
+  } catch {
+    return null;
+  }
+}
+
+async function safeReadDir(value) {
+  try {
+    return await fs.readdir(value, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+}
+
+async function pathExists(value) {
+  try {
+    await fs.access(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function systemOpenUrl(target) {
