@@ -2683,19 +2683,24 @@ body {
   justify-content: flex-end;
 }
 
-.thread-attachment {
-  margin: 0;
-  width: min(180px, 42vw);
+.thread-attachment-pill {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: min(100%, 20rem);
+  padding: 8px 12px;
   border: 1px solid rgba(126, 106, 84, 0.12);
-  border-radius: 16px;
-  overflow: hidden;
+  border-radius: 999px;
   background: rgba(255, 252, 247, 0.9);
 }
 
-.thread-attachment img {
-  display: block;
-  width: 100%;
-  height: auto;
+.thread-attachment-pill-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--ink);
 }
 
 .thread-message-role,
@@ -3089,7 +3094,7 @@ body.topbar-collapsed .topbar {
   border: 0;
   border-radius: 0;
   background: transparent;
-  padding: 18px 18px 18px 60px;
+  padding: 18px 18px 14px;
   box-shadow: none;
   resize: none;
 }
@@ -3099,12 +3104,91 @@ body.topbar-collapsed .topbar {
   box-shadow: none;
 }
 
-.composer-attachment-button {
-  position: absolute;
-  left: 14px;
-  bottom: 14px;
-  width: 34px;
-  height: 34px;
+.composer-inline-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.composer-inline-row select {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.composer-attachment-inline-button {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(126, 106, 84, 0.1);
+  color: var(--muted);
+  padding: 0;
+}
+
+.composer-attachment-inline-button svg {
+  width: 15px;
+  height: 15px;
+}
+
+.composer-attachment-inline-button.active {
+  background: rgba(23, 20, 17, 0.1);
+  color: var(--ink);
+}
+
+.composer-attachment-inline-button:disabled {
+  opacity: 0.4;
+}
+
+.composer-attachment-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 16px 10px;
+  border-top: 1px solid rgba(126, 106, 84, 0.08);
+  background: rgba(250, 247, 241, 0.78);
+}
+
+.composer-attachment-summary,
+.thread-attachment-summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(126, 106, 84, 0.08);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.composer-attachment-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 7px 10px;
+  border: 1px solid rgba(126, 106, 84, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 252, 247, 0.92);
+}
+
+.composer-attachment-pill-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.composer-attachment-remove {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3112,69 +3196,11 @@ body.topbar-collapsed .topbar {
   border-radius: 999px;
   background: rgba(126, 106, 84, 0.08);
   color: var(--muted);
-  padding: 0;
-}
-
-.composer-attachment-button svg {
-  width: 17px;
-  height: 17px;
-}
-
-.composer-attachment-button.active {
-  background: rgba(23, 20, 17, 0.1);
-  color: var(--ink);
-}
-
-.composer-attachment-button:disabled {
-  opacity: 0.4;
-}
-
-.composer-attachment-tray {
-  display: flex;
-  gap: 8px;
-  padding: 0 16px 12px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.composer-attachment-tray::-webkit-scrollbar {
-  display: none;
-}
-
-.composer-attachment-chip {
-  position: relative;
-  flex: 0 0 auto;
-  width: 64px;
-  height: 64px;
-  border: 1px solid rgba(126, 106, 84, 0.12);
-  border-radius: 16px;
-  overflow: hidden;
-  background: rgba(255, 252, 247, 0.92);
-}
-
-.composer-attachment-chip img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.composer-attachment-remove {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 20px;
-  height: 20px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 999px;
-  background: rgba(23, 20, 17, 0.72);
-  color: #ffffff;
-  font-size: 13px;
+  min-height: 22px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 700;
   line-height: 1;
-  padding: 0;
 }
 
 .composer-dock {
@@ -3312,7 +3338,7 @@ body.topbar-collapsed .topbar {
 
   .composer textarea {
     min-height: 96px;
-    padding: 16px 16px 16px 56px;
+    padding: 16px 16px 12px;
   }
 
   .composer-dock {
@@ -3346,17 +3372,17 @@ body.topbar-collapsed .topbar {
   }
 
   .composer-attachment-tray {
-    padding: 0 14px 10px;
+    padding: 8px 14px 10px;
   }
 
-  .composer-attachment-chip {
-    width: 58px;
-    height: 58px;
-    border-radius: 14px;
+  .composer-attachment-pill {
+    max-width: 100%;
+    padding: 7px 9px;
   }
 
-  .thread-attachment {
-    width: min(160px, 44vw);
+  .composer-attachment-pill-label,
+  .thread-attachment-pill-label {
+    font-size: 11px;
   }
 }
 
@@ -3364,7 +3390,8 @@ body.topbar-collapsed .topbar {
 
 @media (max-width: 760px) {
   .shell {
-    padding-top: calc(var(--topbar-height, 72px) + 12px);
+    padding-top: calc(var(--topbar-height, 72px) + 8px);
+    padding-bottom: 0;
     transition: padding-top 240ms ease;
   }
 
@@ -3394,7 +3421,7 @@ body.topbar-collapsed .topbar {
   }
 
   .codex-section {
-    min-height: calc(var(--app-height) - var(--topbar-height, 72px) - 12px);
+    min-height: calc(var(--app-height) - var(--topbar-height, 72px));
     align-items: stretch;
   }
 
@@ -3403,9 +3430,10 @@ body.topbar-collapsed .topbar {
   }
 
   .codex-main {
-    height: calc(var(--app-height) - var(--topbar-height, 72px) - 12px);
+    height: calc(var(--app-height) - var(--topbar-height, 72px));
     min-height: 0;
     overflow: hidden;
+    gap: 8px;
   }
 
   .codex-job-detail {
@@ -3416,7 +3444,7 @@ body.topbar-collapsed .topbar {
     overscroll-behavior-y: contain;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
-    padding-bottom: 8px;
+    padding-bottom: 0;
   }
 
   .codex-job-detail::-webkit-scrollbar {
@@ -3430,13 +3458,16 @@ body.topbar-collapsed .topbar {
   }
 
   .composer {
-    position: static;
-    bottom: auto;
-    margin-top: 10px;
+    position: sticky;
+    bottom: 0;
+    margin-top: 0;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    box-shadow: 0 14px 34px rgba(23, 20, 17, 0.18);
   }
 
-  body.composer-editing .composer {
-    margin-bottom: max(12px, var(--safe-bottom));
+  .composer-dock {
+    padding-bottom: max(6px, var(--safe-bottom));
   }
 
   .session-sidebar {

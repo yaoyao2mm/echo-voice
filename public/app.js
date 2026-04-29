@@ -114,8 +114,6 @@ let lastTopbarScrollY = 0;
 let topbarScrollAccumulator = 0;
 let topbarCollapsed = false;
 let composerAttachments = [];
-let stableViewportHeight = 0;
-let composerFocusScrollTimer = null;
 
 bindViewportMetrics();
 bindTopbarScrollState();
@@ -148,8 +146,6 @@ elements.codexPermissionMode.addEventListener("change", handleRuntimeControlChan
 elements.codexModel.addEventListener("change", handleRuntimeControlChange);
 elements.codexReasoningEffort.addEventListener("change", handleRuntimeControlChange);
 elements.codexPrompt.addEventListener("input", updateComposerAvailability);
-elements.codexPrompt.addEventListener("focus", () => setComposerEditing(true));
-elements.codexPrompt.addEventListener("blur", () => setComposerEditing(false));
 elements.composerAttachmentButton.addEventListener("click", openComposerAttachmentPicker);
 elements.composerAttachmentInput.addEventListener("change", handleComposerAttachmentInput);
 elements.codexPrompt.addEventListener("paste", handleComposerPaste);
@@ -367,12 +363,7 @@ function bindViewportMetrics() {
 
 function syncViewportMetrics() {
   const viewport = window.visualViewport;
-  const rawHeight = Math.round(viewport?.height || window.innerHeight || 0);
-  const composerFocused = document.activeElement === elements.codexPrompt;
-  const keyboardLikelyOpen =
-    composerFocused && stableViewportHeight > 0 && rawHeight > 0 && rawHeight < stableViewportHeight - 120;
-  if (!keyboardLikelyOpen && rawHeight > 0) stableViewportHeight = rawHeight;
-  const nextHeight = keyboardLikelyOpen ? stableViewportHeight : rawHeight;
+  const nextHeight = Math.round(viewport?.height || window.innerHeight || 0);
   if (nextHeight > 0) document.documentElement.style.setProperty("--app-height", `${nextHeight}px`);
   if (elements.topbar) {
     document.documentElement.style.setProperty("--topbar-height", `${Math.round(elements.topbar.offsetHeight || 0)}px`);
@@ -450,17 +441,6 @@ function setTopbarCollapsed(collapsed) {
   if (topbarCollapsed === collapsed) return;
   topbarCollapsed = collapsed;
   document.body.classList.toggle("topbar-collapsed", collapsed);
-}
-
-function setComposerEditing(editing) {
-  document.body.classList.toggle("composer-editing", Boolean(editing));
-  if (!editing) return;
-  if (composerFocusScrollTimer) window.clearTimeout(composerFocusScrollTimer);
-  composerFocusScrollTimer = window.setTimeout(() => {
-    composerFocusScrollTimer = null;
-    if (document.activeElement !== elements.codexPrompt) return;
-    elements.codexPrompt.scrollIntoView({ block: "nearest" });
-  }, 140);
 }
 
 function initRuntimeControls() {
@@ -1091,16 +1071,20 @@ function renderComposerAttachments() {
     hasAttachments ? `已附加 ${composerAttachments.length} 张截图` : "附加截图"
   );
   elements.composerAttachmentTray.innerHTML = hasAttachments
-    ? composerAttachments
-        .map(
-          (attachment) => `
-            <div class="composer-attachment-chip" data-attachment-id="${escapeHtml(attachment.id)}">
-              <img src="${escapeHtml(attachment.url)}" alt="${escapeHtml(attachment.name)}" />
-              <button type="button" class="composer-attachment-remove" aria-label="移除 ${escapeHtml(attachment.name)}">×</button>
-            </div>
-          `
-        )
-        .join("")
+    ? `
+        <span class="composer-attachment-summary">${escapeHtml(attachmentSummaryText(composerAttachments, "已附加"))}</span>
+        ${composerAttachments
+          .map((attachment, index) => {
+            const label = attachmentDisplayLabel(attachment, index);
+            return `
+              <div class="composer-attachment-pill" data-attachment-id="${escapeHtml(attachment.id)}">
+                <span class="composer-attachment-pill-label">${escapeHtml(label)}</span>
+                <button type="button" class="composer-attachment-remove" aria-label="移除 ${escapeHtml(label)}">移除</button>
+              </div>
+            `;
+          })
+          .join("")}
+      `
     : "";
 
   for (const button of elements.composerAttachmentTray.querySelectorAll(".composer-attachment-remove")) {
@@ -1110,6 +1094,8 @@ function renderComposerAttachments() {
       removeComposerAttachment(chip.dataset.attachmentId || "");
     });
   }
+
+  updateComposerAvailability();
 }
 
 function removeComposerAttachment(id) {
@@ -1700,21 +1686,29 @@ function renderConversationAttachments(attachments = []) {
   if (!attachments.length) return "";
   return `
     <div class="thread-attachments">
+      <span class="thread-attachment-summary">${escapeHtml(attachmentSummaryText(attachments, "附加"))}</span>
       ${attachments
-        .map(
-          (attachment, index) => `
-            <figure class="thread-attachment">
-              <img
-                src="${escapeHtml(attachment.url)}"
-                alt="${escapeHtml(attachment.name || `截图 ${index + 1}`)}"
-                loading="lazy"
-              />
-            </figure>
-          `
-        )
+        .map((attachment, index) => {
+          const label = attachmentDisplayLabel(attachment, index);
+          return `
+            <div class="thread-attachment-pill">
+              <span class="thread-attachment-pill-label">${escapeHtml(label)}</span>
+            </div>
+          `;
+        })
         .join("")}
     </div>
   `;
+}
+
+function attachmentDisplayLabel(attachment, index = 0) {
+  const name = String(attachment?.name || "").trim();
+  return name || `截图 ${index + 1}`;
+}
+
+function attachmentSummaryText(attachments = [], prefix = "附加") {
+  const count = Array.isArray(attachments) ? attachments.length : 0;
+  return `${prefix} ${count} 个附件`;
 }
 
 function conversationStatusHint(job, hasTimeline) {
