@@ -6,6 +6,21 @@ let sessionToken = localStorage.getItem("echoSession") || "";
 let currentUser = readStoredUser();
 let authEnabled = true;
 const mobileRefineTimeoutMs = 10000;
+const MODEL_OPTIONS = [
+  { value: "", label: "桌面默认" },
+  { value: "gpt-5.5", label: "GPT-5.5" },
+  { value: "gpt-5.4", label: "GPT-5.4" },
+  { value: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
+  { value: "gpt-5.3-codex", label: "GPT-5.3-Codex" },
+  { value: "gpt-5.2-codex", label: "GPT-5.2-Codex" }
+];
+const REASONING_OPTIONS = [
+  { value: "", label: "桌面默认" },
+  { value: "low", label: "低" },
+  { value: "medium", label: "中" },
+  { value: "high", label: "高" },
+  { value: "xhigh", label: "极高" }
+];
 if (tokenFromUrl) {
   window.history.replaceState({}, "", window.location.pathname);
 }
@@ -43,8 +58,9 @@ const elements = {
   showArchivedSessionsButton: document.querySelector("#showArchivedSessionsButton"),
   sidebarUserMeta: document.querySelector("#sidebarUserMeta"),
   codexProject: document.querySelector("#codexProject"),
-  heroProjectLabel: document.querySelector("#heroProjectLabel"),
-  heroProjectMeta: document.querySelector("#heroProjectMeta"),
+  codexModel: document.querySelector("#codexModel"),
+  codexReasoningEffort: document.querySelector("#codexReasoningEffort"),
+  composerProjectLabel: document.querySelector("#composerProjectLabel"),
   projectSidebarCard: document.querySelector("#projectSidebarCard"),
   projectPickerLabel: document.querySelector("#projectPickerLabel"),
   projectPickerMeta: document.querySelector("#projectPickerMeta"),
@@ -75,8 +91,12 @@ let showArchivedSessions = false;
 let sessionSearchQuery = "";
 let postprocessEnabled = localStorage.getItem("echoPostprocessEnabled") !== "false";
 let composerBusy = false;
+let codexAgentRuntime = {};
+let runtimePreferences = readStoredRuntimePreferences();
+let runtimeDirty = false;
 
 bindViewportMetrics();
+initRuntimeControls();
 elements.loginForm.addEventListener("submit", login);
 elements.logoutButton.addEventListener("click", logout);
 elements.openPairingButton.addEventListener("click", () => showPairingPanel({ focus: true }));
@@ -98,8 +118,11 @@ elements.showArchivedSessionsButton.addEventListener("click", () => setSessionAr
 elements.codexProject.addEventListener("change", () => {
   localStorage.setItem("echoCodexProject", elements.codexProject.value);
   syncProjectPicker();
+  refreshActiveSessionHeader();
   updateComposerAvailability();
 });
+elements.codexModel.addEventListener("change", handleRuntimeControlChange);
+elements.codexReasoningEffort.addEventListener("change", handleRuntimeControlChange);
 document.addEventListener("keydown", handleGlobalKeydown);
 elements.postprocessToggle.addEventListener("change", () => {
   postprocessEnabled = elements.postprocessToggle.checked;
@@ -312,6 +335,108 @@ function syncViewportMetrics() {
   if (nextHeight > 0) document.documentElement.style.setProperty("--app-height", `${nextHeight}px`);
 }
 
+function initRuntimeControls() {
+  populateRuntimeSelect(elements.codexModel, MODEL_OPTIONS);
+  populateRuntimeSelect(elements.codexReasoningEffort, REASONING_OPTIONS);
+  applyRuntimeDraft(runtimePreferences, { persist: false, dirty: false });
+  refreshRuntimeDefaultOptions();
+}
+
+function populateRuntimeSelect(select, options) {
+  select.innerHTML = "";
+  for (const option of options) {
+    const node = document.createElement("option");
+    node.value = option.value;
+    node.textContent = option.label;
+    select.append(node);
+  }
+}
+
+function handleRuntimeControlChange() {
+  runtimeDirty = true;
+  runtimePreferences = currentRuntimeDraft();
+  writeStoredRuntimePreferences(runtimePreferences);
+  refreshActiveSessionHeader();
+}
+
+function currentRuntimeDraft() {
+  return normalizeRuntimeChoice({
+    model: elements.codexModel.value,
+    reasoningEffort: elements.codexReasoningEffort.value
+  });
+}
+
+function applyRuntimeDraft(runtime = {}, options = {}) {
+  const next = normalizeRuntimeChoice(runtime);
+  ensureRuntimeOption(elements.codexModel, MODEL_OPTIONS, next.model, modelDisplayName(next.model));
+  ensureRuntimeOption(
+    elements.codexReasoningEffort,
+    REASONING_OPTIONS,
+    next.reasoningEffort,
+    reasoningDisplayName(next.reasoningEffort)
+  );
+  elements.codexModel.value = next.model;
+  elements.codexReasoningEffort.value = next.reasoningEffort;
+  runtimeDirty = Boolean(options.dirty);
+  if (options.persist !== false) {
+    runtimePreferences = next;
+    writeStoredRuntimePreferences(next);
+  }
+  refreshRuntimeDefaultOptions();
+}
+
+function refreshRuntimeDefaultOptions() {
+  const modelOption = elements.codexModel.querySelector('option[value=""]');
+  const reasoningOption = elements.codexReasoningEffort.querySelector('option[value=""]');
+  if (modelOption) {
+    modelOption.textContent = codexAgentRuntime.model
+      ? `桌面默认 · ${modelDisplayName(codexAgentRuntime.model)}`
+      : "桌面默认";
+  }
+  if (reasoningOption) {
+    reasoningOption.textContent = codexAgentRuntime.reasoningEffort
+      ? `桌面默认 · ${reasoningDisplayName(codexAgentRuntime.reasoningEffort)}`
+      : "桌面默认";
+  }
+}
+
+function ensureRuntimeOption(select, options, value, fallbackLabel) {
+  if (!value) return;
+  const known = options.some((option) => option.value === value);
+  const existing = Array.from(select.options).find((option) => option.value === value);
+  if (known || existing) return;
+  const node = document.createElement("option");
+  node.value = value;
+  node.textContent = fallbackLabel || value;
+  select.append(node);
+}
+
+function normalizeRuntimeChoice(runtime = {}) {
+  const knownModelValues = new Set(MODEL_OPTIONS.map((option) => option.value));
+  const knownReasoningValues = new Set(REASONING_OPTIONS.map((option) => option.value));
+  const model = String(runtime.model || "").trim();
+  const reasoningEffort = String(runtime.reasoningEffort || runtime.effort || "").trim().toLowerCase();
+  return {
+    model: knownModelValues.has(model) || model ? model : "",
+    reasoningEffort: knownReasoningValues.has(reasoningEffort) || reasoningEffort ? reasoningEffort : ""
+  };
+}
+
+function readStoredRuntimePreferences() {
+  return normalizeRuntimeChoice({
+    model: localStorage.getItem("echoCodexModel") || "",
+    reasoningEffort: localStorage.getItem("echoCodexReasoningEffort") || ""
+  });
+}
+
+function writeStoredRuntimePreferences(runtime = {}) {
+  const next = normalizeRuntimeChoice(runtime);
+  if (next.model) localStorage.setItem("echoCodexModel", next.model);
+  else localStorage.removeItem("echoCodexModel");
+  if (next.reasoningEffort) localStorage.setItem("echoCodexReasoningEffort", next.reasoningEffort);
+  else localStorage.removeItem("echoCodexReasoningEffort");
+}
+
 function showPairingPanel({ focus = false } = {}) {
   if (!ensureLoggedIn()) return;
   updateAuthView();
@@ -487,6 +612,8 @@ async function refreshCodex() {
     elements.codexStatusText.textContent = "Codex 未连接";
     elements.codexQueueMeta.textContent = "";
     codexWorkspaces = [];
+    codexAgentRuntime = {};
+    refreshRuntimeDefaultOptions();
     elements.codexProject.innerHTML = "";
     renderProjectPicker(false);
     updateComposerAvailability();
@@ -497,9 +624,11 @@ async function refreshCodex() {
 function renderCodexStatus(codex) {
   const workspaces = codex.workspaces || [];
   codexWorkspaces = workspaces;
+  codexAgentRuntime = normalizeRuntimeChoice(codex.runtime || {});
+  refreshRuntimeDefaultOptions();
   elements.codexStatusText.textContent = codex.agentOnline ? "本机 Codex 在线" : "等待桌面 agent";
   elements.codexQueueMeta.textContent = codex.agentOnline
-    ? `交互式 app-server · 会话 ${codex.interactive?.activeSessions || 0} · 待审批 ${codex.interactive?.pendingApprovals || 0} · 归档 ${codex.interactive?.archivedSessions || 0} · 项目 ${workspaces.length}`
+    ? `会话 ${codex.interactive?.activeSessions || 0} · 待审批 ${codex.interactive?.pendingApprovals || 0} · 归档 ${codex.interactive?.archivedSessions || 0} · 项目 ${workspaces.length}`
     : "打开桌面端后自动同步";
 
   const preferred = localStorage.getItem("echoCodexProject") || elements.codexProject.value;
@@ -574,14 +703,11 @@ async function setSessionArchiveView(archived) {
   composingNewSession = false;
   selectedCodexJobId = "";
   selectedCodexSession = null;
+  applyRuntimeDraft(runtimePreferences, { persist: false, dirty: false });
   renderEmptySessionDetail(
     archived
-      ? { title: "归档", meta: "归档会话不会出现在最近列表。", body: "选择一个归档会话可以查看详情，也可以恢复到最近列表。" }
-      : {
-          title: "新会话",
-          meta: "外面只保留当前对话，历史会话从左上角切换。",
-          body: "发送后会创建独立会话；切到已有会话时则会继续那条对话。"
-        }
+      ? { title: "归档", body: "归档会话只保留查看和恢复。" }
+      : { title: "新会话", body: "直接发送，开始新的 Codex 会话。" }
   );
   await loadCodexJobs();
 }
@@ -590,6 +716,7 @@ function startNewCodexSession() {
   selectedCodexJobId = "";
   selectedCodexSession = null;
   composingNewSession = true;
+  applyRuntimeDraft(runtimePreferences, { persist: false, dirty: false });
   if (showArchivedSessions) {
     showArchivedSessions = false;
     elements.showActiveSessionsButton.classList.add("active");
@@ -599,8 +726,7 @@ function startNewCodexSession() {
   closeSessionSidebar({ restoreFocus: false });
   renderEmptySessionDetail({
     title: "新会话",
-    meta: "外面保留当前对话，历史会话从左上角切换。",
-    body: "选择项目后发送第一条任务，新的会话会直接显示在这里。"
+    body: "选择工程、模型和推理强度后直接发送。"
   });
   for (const button of elements.codexJobs.querySelectorAll(".codex-job")) {
     button.classList.remove("active");
@@ -614,6 +740,7 @@ async function sendToCodex() {
 
   const rawPrompt = elements.codexPrompt.value.trim();
   const projectId = elements.codexProject.value;
+  const runtime = currentRuntimeDraft();
   if (!rawPrompt) {
     toast("请先填写任务");
     return;
@@ -628,7 +755,7 @@ async function sendToCodex() {
   try {
     const prompt = postprocessEnabled ? await refinePromptForCodex(rawPrompt) : rawPrompt;
     setComposerBusy(true, "发送中");
-    const data = await sendCodexPrompt({ projectId, prompt });
+    const data = await sendCodexPrompt({ projectId, prompt, runtime });
     if (showArchivedSessions) {
       showArchivedSessions = false;
       elements.showActiveSessionsButton.classList.add("active");
@@ -637,6 +764,8 @@ async function sendToCodex() {
     selectedCodexJobId = data.session.id;
     selectedCodexSession = data.session;
     composingNewSession = false;
+    runtimeDirty = false;
+    applyRuntimeDraft(selectedCodexSession.runtime || runtime, { persist: false, dirty: false });
     elements.codexPrompt.value = "";
     toast("已发送");
     await loadCodexJobs();
@@ -651,11 +780,11 @@ async function sendToCodex() {
   }
 }
 
-async function sendCodexPrompt({ projectId, prompt }) {
+async function sendCodexPrompt({ projectId, prompt, runtime }) {
   if (canContinueSelectedSession()) {
-    return apiPost(`/api/codex/sessions/${encodeURIComponent(selectedCodexJobId)}/messages`, { text: prompt });
+    return apiPost(`/api/codex/sessions/${encodeURIComponent(selectedCodexJobId)}/messages`, { text: prompt, runtime });
   }
-  return apiPost("/api/codex/sessions", { projectId, prompt });
+  return apiPost("/api/codex/sessions", { projectId, prompt, runtime });
 }
 
 function canContinueSelectedSession() {
@@ -705,6 +834,8 @@ function updateComposerAvailability() {
       : "发送";
   elements.newCodexSessionButton.disabled = composerBusy || !selectedCodexJobId;
   elements.codexProject.disabled = composerBusy;
+  elements.codexModel.disabled = composerBusy;
+  elements.codexReasoningEffort.disabled = composerBusy;
   elements.codexPrompt.disabled = composerBusy;
 }
 
@@ -718,34 +849,32 @@ function renderProjectPicker(agentOnline) {
     elements.projectPickerMeta.textContent = agentOnline
       ? "去桌面端 Codex 设置添加允许的项目。"
       : "桌面端启动后会同步可切换项目。";
-    elements.heroProjectLabel.textContent = elements.projectPickerLabel.textContent;
-    elements.heroProjectMeta.textContent = elements.projectPickerMeta.textContent;
-    elements.projectSheetStatus.textContent = "桌面端授权的目录会出现在这里。";
+    elements.composerProjectLabel.textContent = elements.projectPickerLabel.textContent;
+    elements.projectSheetStatus.textContent = "";
     renderProjectSheetList();
+    refreshActiveSessionHeader();
     return;
   }
 
   if (selectedWorkspace) {
     elements.projectPickerLabel.textContent = workspaceLabel(selectedWorkspace);
     elements.projectPickerMeta.textContent = workspaceMeta(selectedWorkspace);
-    elements.heroProjectLabel.textContent = workspaceLabel(selectedWorkspace);
-    elements.heroProjectMeta.textContent = workspaceMeta(selectedWorkspace);
+    elements.composerProjectLabel.textContent = workspaceLabel(selectedWorkspace);
   } else {
     elements.projectPickerLabel.textContent = "选择项目";
     elements.projectPickerMeta.textContent = `已同步 ${codexWorkspaces.length} 个项目。`;
-    elements.heroProjectLabel.textContent = elements.projectPickerLabel.textContent;
-    elements.heroProjectMeta.textContent = elements.projectPickerMeta.textContent;
+    elements.composerProjectLabel.textContent = elements.projectPickerLabel.textContent;
   }
 
-  elements.projectSheetStatus.textContent = `桌面端已授权 ${codexWorkspaces.length} 个项目，发送前可随时切换。`;
+  elements.projectSheetStatus.textContent = "";
   renderProjectSheetList();
+  refreshActiveSessionHeader();
 }
 
 function renderProjectSheetList() {
   elements.projectSheetList.innerHTML = "";
   if (!codexWorkspaces.length) {
-    elements.projectSheetList.innerHTML =
-      '<div class="project-sheet-empty">桌面端还没有同步可用项目。去桌面端添加工程目录后，这里会自动更新。</div>';
+    elements.projectSheetList.innerHTML = '<div class="project-sheet-empty">暂时没有可切换工程。</div>';
     return;
   }
 
@@ -800,11 +929,13 @@ function syncProjectPicker() {
   if (workspace) {
     elements.projectPickerLabel.textContent = workspaceLabel(workspace);
     elements.projectPickerMeta.textContent = workspaceMeta(workspace);
-    elements.heroProjectLabel.textContent = workspaceLabel(workspace);
-    elements.heroProjectMeta.textContent = workspaceMeta(workspace);
+    elements.composerProjectLabel.textContent = workspaceLabel(workspace);
+  } else {
+    elements.composerProjectLabel.textContent = elements.projectPickerLabel.textContent;
   }
   elements.projectSidebarCard.classList.toggle("empty", !workspace);
   renderProjectSheetList();
+  refreshActiveSessionHeader();
 }
 
 function workspaceLabel(workspace) {
@@ -839,14 +970,10 @@ async function loadCodexJobs() {
     selectedCodexSession = null;
     if (!composingNewSession) {
       selectedCodexJobId = "";
+      applyRuntimeDraft(runtimePreferences, { persist: false, dirty: false });
       renderEmptySessionDetail({
         title: showArchivedSessions ? "归档" : "新会话",
-        meta: showArchivedSessions
-          ? "归档会话会从最近列表中移走。"
-          : "外面只保留当前对话，历史会话从左上角进入。",
-        body: showArchivedSessions
-          ? "归档用于清理工作台；恢复后可以继续查看和对话。"
-          : "手机负责捕捉想法，本机 Codex 负责执行。"
+        body: showArchivedSessions ? "这里暂时没有归档会话。" : "直接发送，开始新的 Codex 会话。"
       });
     }
     return;
@@ -878,11 +1005,8 @@ async function loadCodexJobs() {
     await showCodexJob(selectedCodexJobId, { keepSelection: true });
   } else {
     selectedCodexSession = null;
-    renderEmptySessionDetail({
-      title: "新会话",
-      meta: "当前不会覆盖任何历史会话。",
-      body: "发送后会创建独立会话；历史会话仍然保留在左上角抽屉里。"
-    });
+    applyRuntimeDraft(runtimePreferences, { persist: false, dirty: false });
+    renderEmptySessionDetail({ title: "新会话", body: "直接发送，开始新的 Codex 会话。" });
   }
 }
 
@@ -900,7 +1024,8 @@ function renderSessionButton(job) {
         <span class="session-time">${escapeHtml(formatRelativeTime(sessionTime(job)))}</span>
       </div>
       <strong>${escapeHtml(jobTitle(job))}</strong>
-      <span>${escapeHtml(job.projectId)} · ${escapeHtml(jobPreview(job))}</span>
+      <span class="session-secondary">${escapeHtml(sessionProjectLabel(job.projectId))}${sessionRuntimeLabel(job.runtime) ? ` · ${escapeHtml(sessionRuntimeLabel(job.runtime))}` : ""}</span>
+      <span class="session-preview">${escapeHtml(jobPreview(job))}</span>
       ${job.pendingApprovalCount ? `<span class="approval-count">${escapeHtml(job.pendingApprovalCount)} 个待审批</span>` : ""}
     </button>
     <button class="session-archive-action" type="button" ${canArchive || archived ? "" : "disabled"}>
@@ -923,11 +1048,7 @@ async function archiveSession(sessionId, archived) {
     if (sessionId === selectedCodexJobId) {
       selectedCodexJobId = "";
       selectedCodexSession = null;
-      renderEmptySessionDetail(
-        archived
-          ? { title: "已归档", meta: "这个会话已移到归档。", body: "在左侧切到归档视图可以恢复它。" }
-          : { title: "已恢复", meta: "这个会话回到最近列表。", body: "在最近会话中选择它即可继续。" }
-      );
+      renderEmptySessionDetail(archived ? { title: "已归档", body: "这个会话已移到归档。" } : { title: "已恢复", body: "这个会话已经回到最近列表。" });
     }
     await loadCodexJobs();
   } catch (error) {
@@ -939,7 +1060,16 @@ async function archiveSession(sessionId, archived) {
 
 function matchesSessionSearch(job) {
   if (!sessionSearchQuery) return true;
-  const haystack = [jobTitle(job), job.projectId, jobPreview(job), job.status, job.finalMessage, job.lastError]
+  const haystack = [
+    jobTitle(job),
+    job.projectId,
+    sessionProjectLabel(job.projectId),
+    jobPreview(job),
+    sessionRuntimeLabel(job.runtime),
+    job.status,
+    job.finalMessage,
+    job.lastError
+  ]
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
@@ -1005,16 +1135,19 @@ async function showCodexJob(id, options = {}) {
   const data = await apiGet(`/api/codex/sessions/${encodeURIComponent(id)}`);
   const job = data.session;
   selectedCodexSession = job;
+  if (!(options.keepSelection && runtimeDirty)) {
+    applyRuntimeDraft(job.runtime || runtimePreferences, { persist: false, dirty: false });
+  }
   const errorText = humanizeCodexError(job.error || job.lastError);
   const output = jobOutput(job, errorText);
   elements.codexJobDetail.hidden = false;
   elements.runLog.hidden = false;
   elements.activeSessionTitle.textContent = jobTitle(job);
-  elements.activeSessionMeta.textContent = `${job.projectId} · ${job.archivedAt ? "已归档" : statusLabel(job.status)} · ${formatRelativeTime(sessionTime(job))}`;
   elements.codexRunSummary.innerHTML = `
     <div class="run-summary-head">
       <span class="status-pill ${escapeHtml(job.status)}">${escapeHtml(statusLabel(job.status))}</span>
-      <strong>${escapeHtml(job.projectId)}</strong>
+      <strong>${escapeHtml(sessionProjectLabel(job.projectId))}</strong>
+      ${sessionRuntimeLabel(job.runtime) ? `<span class="runtime-pill">${escapeHtml(sessionRuntimeLabel(job.runtime))}</span>` : ""}
       <span>${escapeHtml(formatRelativeTime(sessionTime(job)))}</span>
     </div>
     <div class="run-block-title">任务</div>
@@ -1031,13 +1164,13 @@ async function showCodexJob(id, options = {}) {
     ...(job.events || []).slice(-80).map((event) => `${event.at || ""} ${event.type || ""}\n${event.text || ""}`)
   ].filter(Boolean);
   elements.codexLog.textContent = lines.join("\n\n");
+  refreshActiveSessionHeader();
   updateComposerAvailability();
 }
 
-function renderEmptySessionDetail({ title, meta, body }) {
+function renderEmptySessionDetail({ title, body }) {
   elements.codexJobDetail.hidden = false;
   elements.activeSessionTitle.textContent = title;
-  elements.activeSessionMeta.textContent = meta;
   elements.codexApprovals.hidden = true;
   elements.codexApprovals.innerHTML = "";
   elements.runLog.hidden = true;
@@ -1048,6 +1181,7 @@ function renderEmptySessionDetail({ title, meta, body }) {
       <p>${escapeHtml(body)}</p>
     </div>
   `;
+  refreshActiveSessionHeader();
 }
 
 function renderApprovals(session) {
@@ -1150,6 +1284,19 @@ function sessionTime(session) {
   return session.updatedAt || session.completedAt || session.startedAt || session.createdAt;
 }
 
+function refreshActiveSessionHeader() {
+  const session = composingNewSession ? null : selectedCodexSession;
+  const runtime = runtimeDirty ? currentRuntimeDraft() : session?.runtime || runtimePreferences;
+  const parts = [sessionProjectLabel(session?.projectId || elements.codexProject.value)];
+  const runtimeLabel = sessionRuntimeLabel(runtime);
+  if (runtimeLabel) parts.push(runtimeLabel);
+  if (session) {
+    parts.push(session.archivedAt ? "已归档" : statusLabel(session.status));
+    parts.push(formatRelativeTime(sessionTime(session)));
+  }
+  elements.activeSessionMeta.textContent = parts.filter(Boolean).join(" · ") || "选择工程、模型和推理强度后直接发送。";
+}
+
 function formatRelativeTime(value) {
   if (!value) return "刚刚";
   const date = new Date(value);
@@ -1161,6 +1308,30 @@ function formatRelativeTime(value) {
   const hours = Math.round(minutes / 60);
   if (hours < 24) return `${hours} 小时前`;
   return date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
+}
+
+function sessionProjectLabel(projectId) {
+  const normalizedProjectId = String(projectId || "").trim();
+  if (!normalizedProjectId) return "未选择工程";
+  return workspaceLabel(codexWorkspaces.find((workspace) => workspace.id === normalizedProjectId) || { id: normalizedProjectId });
+}
+
+function sessionRuntimeLabel(runtime = {}) {
+  const normalized = normalizeRuntimeChoice(runtime);
+  const parts = [];
+  if (normalized.model) parts.push(modelDisplayName(normalized.model));
+  if (normalized.reasoningEffort) parts.push(`推理 ${reasoningDisplayName(normalized.reasoningEffort)}`);
+  return parts.join(" · ");
+}
+
+function modelDisplayName(value) {
+  const normalized = String(value || "").trim();
+  return MODEL_OPTIONS.find((option) => option.value === normalized)?.label || normalized;
+}
+
+function reasoningDisplayName(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return REASONING_OPTIONS.find((option) => option.value === normalized)?.label || normalized;
 }
 
 function humanizeCodexError(error) {

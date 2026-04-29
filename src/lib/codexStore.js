@@ -98,7 +98,8 @@ const summarizeSessionColumns = `
   final_message AS finalMessage,
   leased_by AS leasedBy,
   lease_expires_at AS leaseExpiresAt,
-  archived_at AS archivedAt
+  archived_at AS archivedAt,
+  runtime_json AS runtimeJson
 `;
 
 const summarizeSessionCommandColumns = `
@@ -387,26 +388,28 @@ export function completeJob(jobId, result = {}, options = {}) {
   return true;
 }
 
-export function createSession({ projectId, prompt }) {
+export function createSession({ projectId, prompt, runtime }) {
   const now = nowIso();
   const sessionId = crypto.randomUUID();
   const commandId = crypto.randomUUID();
   const normalizedPrompt = String(prompt || "").trim();
   const normalizedProjectId = String(projectId || "").trim();
+  const normalizedRuntime = normalizeRuntime(runtime);
   const title = normalizedPrompt.split(/\s+/).join(" ").slice(0, 120) || "Codex session";
 
   const create = db.transaction(() => {
     db.prepare(`
       INSERT INTO codex_sessions (
-        id, project_id, title, status, created_at, updated_at
+        id, project_id, title, status, created_at, updated_at, runtime_json
       ) VALUES (
-        @id, @projectId, @title, 'queued', @now, @now
+        @id, @projectId, @title, 'queued', @now, @now, @runtimeJson
       )
     `).run({
       id: sessionId,
       projectId: normalizedProjectId,
       title,
-      now
+      now,
+      runtimeJson: JSON.stringify(normalizedRuntime)
     });
 
     insertSessionCommand.run({
@@ -492,7 +495,7 @@ export function archiveSession(id, input = {}) {
   return getSessionSummary(id);
 }
 
-export function enqueueSessionMessage(sessionId, text) {
+export function enqueueSessionMessage(sessionId, input = {}) {
   const session = getSessionSummary(sessionId);
   if (!session) return notFound("Codex session not found.");
   if (session.archivedAt) return conflict("Restore this Codex session before continuing it.");
@@ -502,7 +505,8 @@ export function enqueueSessionMessage(sessionId, text) {
 
   const now = nowIso();
   const commandId = crypto.randomUUID();
-  const message = String(text || "").trim();
+  const message = String(input.text || input.prompt || "").trim();
+  const runtime = normalizeRuntime(Object.keys(input.runtime || {}).length > 0 ? input.runtime : session.runtime);
   if (!message) return badRequest("Codex message is required.");
 
   const enqueue = db.transaction(() => {
@@ -517,9 +521,10 @@ export function enqueueSessionMessage(sessionId, text) {
     db.prepare(`
       UPDATE codex_sessions
       SET updated_at = @now,
+          runtime_json = @runtimeJson,
           status = CASE WHEN status = 'queued' THEN 'queued' ELSE status END
       WHERE id = @sessionId
-    `).run({ sessionId, now });
+    `).run({ sessionId, now, runtimeJson: JSON.stringify(runtime) });
 
     insertSessionEvent.run(
       normalizeSessionEvent(sessionId, {
@@ -560,7 +565,8 @@ export function acquireNextSessionCommand({ agentId, workspaces = [] } = {}) {
         c.error,
         s.project_id AS projectId,
         s.app_thread_id AS appThreadId,
-        s.active_turn_id AS activeTurnId
+        s.active_turn_id AS activeTurnId,
+        s.runtime_json AS runtimeJson
       FROM codex_session_commands c
       JOIN codex_sessions s ON s.id = c.session_id
       WHERE c.status = 'queued'
@@ -895,7 +901,8 @@ function migrate() {
       last_error TEXT NOT NULL DEFAULT '',
       final_message TEXT NOT NULL DEFAULT '',
       leased_by TEXT,
-      lease_expires_at TEXT
+      lease_expires_at TEXT,
+      runtime_json TEXT NOT NULL DEFAULT '{}'
     );
 
     CREATE INDEX IF NOT EXISTS idx_codex_sessions_status_updated
@@ -960,6 +967,7 @@ function migrate() {
   `);
 
   ensureColumn("codex_sessions", "archived_at", "TEXT");
+  ensureColumn("codex_sessions", "runtime_json", "TEXT NOT NULL DEFAULT '{}'");
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_codex_sessions_archived_updated
       ON codex_sessions(archived_at, updated_at);
@@ -1139,6 +1147,7 @@ function summarizeSession(row) {
 
   return {
     ...row,
+    runtime: parseJson(row.runtimeJson, {}),
     eventCount,
     pendingCommandCount,
     pendingApprovalCount,
@@ -1254,6 +1263,7 @@ function buildAgentSessionCommand(command) {
     projectId: command.projectId,
     appThreadId: command.appThreadId || "",
     activeTurnId: command.activeTurnId || "",
+    runtime: parseJson(command.runtimeJson, {}),
     payload: parsed.payload,
     createdAt: parsed.createdAt
   };
@@ -1370,6 +1380,7 @@ function normalizeRuntime(runtime = {}) {
         sandbox: String(runtime.sandbox || "").trim(),
         approvalPolicy: String(runtime.approvalPolicy || "").trim(),
         model: String(runtime.model || "").trim(),
+        reasoningEffort: String(runtime.reasoningEffort || runtime.effort || "").trim().toLowerCase(),
         profile: String(runtime.profile || "").trim(),
         timeoutMs: Number(runtime.timeoutMs || 0) || null
       }

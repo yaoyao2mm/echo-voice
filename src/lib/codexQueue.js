@@ -40,13 +40,16 @@ export function createCodexSession(input) {
     throw error;
   }
 
-  const session = createStoredSession({ projectId, prompt });
+  const session = createStoredSession({ projectId, prompt, runtime: input.runtime || {} });
   events.emit("codex-session-command");
   return session;
 }
 
 export function enqueueCodexSessionMessage(id, input = {}) {
-  const session = enqueueStoredSessionMessage(id, input.text || input.prompt || "");
+  const session = enqueueStoredSessionMessage(id, {
+    text: input.text || input.prompt || "",
+    runtime: input.runtime || {}
+  });
   events.emit("codex-session-command");
   return session;
 }

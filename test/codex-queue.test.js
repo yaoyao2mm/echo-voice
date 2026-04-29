@@ -64,13 +64,21 @@ test("interactive Codex sessions lease commands and keep thread state", async ()
     workspaces: [{ id: "demo", path: process.cwd() }]
   };
 
-  const created = queue.createCodexSession({ projectId: "demo", prompt: "先看一下这个项目" });
+  const created = queue.createCodexSession({
+    projectId: "demo",
+    prompt: "先看一下这个项目",
+    runtime: { model: "gpt-5.4", reasoningEffort: "high" }
+  });
   assert.equal(created.status, "queued");
+  assert.equal(created.runtime.model, "gpt-5.4");
+  assert.equal(created.runtime.reasoningEffort, "high");
 
   const startCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
   assert.equal(startCommand.sessionId, created.id);
   assert.equal(startCommand.type, "start");
   assert.equal(startCommand.payload.prompt, "先看一下这个项目");
+  assert.equal(startCommand.runtime.model, "gpt-5.4");
+  assert.equal(startCommand.runtime.reasoningEffort, "high");
 
   assert.equal(
     queue.appendCodexSessionEvents(
@@ -146,13 +154,20 @@ test("interactive Codex sessions lease commands and keep thread state", async ()
   assert.equal(queue.getCodexSession(created.id).status, "active");
   assert.equal(queue.getCodexSession(created.id).activeTurnId, null);
 
-  const afterMessage = queue.enqueueCodexSessionMessage(created.id, { text: "继续修复 UI" });
+  const afterMessage = queue.enqueueCodexSessionMessage(created.id, {
+    text: "继续修复 UI",
+    runtime: { model: "gpt-5.3-codex", reasoningEffort: "xhigh" }
+  });
   assert.equal(afterMessage.pendingCommandCount, 1);
+  assert.equal(afterMessage.runtime.model, "gpt-5.3-codex");
+  assert.equal(afterMessage.runtime.reasoningEffort, "xhigh");
 
   const messageCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
   assert.equal(messageCommand.type, "message");
   assert.equal(messageCommand.appThreadId, "thr_1");
   assert.equal(messageCommand.payload.text, "继续修复 UI");
+  assert.equal(messageCommand.runtime.model, "gpt-5.3-codex");
+  assert.equal(messageCommand.runtime.reasoningEffort, "xhigh");
 });
 
 test("interactive Codex approvals wait for mobile decisions", async () => {

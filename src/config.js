@@ -75,6 +75,7 @@ export const config = {
     approvalPolicy: process.env.ECHO_CODEX_APPROVAL_POLICY || "on-request",
     approvalTimeoutMs: Number(process.env.ECHO_CODEX_APPROVAL_TIMEOUT_MS || 5 * 60 * 1000),
     model: process.env.ECHO_CODEX_MODEL || "",
+    reasoningEffort: process.env.ECHO_CODEX_REASONING_EFFORT || process.env.ECHO_CODEX_MODEL_REASONING_EFFORT || "",
     profile: process.env.ECHO_CODEX_PROFILE || "",
     timeoutMs: Number(process.env.ECHO_CODEX_TIMEOUT_MS || 30 * 60 * 1000),
     leaseMs: Number(process.env.ECHO_CODEX_LEASE_MS || 10 * 60 * 1000),

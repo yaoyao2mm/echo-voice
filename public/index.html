@@ -10,8 +10,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Echo Codex</title>
-    <link rel="manifest" href="/manifest.webmanifest?v=20" />
-    <link rel="stylesheet" href="/styles.css?v=20" />
+    <link rel="manifest" href="/manifest.webmanifest?v=21" />
+    <link rel="stylesheet" href="/styles.css?v=21" />
   </head>
   <body>
     <main class="shell">
@@ -33,9 +33,6 @@
             <h1>Echo Codex</h1>
             <p id="statusText">连接中</p>
           </div>
-        </div>
-        <div class="topbar-actions" aria-hidden="true">
-          <span class="topbar-mark">Local Codex Workbench</span>
         </div>
       </header>
 
@@ -78,22 +75,14 @@
         <button id="sessionBackdrop" class="session-backdrop" type="button" aria-label="关闭会话列表" hidden></button>
         <aside id="codexSessionSidebar" class="session-sidebar" aria-label="Codex 会话">
           <div class="sidebar-head">
-            <div>
-              <span class="section-kicker">Echo Workbench</span>
-              <strong>一个侧栏管全部</strong>
-              <p>会话、工程、用户中心和设置统一放在这里。</p>
-            </div>
+            <strong>Workbench</strong>
             <div class="sidebar-head-actions">
               <button id="newCodexSessionButton" class="secondary compact-action" type="button">新建</button>
             </div>
           </div>
           <section class="sidebar-panel sidebar-panel-conversations">
             <div class="sidebar-panel-head">
-              <div>
-                <span class="section-kicker">Conversations</span>
-                <strong>最近会话</strong>
-              </div>
-              <span class="sidebar-panel-meta">当前对话外露，历史都在这里</span>
+              <strong>会话</strong>
             </div>
             <div class="sidebar-tools">
               <input id="sessionSearch" type="search" autocomplete="off" placeholder="搜索会话" />
@@ -111,28 +100,20 @@
 
           <section class="sidebar-panel sidebar-panel-projects">
             <div class="sidebar-panel-head">
-              <div>
-                <span class="section-kicker">Projects</span>
-                <strong>切换工程</strong>
-              </div>
-              <span class="sidebar-panel-meta">桌面端授权目录</span>
+              <strong>工程</strong>
             </div>
             <div id="projectSidebarCard" class="project-sidebar-card">
               <strong id="projectPickerLabel" class="project-picker-label">等待桌面 agent</strong>
               <span id="projectPickerMeta" class="project-picker-meta">桌面端启动后会同步可切换项目。</span>
             </div>
-            <p id="projectSheetStatus" class="sidebar-panel-note">桌面端授权的目录会出现在这里。</p>
+            <p id="projectSheetStatus" class="sidebar-panel-note"></p>
             <div id="projectSheetList" class="project-sheet-list sidebar-project-list" role="listbox" aria-label="项目列表"></div>
             <select id="codexProject" class="sr-only" tabindex="-1" aria-hidden="true"></select>
           </section>
 
           <section class="sidebar-panel sidebar-panel-settings">
             <div class="sidebar-panel-head">
-              <div>
-                <span class="section-kicker">Settings</span>
-                <strong>工作台设置</strong>
-              </div>
-              <span class="sidebar-panel-meta">影响发送行为</span>
+              <strong>设置</strong>
             </div>
             <label class="postprocess-toggle sidebar-setting-card" for="postprocessToggle">
               <input id="postprocessToggle" type="checkbox" role="switch" />
@@ -146,11 +127,7 @@
 
           <section class="sidebar-panel sidebar-panel-user">
             <div class="sidebar-panel-head">
-              <div>
-                <span class="section-kicker">Account</span>
-                <strong>用户中心</strong>
-              </div>
-              <span class="sidebar-panel-meta">账号 / 配对 / 刷新</span>
+              <strong>用户中心</strong>
             </div>
             <div class="sidebar-user-card">
               <div class="sidebar-user-identity">
@@ -167,19 +144,21 @@
         </aside>
 
         <section class="codex-main" aria-label="Codex 当前会话">
-          <section class="workbench-hero">
-            <div class="workbench-hero-copy">
-              <span class="section-kicker">Current Conversation</span>
+          <section class="session-toolbar">
+            <div class="session-toolbar-copy">
               <strong id="activeSessionTitle">新会话</strong>
-              <p id="activeSessionMeta" class="codex-runtime">当前只显示一条对话，历史会话从左上角进入。</p>
+              <p id="activeSessionMeta" class="codex-runtime">选择工程、模型和推理强度后直接发送。</p>
             </div>
-            <div class="workbench-hero-side">
-              <div class="hero-project-card">
-                <span class="hero-project-kicker">当前工程</span>
-                <strong id="heroProjectLabel">等待桌面 agent</strong>
-                <span id="heroProjectMeta">桌面端启动后会同步可切换项目。</span>
-              </div>
-              <button id="refreshCodex" class="icon-button hero-refresh-button" type="button" title="刷新 Codex" aria-label="刷新 Codex">
+            <div class="session-toolbar-actions">
+              <label class="toolbar-select" for="codexModel">
+                <span>模型</span>
+                <select id="codexModel" aria-label="选择模型"></select>
+              </label>
+              <label class="toolbar-select" for="codexReasoningEffort">
+                <span>推理</span>
+                <select id="codexReasoningEffort" aria-label="选择推理强度"></select>
+              </label>
+              <button id="refreshCodex" class="icon-button session-refresh-button" type="button" title="刷新 Codex" aria-label="刷新 Codex">
                 ↻
               </button>
             </div>
@@ -195,10 +174,12 @@
           </section>
 
           <section class="composer">
-            <label class="field-label" for="codexPrompt">任务</label>
+            <div class="composer-context">
+              <span class="composer-context-kicker">当前工程</span>
+              <strong id="composerProjectLabel">等待桌面 agent</strong>
+            </div>
             <textarea id="codexPrompt" rows="7" placeholder="说一个灵感、bug 或要交给 Codex 的任务。"></textarea>
             <div class="composer-footer">
-              <p class="composer-footnote">历史会话在侧边栏里切换；这里始终只服务当前这条对话。</p>
               <button id="sendCodexButton" class="codex-submit" type="button">发送</button>
             </div>
           </section>
@@ -206,6 +187,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=20" type="module"></script>
+    <script src="/app.js?v=21" type="module"></script>
   </body>
 </html>

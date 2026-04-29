@@ -25,6 +25,7 @@ if (config.codex.enabled) {
   const runtime = publicCodexRuntime();
   console.log(`  command: ${runtime.command}`);
   console.log(`  model: ${runtime.model || "Codex default"}`);
+  console.log(`  reasoning: ${runtime.reasoningEffort || "Codex default"}`);
   console.log(`  sandbox: ${runtime.sandbox}`);
   for (const workspace of publicWorkspaces()) {
     console.log(`  ${workspace.id}: ${workspace.path}`);

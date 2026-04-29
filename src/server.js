@@ -212,7 +212,8 @@ app.post("/api/codex/sessions", (req, res) => {
 
     const session = createCodexSession({
       projectId: req.body.projectId,
-      prompt: req.body.prompt
+      prompt: req.body.prompt,
+      runtime: req.body.runtime || {}
     });
     res.json({ session });
   } catch (error) {
@@ -237,7 +238,8 @@ app.post("/api/codex/sessions/:id/messages", (req, res) => {
     }
 
     const session = enqueueCodexSessionMessage(req.params.id, {
-      text: req.body.text || req.body.prompt
+      text: req.body.text || req.body.prompt,
+      runtime: req.body.runtime || {}
     });
     res.json({ session });
   } catch (error) {

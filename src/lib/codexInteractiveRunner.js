@@ -32,11 +32,12 @@ export class CodexInteractiveRuntime {
   }
 
   async #startSession(command, workspace) {
-    const threadResult = await this.client.request("thread/start", this.#threadConfig(workspace), 120000);
+    const runtime = this.#runtimeFor(command);
+    const threadResult = await this.client.request("thread/start", this.#threadConfig(workspace, runtime), 120000);
     const appThreadId = threadResult?.thread?.id;
     if (!appThreadId) throw new Error("Codex app-server did not return a thread id.");
 
-    this.#rememberSession(command.sessionId, appThreadId, workspace.id);
+    this.#rememberSession(command.sessionId, appThreadId, workspace.id, runtime);
     await this.#emit(command.sessionId, [
       {
         type: "thread.started",
@@ -56,13 +57,15 @@ export class CodexInteractiveRuntime {
       sessionId: command.sessionId,
       threadId: appThreadId,
       text: prompt,
-      workspace
+      workspace,
+      runtime
     });
     return { ok: true, appThreadId, activeTurnId: turn.id, sessionStatus: "running" };
   }
 
   async #sendMessage(command, workspace) {
-    const appThreadId = await this.#ensureThread(command, workspace);
+    const runtime = this.#runtimeFor(command);
+    const appThreadId = await this.#ensureThread(command, workspace, runtime);
     const text = String(command.payload?.text || "").trim();
     if (!text) throw new Error("Codex session message is empty.");
 
@@ -70,7 +73,8 @@ export class CodexInteractiveRuntime {
       sessionId: command.sessionId,
       threadId: appThreadId,
       text,
-      workspace
+      workspace,
+      runtime
     });
     return { ok: true, appThreadId, activeTurnId: turn.id, sessionStatus: "running" };
   }
@@ -86,7 +90,7 @@ export class CodexInteractiveRuntime {
     return { ok: true, appThreadId, sessionStatus: "active" };
   }
 
-  async #startOrSteerTurn({ sessionId, threadId, text, workspace }) {
+  async #startOrSteerTurn({ sessionId, threadId, text, workspace, runtime }) {
     const input = [buildUserTextInput(text)];
     const activeTurnId = this.activeTurns.get(threadId);
     if (activeTurnId) {
@@ -118,8 +122,9 @@ export class CodexInteractiveRuntime {
         threadId,
         input,
         cwd: workspace.path,
-        approvalPolicy: config.codex.approvalPolicy,
-        model: config.codex.model || null
+        approvalPolicy: runtime.approvalPolicy,
+        model: runtime.model,
+        effort: runtime.reasoningEffort
       },
       60000
     );
@@ -129,14 +134,14 @@ export class CodexInteractiveRuntime {
     return { id: turnId };
   }
 
-  async #ensureThread(command, workspace) {
+  async #ensureThread(command, workspace, runtime) {
     if (command.appThreadId) {
       if (!this.threadToSession.has(command.appThreadId)) {
         const resumeResult = await this.client.request(
           "thread/resume",
           {
             threadId: command.appThreadId,
-            ...this.#resumeConfig(workspace)
+            ...this.#resumeConfig(workspace, runtime)
           },
           120000
         );
@@ -150,7 +155,7 @@ export class CodexInteractiveRuntime {
           }
         ]);
       }
-      this.#rememberSession(command.sessionId, command.appThreadId, workspace.id);
+      this.#rememberSession(command.sessionId, command.appThreadId, workspace.id, runtime);
       return command.appThreadId;
     }
 
@@ -180,26 +185,26 @@ export class CodexInteractiveRuntime {
     await this.client.start();
   }
 
-  #threadConfig(workspace) {
+  #threadConfig(workspace, runtime) {
     return {
       cwd: workspace.path,
-      approvalPolicy: config.codex.approvalPolicy,
+      approvalPolicy: runtime.approvalPolicy,
       approvalsReviewer: "user",
-      sandbox: normalizeSandboxMode(config.codex.sandbox),
+      sandbox: normalizeSandboxMode(runtime.sandbox),
       serviceName: "echo-codex",
-      model: config.codex.model || null,
+      model: runtime.model,
       experimentalRawEvents: false,
       persistExtendedHistory: false
     };
   }
 
-  #resumeConfig(workspace) {
+  #resumeConfig(workspace, runtime) {
     return {
       cwd: workspace.path,
-      approvalPolicy: config.codex.approvalPolicy,
+      approvalPolicy: runtime.approvalPolicy,
       approvalsReviewer: "user",
-      sandbox: normalizeSandboxMode(config.codex.sandbox),
-      model: config.codex.model || null,
+      sandbox: normalizeSandboxMode(runtime.sandbox),
+      model: runtime.model,
       persistExtendedHistory: false
     };
   }
@@ -213,13 +218,25 @@ export class CodexInteractiveRuntime {
   }
 
   #rememberCommand(command) {
-    if (command.appThreadId) this.#rememberSession(command.sessionId, command.appThreadId, command.projectId);
+    if (command.appThreadId) this.#rememberSession(command.sessionId, command.appThreadId, command.projectId, this.#runtimeFor(command));
     if (command.appThreadId && command.activeTurnId) this.activeTurns.set(command.appThreadId, command.activeTurnId);
   }
 
-  #rememberSession(sessionId, appThreadId, projectId) {
-    this.sessions.set(sessionId, { appThreadId, projectId });
+  #rememberSession(sessionId, appThreadId, projectId, runtime) {
+    this.sessions.set(sessionId, { appThreadId, projectId, runtime });
     this.threadToSession.set(appThreadId, sessionId);
+  }
+
+  #runtimeFor(command = {}) {
+    const remembered = this.sessions.get(command.sessionId)?.runtime || {};
+    const runtime = command.runtime && typeof command.runtime === "object" ? command.runtime : remembered;
+    return {
+      approvalPolicy: String(runtime.approvalPolicy || config.codex.approvalPolicy || "on-request").trim() || "on-request",
+      sandbox: String(runtime.sandbox || config.codex.sandbox || "workspace-write").trim() || "workspace-write",
+      model: String(runtime.model || config.codex.model || "").trim() || null,
+      reasoningEffort:
+        String(runtime.reasoningEffort || runtime.effort || config.codex.reasoningEffort || "").trim().toLowerCase() || null
+    };
   }
 
   #handleNotification(message) {

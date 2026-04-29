@@ -18,6 +18,7 @@ export function publicCodexRuntime() {
     approvalPolicy: config.codex.approvalPolicy,
     approvalTimeoutMs: config.codex.approvalTimeoutMs,
     model: config.codex.model,
+    reasoningEffort: config.codex.reasoningEffort,
     profile: config.codex.profile,
     timeoutMs: config.codex.timeoutMs
   };
