@@ -10,8 +10,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Echo Codex</title>
-    <link rel="manifest" href="/manifest.webmanifest?v=23" />
-    <link rel="stylesheet" href="/styles.css?v=23" />
+    <link rel="manifest" href="/manifest.webmanifest?v=24" />
+    <link rel="stylesheet" href="/styles.css?v=24" />
   </head>
   <body>
     <main class="shell">
@@ -159,27 +159,29 @@
               <textarea id="codexPrompt" rows="7" placeholder="给 Codex 发消息，继续当前话题，或者开启新话题。"></textarea>
               <div class="composer-dock">
                 <div class="composer-toolbar" aria-label="当前会话配置">
-                  <div class="composer-chip composer-chip-project">
-                    <span class="composer-chip-label">工程</span>
+                  <div class="composer-inline-control composer-inline-project">
+                    <span class="composer-inline-kicker">工程</span>
                     <strong id="composerProjectLabel">等待桌面 agent</strong>
                   </div>
-                  <label class="composer-chip composer-chip-select" for="codexModel">
-                    <span class="composer-chip-label">模型</span>
+                  <label class="composer-inline-control composer-inline-select" for="codexModel">
+                    <span class="composer-inline-kicker">模型</span>
                     <select id="codexModel" aria-label="选择模型"></select>
                   </label>
-                  <label class="composer-chip composer-chip-select" for="codexReasoningEffort">
-                    <span class="composer-chip-label">推理</span>
+                  <label class="composer-inline-control composer-inline-select" for="codexReasoningEffort">
+                    <span class="composer-inline-kicker">推理</span>
                     <select id="codexReasoningEffort" aria-label="选择推理强度"></select>
                   </label>
-                  <label class="composer-chip composer-chip-toggle postprocess-toggle" for="postprocessToggle">
+                  <label class="composer-inline-control composer-inline-toggle postprocess-toggle" for="postprocessToggle">
                     <input id="postprocessToggle" type="checkbox" role="switch" />
-                    <span class="composer-chip-label">输入</span>
-                    <span id="postprocessLabel" class="composer-chip-value">后处理</span>
+                    <span class="composer-inline-kicker">输入</span>
+                    <span id="postprocessLabel" class="composer-inline-value">后处理</span>
                   </label>
                 </div>
                 <div class="composer-actions">
                   <span class="composer-actions-meta" id="composerActionsMeta">当前话题会自动保留，稍后可以继续。</span>
-                  <button id="sendCodexButton" class="codex-submit" type="button">发送</button>
+                  <button id="sendCodexButton" class="codex-submit" type="button" aria-label="发送">
+                    ↑
+                  </button>
                 </div>
               </div>
             </div>
@@ -188,6 +190,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=23" type="module"></script>
+    <script src="/app.js?v=24" type="module"></script>
   </body>
 </html>

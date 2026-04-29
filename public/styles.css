@@ -3010,32 +3010,29 @@ body {
 
 .composer-dock {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   border-top: 1px solid rgba(126, 106, 84, 0.08);
-  padding: 12px;
+  background: linear-gradient(180deg, rgba(246, 241, 233, 0.66), rgba(251, 249, 245, 0.92));
+  padding: 10px 14px 12px;
 }
 
 .composer-toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px 14px;
   align-items: center;
 }
 
-.composer-chip {
+.composer-inline-control {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-height: 36px;
+  min-height: 28px;
   min-width: 0;
-  max-width: 100%;
-  border: 1px solid rgba(126, 106, 84, 0.12);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.76);
-  padding: 0 12px;
+  color: var(--ink);
 }
 
-.composer-chip-label {
+.composer-inline-kicker {
   flex: 0 0 auto;
   color: var(--muted-2);
   font-size: 10px;
@@ -3044,8 +3041,8 @@ body {
   text-transform: uppercase;
 }
 
-.composer-chip-value,
-.composer-chip strong {
+.composer-inline-value,
+.composer-inline-control strong {
   min-width: 0;
   font-size: 13px;
   font-weight: 700;
@@ -3055,32 +3052,48 @@ body {
   white-space: nowrap;
 }
 
-.composer-chip-project {
+.composer-inline-project {
   flex: 1 1 220px;
 }
 
-.composer-chip-select,
-.composer-chip-toggle {
+.composer-inline-project strong {
+  display: inline-block;
+  max-width: 100%;
+}
+
+.composer-inline-select,
+.composer-inline-toggle {
   flex: 0 1 auto;
 }
 
-.composer-chip-select select {
-  min-height: 32px;
+.composer-inline-select select {
+  min-height: 28px;
   border: 0;
   background: transparent;
   color: var(--ink);
   box-shadow: none;
-  padding: 0 18px 0 0;
+  padding: 0 16px 0 0;
   font-size: 13px;
   font-weight: 700;
+  margin: 0;
 }
 
-.composer-chip-select select:focus {
+.composer-inline-select select:focus {
   box-shadow: none;
 }
 
 .postprocess-toggle {
   cursor: pointer;
+}
+
+.composer-toolbar .postprocess-toggle {
+  min-height: 28px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+  font-weight: inherit;
 }
 
 .postprocess-toggle input {
@@ -3092,10 +3105,10 @@ body {
 }
 
 .postprocess-toggle.off {
-  background: rgba(255, 255, 255, 0.5);
+  opacity: 0.72;
 }
 
-.postprocess-toggle.off .composer-chip-value {
+.postprocess-toggle.off .composer-inline-value {
   color: var(--muted);
 }
 
@@ -3103,10 +3116,12 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
+  padding-top: 2px;
 }
 
 .composer-actions-meta {
+  flex: 1 1 auto;
   min-width: 0;
   color: var(--muted-2);
   font-size: 11px;
@@ -3114,11 +3129,16 @@ body {
 }
 
 .codex-submit {
-  width: auto;
-  min-width: 86px;
-  min-height: 38px;
-  border-radius: 999px;
-  padding: 0 16px;
+  width: 40px;
+  min-width: 40px;
+  min-height: 40px;
+  border-radius: 14px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 760;
 }
 
 @media (max-width: 760px) {
@@ -3136,7 +3156,7 @@ body {
     border-radius: 22px;
   }
 
-  .composer-chip-project {
+  .composer-inline-project {
     flex-basis: 100%;
   }
 }
@@ -3152,25 +3172,23 @@ body {
   }
 
   .composer-dock {
-    padding: 10px;
+    padding: 9px 12px 11px;
   }
 
   .composer-toolbar {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 12px;
   }
 
-  .composer-chip {
+  .composer-inline-control {
     min-width: 0;
-    padding: 0 10px;
   }
 
-  .composer-chip-project {
-    grid-column: 1 / -1;
+  .composer-inline-project {
+    flex-basis: 100%;
   }
 
-  .composer-chip-select select {
-    width: 100%;
+  .composer-inline-select select {
+    max-width: 104px;
   }
 
   .composer-actions-meta {
@@ -3178,7 +3196,8 @@ body {
   }
 
   .codex-submit {
-    min-width: 74px;
-    padding: 0 14px;
+    width: 38px;
+    min-width: 38px;
+    min-height: 38px;
   }
 }
