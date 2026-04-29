@@ -26,6 +26,7 @@ if (tokenFromUrl) {
 }
 
 const elements = {
+  topbar: document.querySelector(".topbar"),
   statusText: document.querySelector("#statusText"),
   userBadge: document.querySelector("#userBadge"),
   logoutButton: document.querySelector("#logoutButton"),
@@ -95,8 +96,11 @@ let composerBusy = false;
 let codexAgentRuntime = {};
 let runtimePreferences = readStoredRuntimePreferences();
 let runtimeDirty = false;
+let lastTrackedScrollY = 0;
+let topbarCollapsed = false;
 
 bindViewportMetrics();
+bindTopbarScrollState();
 initRuntimeControls();
 elements.loginForm.addEventListener("submit", login);
 elements.logoutButton.addEventListener("click", logout);
@@ -334,6 +338,56 @@ function syncViewportMetrics() {
   const viewport = window.visualViewport;
   const nextHeight = Math.round(viewport?.height || window.innerHeight || 0);
   if (nextHeight > 0) document.documentElement.style.setProperty("--app-height", `${nextHeight}px`);
+  if (elements.topbar) {
+    document.documentElement.style.setProperty("--topbar-height", `${Math.round(elements.topbar.offsetHeight || 0)}px`);
+  }
+}
+
+function bindTopbarScrollState() {
+  syncTopbarVisibility({ forceVisible: true });
+  window.addEventListener(
+    "scroll",
+    () => {
+      syncTopbarVisibility();
+    },
+    { passive: true }
+  );
+  elements.codexRunSummary?.addEventListener(
+    "scroll",
+    () => {
+      syncTopbarVisibility();
+    },
+    { passive: true }
+  );
+}
+
+function syncTopbarVisibility(options = {}) {
+  const currentY = currentScrollTop();
+  if (options.forceVisible || currentY <= 8 || elements.codexView.classList.contains("sessions-open")) {
+    lastTrackedScrollY = currentY;
+    setTopbarCollapsed(false);
+    return;
+  }
+
+  const delta = currentY - lastTrackedScrollY;
+  if (delta >= 12) {
+    setTopbarCollapsed(true);
+  } else if (delta <= -8) {
+    setTopbarCollapsed(false);
+  }
+  lastTrackedScrollY = currentY;
+}
+
+function currentScrollTop() {
+  const threadScrollTop = elements.codexRunSummary?.scrollTop || 0;
+  if (threadScrollTop > 0) return threadScrollTop;
+  return Math.max(window.scrollY || 0, 0);
+}
+
+function setTopbarCollapsed(collapsed) {
+  if (topbarCollapsed === collapsed) return;
+  topbarCollapsed = collapsed;
+  document.body.classList.toggle("topbar-collapsed", collapsed);
 }
 
 function initRuntimeControls() {
@@ -659,6 +713,7 @@ function renderCodexStatus(codex) {
 
 function openSessionSidebar() {
   elements.codexView.classList.add("sessions-open");
+  setTopbarCollapsed(false);
   elements.sessionBackdrop.hidden = false;
   updateSessionSidebarToggle(true);
   syncBodySheetState();
@@ -672,6 +727,7 @@ function closeSessionSidebar({ restoreFocus = true } = {}) {
   elements.sessionBackdrop.hidden = true;
   updateSessionSidebarToggle(false);
   syncBodySheetState();
+  syncTopbarVisibility({ forceVisible: currentScrollTop() <= 8 });
   if (restoreFocus) {
     elements.toggleSessionsButton.focus({ preventScroll: true });
   }

@@ -10,8 +10,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Echo Codex</title>
-    <link rel="manifest" href="/manifest.webmanifest?v=24" />
-    <link rel="stylesheet" href="/styles.css?v=24" />
+    <link rel="manifest" href="/manifest.webmanifest?v=25" />
+    <link rel="stylesheet" href="/styles.css?v=25" />
   </head>
   <body>
     <main class="shell">
@@ -133,6 +133,14 @@
                 <button id="refreshStatus" class="secondary compact-action" type="button" hidden>刷新状态</button>
                 <button id="logoutButton" class="top-logout-button" type="button" hidden>退出</button>
               </div>
+              <label class="postprocess-toggle sidebar-utility-toggle" for="postprocessToggle">
+                <input id="postprocessToggle" type="checkbox" role="switch" />
+                <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+                <span class="sidebar-setting-copy">
+                  <strong>输入后处理</strong>
+                  <span id="postprocessLabel">后处理</span>
+                </span>
+              </label>
             </div>
           </section>
         </aside>
@@ -171,17 +179,7 @@
                     <span class="composer-inline-kicker">推理</span>
                     <select id="codexReasoningEffort" aria-label="选择推理强度"></select>
                   </label>
-                  <label class="composer-inline-control composer-inline-toggle postprocess-toggle" for="postprocessToggle">
-                    <input id="postprocessToggle" type="checkbox" role="switch" />
-                    <span class="composer-inline-kicker">输入</span>
-                    <span id="postprocessLabel" class="composer-inline-value">后处理</span>
-                  </label>
-                </div>
-                <div class="composer-actions">
-                  <span class="composer-actions-meta" id="composerActionsMeta">当前话题会自动保留，稍后可以继续。</span>
-                  <button id="sendCodexButton" class="codex-submit" type="button" aria-label="发送">
-                    ↑
-                  </button>
+                  <button id="sendCodexButton" class="codex-submit composer-submit-inline" type="button">发送</button>
                 </div>
               </div>
             </div>
@@ -190,6 +188,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=24" type="module"></script>
+    <script src="/app.js?v=25" type="module"></script>
   </body>
 </html>
