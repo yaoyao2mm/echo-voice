@@ -2917,3 +2917,268 @@ body {
     width: 100%;
   }
 }
+
+/* v23 integrated composer */
+
+.sidebar-add-button {
+  width: 34px;
+  min-height: 34px;
+  border: 1px solid rgba(126, 106, 84, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 252, 247, 0.78);
+  color: var(--ink);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.sidebar-add-button:hover,
+.sidebar-add-button:focus-visible {
+  background: rgba(23, 20, 17, 0.06);
+}
+
+.project-sidebar-card {
+  display: grid;
+  gap: 4px;
+  padding: 2px 0 6px;
+}
+
+.project-picker-label {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.project-picker-meta {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.sidebar-user-card {
+  display: grid;
+  gap: 10px;
+  padding: 2px 0 0;
+}
+
+.sidebar-user-meta {
+  margin: 0;
+}
+
+.sidebar-user-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sidebar-user-actions > * {
+  min-height: 34px;
+  border-radius: 999px;
+  padding: 0 12px;
+}
+
+.composer {
+  position: sticky;
+  bottom: max(10px, var(--safe-bottom));
+  z-index: 8;
+  border: 1px solid rgba(126, 106, 84, 0.14);
+  border-radius: 24px;
+  background: rgba(251, 249, 245, 0.97);
+  box-shadow: 0 24px 60px -38px rgba(23, 20, 17, 0.42);
+  backdrop-filter: blur(18px);
+  padding: 0;
+  overflow: hidden;
+}
+
+.composer-shell {
+  display: grid;
+  gap: 0;
+}
+
+.composer textarea {
+  min-height: 132px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 18px 18px 12px;
+  box-shadow: none;
+  resize: none;
+}
+
+.composer textarea:focus {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.composer-dock {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid rgba(126, 106, 84, 0.08);
+  padding: 12px;
+}
+
+.composer-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.composer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid rgba(126, 106, 84, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.76);
+  padding: 0 12px;
+}
+
+.composer-chip-label {
+  flex: 0 0 auto;
+  color: var(--muted-2);
+  font-size: 10px;
+  font-weight: 780;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.composer-chip-value,
+.composer-chip strong {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-chip-project {
+  flex: 1 1 220px;
+}
+
+.composer-chip-select,
+.composer-chip-toggle {
+  flex: 0 1 auto;
+}
+
+.composer-chip-select select {
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  box-shadow: none;
+  padding: 0 18px 0 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.composer-chip-select select:focus {
+  box-shadow: none;
+}
+
+.postprocess-toggle {
+  cursor: pointer;
+}
+
+.postprocess-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.postprocess-toggle.off {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.postprocess-toggle.off .composer-chip-value {
+  color: var(--muted);
+}
+
+.composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.composer-actions-meta {
+  min-width: 0;
+  color: var(--muted-2);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.codex-submit {
+  width: auto;
+  min-width: 86px;
+  min-height: 38px;
+  border-radius: 999px;
+  padding: 0 16px;
+}
+
+@media (max-width: 760px) {
+  .session-sidebar {
+    width: min(320px, calc(100vw - 12px));
+  }
+
+  .sidebar-user-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .composer {
+    bottom: max(8px, var(--safe-bottom));
+    border-radius: 22px;
+  }
+
+  .composer-chip-project {
+    flex-basis: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .composer {
+    border-radius: 20px;
+  }
+
+  .composer textarea {
+    min-height: 120px;
+    padding: 16px 16px 10px;
+  }
+
+  .composer-dock {
+    padding: 10px;
+  }
+
+  .composer-toolbar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .composer-chip {
+    min-width: 0;
+    padding: 0 10px;
+  }
+
+  .composer-chip-project {
+    grid-column: 1 / -1;
+  }
+
+  .composer-chip-select select {
+    width: 100%;
+  }
+
+  .composer-actions-meta {
+    font-size: 10px;
+  }
+
+  .codex-submit {
+    min-width: 74px;
+    padding: 0 14px;
+  }
+}

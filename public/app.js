@@ -50,6 +50,7 @@ const elements = {
   codexQueueMeta: document.querySelector("#codexQueueMeta"),
   activeSessionTitle: document.querySelector("#activeSessionTitle"),
   activeSessionMeta: document.querySelector("#activeSessionMeta"),
+  composerActionsMeta: document.querySelector("#composerActionsMeta"),
   refreshCodex: document.querySelector("#refreshCodex"),
   toggleSessionsButton: document.querySelector("#toggleSessionsButton"),
   sessionBackdrop: document.querySelector("#sessionBackdrop"),
@@ -104,7 +105,7 @@ elements.refreshStatus.addEventListener("click", refreshStatus);
 elements.scanPairingButton.addEventListener("click", startPairingScanner);
 elements.stopScanButton.addEventListener("click", stopPairingScanner);
 elements.savePairingButton.addEventListener("click", pairFromInput);
-elements.refreshCodex.addEventListener("click", refreshCodex);
+elements.refreshCodex?.addEventListener("click", refreshCodex);
 elements.newCodexSessionButton.addEventListener("click", startNewCodexSession);
 elements.sendCodexButton.addEventListener("click", sendToCodex);
 elements.toggleSessionsButton.addEventListener("click", toggleSessionSidebar);
@@ -357,6 +358,7 @@ function handleRuntimeControlChange() {
   runtimePreferences = currentRuntimeDraft();
   writeStoredRuntimePreferences(runtimePreferences);
   refreshActiveSessionHeader();
+  refreshComposerMeta();
 }
 
 function currentRuntimeDraft() {
@@ -837,6 +839,7 @@ function updateComposerAvailability() {
   elements.codexModel.disabled = composerBusy;
   elements.codexReasoningEffort.disabled = composerBusy;
   elements.codexPrompt.disabled = composerBusy;
+  refreshComposerMeta();
 }
 
 function renderProjectPicker(agentOnline) {
@@ -1425,6 +1428,25 @@ function refreshActiveSessionHeader() {
     parts.push(formatRelativeTime(sessionTime(session)));
   }
   elements.activeSessionMeta.textContent = parts.filter(Boolean).join(" · ") || "选择工程、模型和推理强度后直接发送。";
+  refreshComposerMeta();
+}
+
+function refreshComposerMeta() {
+  if (!elements.composerActionsMeta) return;
+  if (composerBusy) {
+    elements.composerActionsMeta.textContent = "Codex 正在处理这一轮消息。";
+    return;
+  }
+  if (!elements.codexProject.value) {
+    elements.composerActionsMeta.textContent = "先在左侧选择工程，再开始对话。";
+    return;
+  }
+  const session = composingNewSession ? null : selectedCodexSession;
+  const runtime = runtimeDirty ? currentRuntimeDraft() : session?.runtime || runtimePreferences;
+  const runtimeLabel = sessionRuntimeLabel(runtime) || "桌面默认";
+  const modeLabel = postprocessEnabled ? "后处理" : "原文";
+  const lead = session ? "继续当前话题" : "发送后创建新话题";
+  elements.composerActionsMeta.textContent = `${lead} · ${sessionProjectLabel(session?.projectId || elements.codexProject.value)} · ${runtimeLabel} · ${modeLabel}`;
 }
 
 function formatRelativeTime(value) {
@@ -1487,6 +1509,7 @@ function updatePostprocessUi() {
   elements.postprocessToggle.checked = postprocessEnabled;
   elements.postprocessLabel.textContent = postprocessEnabled ? "后处理" : "原文";
   elements.postprocessToggle.closest(".postprocess-toggle")?.classList.toggle("off", !postprocessEnabled);
+  refreshComposerMeta();
 }
 
 function isAuthError(error) {

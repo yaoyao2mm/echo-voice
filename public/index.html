@@ -10,8 +10,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Echo Codex</title>
-    <link rel="manifest" href="/manifest.webmanifest?v=22" />
-    <link rel="stylesheet" href="/styles.css?v=22" />
+    <link rel="manifest" href="/manifest.webmanifest?v=23" />
+    <link rel="stylesheet" href="/styles.css?v=23" />
   </head>
   <body>
     <main class="shell">
@@ -77,7 +77,15 @@
           <div class="sidebar-head">
             <strong>对话</strong>
             <div class="sidebar-head-actions">
-              <button id="newCodexSessionButton" class="secondary compact-action" type="button">新话题</button>
+              <button
+                id="newCodexSessionButton"
+                class="icon-button sidebar-add-button"
+                type="button"
+                aria-label="新话题"
+                title="新话题"
+              >
+                +
+              </button>
             </div>
           </div>
           <section class="sidebar-panel sidebar-panel-conversations">
@@ -109,20 +117,6 @@
             <p id="projectSheetStatus" class="sidebar-panel-note"></p>
             <div id="projectSheetList" class="project-sheet-list sidebar-project-list" role="listbox" aria-label="项目列表"></div>
             <select id="codexProject" class="sr-only" tabindex="-1" aria-hidden="true"></select>
-          </section>
-
-          <section class="sidebar-panel sidebar-panel-settings">
-            <div class="sidebar-panel-head">
-              <strong>设置</strong>
-            </div>
-            <label class="postprocess-toggle sidebar-setting-card" for="postprocessToggle">
-              <input id="postprocessToggle" type="checkbox" role="switch" />
-              <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-              <span class="sidebar-setting-copy">
-                <strong>输入后处理</strong>
-                <span id="postprocessLabel">后处理</span>
-              </span>
-            </label>
           </section>
 
           <section class="sidebar-panel sidebar-panel-user">
@@ -161,27 +155,32 @@
           </section>
 
           <section class="composer">
-            <div class="composer-controls">
-              <div class="composer-project-pill">
-                <span class="composer-control-label">工程</span>
-                <strong id="composerProjectLabel">等待桌面 agent</strong>
-              </div>
-              <label class="composer-inline-select" for="codexModel">
-                <span class="composer-control-label">模型</span>
-                <select id="codexModel" aria-label="选择模型"></select>
-              </label>
-              <label class="composer-inline-select" for="codexReasoningEffort">
-                <span class="composer-control-label">推理</span>
-                <select id="codexReasoningEffort" aria-label="选择推理强度"></select>
-              </label>
-              <button id="refreshCodex" class="icon-button composer-refresh-button" type="button" title="刷新 Codex" aria-label="刷新 Codex">
-                ↻
-              </button>
-            </div>
-            <div class="composer-input-shell">
+            <div class="composer-shell">
               <textarea id="codexPrompt" rows="7" placeholder="给 Codex 发消息，继续当前话题，或者开启新话题。"></textarea>
-              <div class="composer-footer">
-                <button id="sendCodexButton" class="codex-submit" type="button">发送</button>
+              <div class="composer-dock">
+                <div class="composer-toolbar" aria-label="当前会话配置">
+                  <div class="composer-chip composer-chip-project">
+                    <span class="composer-chip-label">工程</span>
+                    <strong id="composerProjectLabel">等待桌面 agent</strong>
+                  </div>
+                  <label class="composer-chip composer-chip-select" for="codexModel">
+                    <span class="composer-chip-label">模型</span>
+                    <select id="codexModel" aria-label="选择模型"></select>
+                  </label>
+                  <label class="composer-chip composer-chip-select" for="codexReasoningEffort">
+                    <span class="composer-chip-label">推理</span>
+                    <select id="codexReasoningEffort" aria-label="选择推理强度"></select>
+                  </label>
+                  <label class="composer-chip composer-chip-toggle postprocess-toggle" for="postprocessToggle">
+                    <input id="postprocessToggle" type="checkbox" role="switch" />
+                    <span class="composer-chip-label">输入</span>
+                    <span id="postprocessLabel" class="composer-chip-value">后处理</span>
+                  </label>
+                </div>
+                <div class="composer-actions">
+                  <span class="composer-actions-meta" id="composerActionsMeta">当前话题会自动保留，稍后可以继续。</span>
+                  <button id="sendCodexButton" class="codex-submit" type="button">发送</button>
+                </div>
               </div>
             </div>
           </section>
@@ -189,6 +188,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=22" type="module"></script>
+    <script src="/app.js?v=23" type="module"></script>
   </body>
 </html>
