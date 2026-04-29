@@ -11,7 +11,7 @@ APP_RESOURCES_DIR="$RESOURCES_DIR/app"
 EXECUTABLE="$MACOS_DIR/Echo Codex"
 
 if [[ ! -d "$ELECTRON_APP" ]]; then
-  npm run desktop:app:install
+  pnpm run desktop:app:install
 fi
 
 rm -rf "$APP_DIR"

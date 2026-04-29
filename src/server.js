@@ -263,7 +263,7 @@ server.listen(config.port, config.host, () => {
   for (const url of urls) console.log(`  ${url}`);
   if (!useHttps && config.mode !== "relay") {
     console.log("\nAndroid QR camera pairing needs HTTPS or localhost.");
-    console.log("For USB development, run `npm run android:usb`, then open:");
+    console.log("For USB development, run `pnpm run android:usb`, then open:");
     console.log(`  ${androidUsbUrl}`);
   }
   if (config.mode === "relay") {
@@ -271,7 +271,7 @@ server.listen(config.port, config.host, () => {
       console.log("\nSet ECHO_PUBLIC_URL=https://YOUR_DOMAIN so the relay prints the correct phone URL.");
     }
     console.log("\nRun this on the computer that should run local Codex:");
-    console.log(`  ECHO_RELAY_URL=${config.publicUrl || `${protocol}://YOUR_DOMAIN`} ECHO_TOKEN=${config.token} npm run desktop`);
+    console.log(`  ECHO_RELAY_URL=${config.publicUrl || `${protocol}://YOUR_DOMAIN`} ECHO_TOKEN=${config.token} pnpm run desktop`);
   }
   const qrUrl = publicUrl || (useHttps ? urls[0] : androidUsbUrl);
   const qrLabel = publicUrl ? "the public URL" : useHttps ? "the first LAN URL" : "Android USB localhost";

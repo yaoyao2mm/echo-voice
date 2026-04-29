@@ -103,7 +103,7 @@ Goal: turn Codex permissions into a small set of understandable product modes.
 
 - Sandbox: `workspace-write`.
 - Uses a named Codex profile or ruleset for trusted repo commands.
-- Intended for common local commands such as `npm test`, `npm run lint`, `pytest`, or repo-specific scripts.
+- Intended for common local commands such as `pnpm test`, `pnpm run lint`, `pytest`, or repo-specific scripts.
 
 #### Network Needed
 

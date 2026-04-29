@@ -26,8 +26,8 @@ LLM_MODEL=gpt-4.1-mini
 Start it:
 
 ```bash
-npm install
-npm run relay
+pnpm install
+pnpm run relay
 ```
 
 ## 2. Nginx HTTPS Proxy
@@ -67,7 +67,7 @@ After=network.target
 Type=simple
 WorkingDirectory=/opt/echo-voice
 EnvironmentFile=/opt/echo-voice/.env
-ExecStart=/usr/bin/npm run relay
+ExecStart=/usr/bin/env pnpm run relay
 Restart=always
 RestartSec=3
 
@@ -88,7 +88,7 @@ sudo systemctl status echo-voice
 On the computer that should run local Codex:
 
 ```bash
-ECHO_RELAY_URL=https://voice.example.com ECHO_TOKEN=replace-with-a-long-random-secret npm run desktop
+ECHO_RELAY_URL=https://voice.example.com ECHO_TOKEN=replace-with-a-long-random-secret pnpm run desktop
 ```
 
 To allow mobile control of local Codex, add an explicit workspace allowlist:
@@ -97,7 +97,7 @@ To allow mobile control of local Codex, add an explicit workspace allowlist:
 ECHO_RELAY_URL=https://voice.example.com \
 ECHO_TOKEN=replace-with-a-long-random-secret \
 ECHO_CODEX_WORKSPACES=echo=/Users/john/workspace/projects/echo,metio=/Users/john/workspace/projects/metio \
-npm run desktop
+pnpm run desktop
 ```
 
 The phone can only choose these workspace ids; it cannot send arbitrary paths or shell commands.
@@ -111,15 +111,15 @@ to the queue for recovery.
 If you usually work with a VPN enabled, prefer relay mode and let the desktop agent follow the system proxy:
 
 ```bash
-ECHO_PROXY_URL=system npm run desktop
+ECHO_PROXY_URL=system pnpm run desktop
 ```
 
 For macOS launchd installs, put `ECHO_PROXY_URL=system` in `.env`, then run:
 
 ```bash
-npm run desktop:mac -- settings
-npm run desktop:mac -- restart
-npm run desktop:mac -- doctor
+pnpm run desktop:mac -- settings
+pnpm run desktop:mac -- restart
+pnpm run desktop:mac -- doctor
 ```
 
 `system` follows the macOS HTTP/HTTPS proxy. If your VPN client only exposes SOCKS, enable its HTTP/mixed proxy port and set `ECHO_PROXY_URL=http://127.0.0.1:PORT` instead.

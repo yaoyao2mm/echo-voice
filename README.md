@@ -17,9 +17,9 @@ The product goal is to feel like the missing mobile companion to the local Codex
 ### Local/LAN Mode
 
 ```bash
-npm install
+pnpm install
 cp .env.example .env
-npm start
+pnpm start
 ```
 
 Open the printed URL on your Android phone. The URL includes a pairing token; API calls without that token are rejected.
@@ -27,13 +27,13 @@ Open the printed URL on your Android phone. The URL includes a pairing token; AP
 Android browsers require a secure context before they allow camera-based QR pairing. The easiest development path is USB forwarding:
 
 ```bash
-npm run android:usb
+pnpm run android:usb
 ```
 
 Then open the printed `http://localhost:3888/?token=...` URL on the phone. For LAN use without USB, run the server with a trusted HTTPS certificate:
 
 ```bash
-HTTPS_CERT=/absolute/path/to/cert.pem HTTPS_KEY=/absolute/path/to/key.pem npm start
+HTTPS_CERT=/absolute/path/to/cert.pem HTTPS_KEY=/absolute/path/to/key.pem pnpm start
 ```
 
 ### Internet Relay Mode
@@ -50,14 +50,14 @@ cp .env.example .env
 # ECHO_AUTH_USERNAME=your-user
 # ECHO_AUTH_PASSWORD=your-password
 # LLM_API_KEY=...
-npm install
-npm run relay
+pnpm install
+pnpm run relay
 ```
 
 Run the desktop agent on the computer where Codex should execute:
 
 ```bash
-ECHO_RELAY_URL=https://voice.example.com ECHO_TOKEN=a-long-random-secret npm run desktop
+ECHO_RELAY_URL=https://voice.example.com ECHO_TOKEN=a-long-random-secret pnpm run desktop
 ```
 
 To enable local Codex control, expose only the project directories you trust:
@@ -66,7 +66,7 @@ To enable local Codex control, expose only the project directories you trust:
 ECHO_RELAY_URL=https://voice.example.com \
 ECHO_TOKEN=a-long-random-secret \
 ECHO_CODEX_WORKSPACES=echo=/Users/john/workspace/projects/echo,metio=/Users/john/workspace/projects/metio \
-npm run desktop
+pnpm run desktop
 ```
 
 On macOS, the preferred path is the native `Echo Codex.app`. It opens the settings window, adds a menu bar item, and can run the desktop agent itself without installing a LaunchAgent:
@@ -79,17 +79,17 @@ ECHO_CODEX_WORKSPACES=echo=/Users/john/workspace/projects/echo,metio=/Users/john
 ECHO_PROXY_URL=system
 EOF
 
-npm run desktop:mac:app
-npm run desktop:mac -- app
-npm run desktop:mac -- status
-npm run desktop:mac -- doctor
-npm run desktop:mac -- logs
+pnpm run desktop:mac:app
+pnpm run desktop:mac -- app
+pnpm run desktop:mac -- status
+pnpm run desktop:mac -- doctor
+pnpm run desktop:mac -- logs
 ```
 
 If you have already built the app, open it again with:
 
 ```bash
-npm run desktop:mac -- app
+pnpm run desktop:mac -- app
 ```
 
 LaunchAgent is still available as a legacy/background option. Other commands: `app`, `start`, `stop`, `restart`, `settings`, `doctor`, `uninstall`, `print-env`.
@@ -97,7 +97,7 @@ LaunchAgent is still available as a legacy/background option. Other commands: `a
 To create a local DMG from that launcher:
 
 ```bash
-npm run desktop:mac:dmg
+pnpm run desktop:mac:dmg
 ```
 
 `desktop:mac -- settings` uses `Echo Codex.app` when it exists, uses the development Electron shell when installed, and falls back to the local browser page otherwise. The UI can update relay, VPN/proxy, local model, and Codex workspace settings without editing `.env` directly.
@@ -127,8 +127,8 @@ On macOS this makes the desktop agent follow the current System Settings HTTP/HT
 After changing network settings, restart and run the doctor:
 
 ```bash
-npm run desktop:mac -- restart
-npm run desktop:mac -- doctor
+pnpm run desktop:mac -- restart
+pnpm run desktop:mac -- doctor
 ```
 
 Open `https://voice.example.com/?token=a-long-random-secret` on the phone. See [docs/internet-deploy.md](docs/internet-deploy.md) for Nginx, systemd, and HTTPS notes.

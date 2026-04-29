@@ -327,10 +327,10 @@ open_settings() {
   fi
 
   if [[ -x "$ROOT_DIR/desktop-app/node_modules/.bin/electron" ]]; then
-    npm --prefix "$ROOT_DIR/desktop-app" start
+    pnpm --dir "$ROOT_DIR" --filter echo-voice-desktop-app start
   else
     echo "Native settings app is not installed yet."
-    echo "Run: npm run desktop:app:install"
+    echo "Run: pnpm run desktop:app:install"
     echo "Opening browser fallback for now."
     node "$ROOT_DIR/scripts/desktop-settings.js" --open
   fi

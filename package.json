@@ -1,8 +1,10 @@
 {
   "name": "echo-voice",
   "version": "0.1.0",
+  "private": true,
   "description": "Mobile control surface for running local Codex tasks through a relay.",
   "type": "module",
+  "packageManager": "pnpm@10.30.3",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -16,18 +18,27 @@
     "start": "node src/server.js",
     "relay": "node src/server.js --relay",
     "desktop": "node src/desktop-agent.js",
-    "desktop:app:install": "npm --prefix desktop-app install",
-    "desktop:app": "npm --prefix desktop-app start",
+    "desktop:app:install": "pnpm install",
+    "desktop:app": "pnpm --filter echo-voice-desktop-app start",
     "desktop:mac:app": "bash scripts/macos-create-app.sh",
     "desktop:mac:dmg": "bash scripts/macos-create-dmg.sh",
     "desktop:settings": "node scripts/desktop-settings.js --open",
     "desktop:mac": "bash scripts/macos-desktop-agent.sh",
     "dev": "node --watch src/server.js",
     "android:usb": "node scripts/adb-reverse.js",
-    "doctor:network": "node scripts/network-doctor.js"
+    "doctor:network": "node scripts/network-doctor.js",
+    "check": "pnpm run check:js && pnpm run check:shell",
+    "check:js": "node --check src/server.js && node --check src/config.js && node --check src/desktop-agent.js && node --check src/lib/refine.js && node --check src/lib/codexQueue.js && node --check src/lib/codexStore.js && node --check src/lib/agentIdentity.js && node --check public/app.js && node --check public/sw.js && node --check desktop-settings/app.js && node --check desktop-app/main.cjs && node --check scripts/desktop-settings.js && node --check scripts/network-doctor.js",
+    "check:shell": "bash -n scripts/macos-desktop-agent.sh && bash -n scripts/macos-create-app.sh && bash -n scripts/macos-create-dmg.sh"
   },
   "engines": {
     "node": ">=20"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "electron"
+    ]
   },
   "dependencies": {
     "better-sqlite3": "^12.9.0",

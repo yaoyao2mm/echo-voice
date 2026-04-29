@@ -4,7 +4,7 @@ import { publicCodexRuntime, publicWorkspaces, runCodexJob } from "./lib/codexRu
 import { describeHttpNetwork, formatFetchError, httpFetch } from "./lib/http.js";
 
 if (!config.relayUrl) {
-  console.error("Missing ECHO_RELAY_URL. Example: ECHO_RELAY_URL=https://voice.example.com ECHO_TOKEN=... npm run desktop");
+  console.error("Missing ECHO_RELAY_URL. Example: ECHO_RELAY_URL=https://voice.example.com ECHO_TOKEN=... pnpm run desktop");
   process.exit(1);
 }
 
