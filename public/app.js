@@ -461,14 +461,6 @@ function refreshComposerStatusBar() {
     elements.composerStatusText.textContent = "正在发送…";
     return;
   }
-  if (composerAttachments.length > 0) {
-    if (session?.status === "running") {
-      elements.composerStatusText.textContent = `Codex 正在回复 · ${attachmentSummaryText(composerAttachments, "已附加")}`;
-      return;
-    }
-    elements.composerStatusText.textContent = `${attachmentSummaryText(composerAttachments, "已附加")} · 发送前可增删`;
-    return;
-  }
   if (!elements.codexProject.value) {
     elements.composerStatusText.textContent = "先选择工程";
     return;
@@ -493,7 +485,7 @@ function refreshComposerStatusBar() {
     elements.composerStatusText.textContent = "当前会话不可继续";
     return;
   }
-  elements.composerStatusText.textContent = session ? "继续当前话题" : "发送后开始新话题";
+  elements.composerStatusText.textContent = "工作区";
 }
 
 function initRuntimeControls() {
@@ -1127,7 +1119,6 @@ function renderComposerAttachments() {
   );
   elements.composerAttachmentTray.innerHTML = hasAttachments
     ? `
-        <span class="composer-attachment-summary">${escapeHtml(attachmentSummaryText(composerAttachments, "已附加"))}</span>
         ${composerAttachments
           .map((attachment, index) => {
             const label = attachmentDisplayLabel(attachment, index);
@@ -1534,9 +1525,6 @@ function renderEmptySessionDetail({ title, body }) {
   elements.codexLog.textContent = "";
   elements.codexRunSummary.innerHTML = `
     <div class="conversation-thread conversation-thread-empty">
-      <div class="thread-status-row">
-        <span class="thread-status-pill">新话题</span>
-      </div>
       <div class="thread-welcome">
         <strong>${escapeHtml(title)}</strong>
         <p>${escapeHtml(body)}</p>
@@ -1654,14 +1642,6 @@ function buildConversationTimeline(job, errorText = "") {
     });
   }
 
-  const statusHint = conversationStatusHint(job, timeline.length > 0);
-  if (statusHint) {
-    timeline.push({
-      kind: "status",
-      text: statusHint
-    });
-  }
-
   if (timeline.length === 0) {
     timeline.push({
       kind: "empty",
@@ -1749,7 +1729,6 @@ function renderConversationAttachments(attachments = []) {
   if (!attachments.length) return "";
   return `
     <div class="thread-attachments">
-      <span class="thread-attachment-summary">${escapeHtml(attachmentSummaryText(attachments, "附加"))}</span>
       ${attachments
         .map((attachment, index) => {
           const label = attachmentDisplayLabel(attachment, index);
