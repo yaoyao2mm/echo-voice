@@ -3327,8 +3327,8 @@ body.topbar-collapsed .topbar {
   }
 
   .composer {
-    bottom: max(8px, var(--safe-bottom));
-    border-radius: 22px;
+    bottom: 0;
+    border-radius: 0;
   }
 
   .composer-toolbar {
@@ -3346,13 +3346,10 @@ body.topbar-collapsed .topbar {
     max-width: 98px;
   }
 
-  .composer {
-    border-radius: 20px;
-  }
-
   .composer-statusbar {
     min-height: 30px;
-    padding: 5px 10px;
+    padding-top: 4px;
+    padding-bottom: 4px;
   }
 
   .composer-status-text {
@@ -3360,12 +3357,13 @@ body.topbar-collapsed .topbar {
   }
 
   .composer textarea {
-    min-height: 58px;
-    padding: 10px 12px 6px;
+    min-height: 54px;
+    padding-top: 9px;
+    padding-bottom: 6px;
   }
 
   .composer-dock {
-    padding: 0;
+    padding-bottom: max(5px, var(--safe-bottom));
   }
 
   .composer-toolbar {
@@ -3395,7 +3393,8 @@ body.topbar-collapsed .topbar {
   }
 
   .composer-attachment-tray {
-    padding: 5px 10px 7px;
+    padding-top: 4px;
+    padding-bottom: 6px;
   }
 
   .composer-attachment-pill {
@@ -3497,20 +3496,50 @@ body.topbar-collapsed .topbar {
 
   .composer {
     position: fixed;
-    left: calc(var(--shell-pad-left) + var(--mobile-chat-rail));
-    right: calc(var(--shell-pad-right) + var(--mobile-chat-rail));
+    left: 0;
+    right: 0;
     bottom: 0;
     margin-top: 0;
     margin-bottom: 0;
     z-index: 24;
-    border-bottom: 0;
-    border-radius: 24px 24px 0 0;
-    background: rgba(251, 249, 245, 0.995);
-    box-shadow: 0 12px 26px rgba(23, 20, 17, 0.16);
+    border: 0;
+    border-top: 1px solid rgba(126, 106, 84, 0.12);
+    border-radius: 0;
+    background: rgba(251, 249, 245, 0.985);
+    box-shadow: none;
     backdrop-filter: none;
   }
 
+  .composer-statusbar,
+  .composer-attachment-tray,
+  .composer-editor,
   .composer-dock {
+    padding-left: var(--shell-pad-left);
+    padding-right: var(--shell-pad-right);
+  }
+
+  .composer-statusbar {
+    min-height: 28px;
+    padding-top: 5px;
+    padding-bottom: 5px;
+  }
+
+  .composer-attachment-tray {
+    padding-top: 5px;
+    padding-bottom: 7px;
+  }
+
+  .composer-editor {
+    background: transparent;
+  }
+
+  .composer textarea {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .composer-dock {
+    background: rgba(246, 241, 233, 0.82);
     padding-bottom: max(6px, var(--safe-bottom));
   }
 
@@ -3542,6 +3571,10 @@ body.topbar-collapsed .topbar {
   .thread-message-user .thread-bubble,
   .thread-message-user .thread-attachments {
     max-width: min(88%, 30rem);
+  }
+
+  .codex-submit {
+    border-radius: 0;
   }
 
   .thread-welcome {
