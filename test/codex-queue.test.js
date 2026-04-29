@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import Database from "better-sqlite3";
 
 const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "echo-queue-test-"));
 process.env.HOME = tempHome;
@@ -12,6 +13,7 @@ process.env.ECHO_CODEX_LEASE_MS = "60000";
 
 const store = await import("../src/lib/codexStore.js");
 const queue = await import("../src/lib/codexQueue.js");
+const db = new Database(path.join(tempHome, ".echo-voice", "echo.sqlite"));
 
 test("agent event and completion writes require the active lease", () => {
   store.resetStoreForTest();
@@ -72,4 +74,45 @@ test("agent polling clamps invalid wait values and still returns immediate jobs"
   });
 
   assert.equal(job.id, created.id);
+});
+
+test("status advertises only online agent workspaces", () => {
+  store.resetStoreForTest();
+
+  queue.updateCodexAgent({
+    id: "stale-agent",
+    workspaces: [{ id: "e2e", label: "E2E", path: "/tmp/e2e" }],
+    runtime: { command: "fake-codex" }
+  });
+  db.prepare("UPDATE codex_agents SET last_seen_at = ? WHERE id = ?").run("2020-01-01T00:00:00.000Z", "stale-agent");
+
+  const staleStatus = queue.codexStatus();
+  assert.equal(staleStatus.agentOnline, false);
+  assert.deepEqual(staleStatus.workspaces, []);
+  assert.equal(staleStatus.agents[0].online, false);
+
+  queue.updateCodexAgent({
+    id: "real-agent-a",
+    workspaces: [
+      { id: "echo", label: "Echo", path: "/workspace/echo" },
+      { id: "metio", label: "Metio", path: "/workspace/metio" }
+    ],
+    runtime: { command: "codex", model: "gpt-5.4" }
+  });
+  queue.updateCodexAgent({
+    id: "real-agent-b",
+    workspaces: [
+      { id: "side", label: "Side", path: "/workspace/side" },
+      { id: "echo", label: "Echo duplicate", path: "/other/echo" }
+    ],
+    runtime: { command: "codex", model: "gpt-5.5" }
+  });
+
+  const onlineStatus = queue.codexStatus();
+  const workspaceIds = onlineStatus.workspaces.map((workspace) => workspace.id).sort();
+  assert.equal(onlineStatus.agentOnline, true);
+  assert.deepEqual(workspaceIds, ["echo", "metio", "side"]);
+  assert.equal(onlineStatus.workspaces.filter((workspace) => workspace.id === "e2e").length, 0);
+  assert.equal(onlineStatus.runtime.command, "codex");
+  assert.equal(onlineStatus.agents.filter((agent) => agent.online).length, 2);
 });

@@ -113,7 +113,14 @@ export function touchAgent(id) {
 export function statusSnapshot() {
   reclaimExpiredLeases();
 
-  const latestAgent = latestAgentSnapshot();
+  const nowMs = Date.now();
+  const agents = listAgents().map((agent) => ({
+    ...agent,
+    online: isAgentOnline(agent, nowMs)
+  }));
+  const onlineAgents = agents.filter((agent) => agent.online);
+  const latestAgent = agents[0] || null;
+  const primaryAgent = onlineAgents[0] || null;
   const queued = db.prepare("SELECT COUNT(*) AS count FROM codex_jobs WHERE status = 'queued'").get().count;
   const running = db.prepare("SELECT COUNT(*) AS count FROM codex_jobs WHERE status = 'running'").get().count;
   const runningJobs = db.prepare(`
@@ -126,11 +133,11 @@ export function statusSnapshot() {
 
   return {
     enabled: true,
-    agentOnline: Boolean(latestAgent && Date.now() - Date.parse(latestAgent.lastSeenAt) < 45000),
+    agentOnline: onlineAgents.length > 0,
     lastAgentSeenAt: latestAgent?.lastSeenAt || "",
-    agents: listAgents(),
-    workspaces: latestAgent?.workspaces || [],
-    runtime: latestAgent?.runtime || {},
+    agents,
+    workspaces: mergeAgentWorkspaces(onlineAgents),
+    runtime: primaryAgent?.runtime || {},
     queued,
     running,
     active: runningJobs[0] || null,
@@ -389,16 +396,6 @@ function reclaimExpiredLeases() {
   reclaim();
 }
 
-function latestAgentSnapshot() {
-  const row = db.prepare(`
-    SELECT id, last_seen_at AS lastSeenAt, workspaces_json AS workspacesJson, runtime_json AS runtimeJson
-    FROM codex_agents
-    ORDER BY last_seen_at DESC
-    LIMIT 1
-  `).get();
-  return row ? parseAgent(row) : null;
-}
-
 function listAgents() {
   return db.prepare(`
     SELECT id, last_seen_at AS lastSeenAt, workspaces_json AS workspacesJson, runtime_json AS runtimeJson
@@ -406,6 +403,27 @@ function listAgents() {
     ORDER BY last_seen_at DESC
     LIMIT 10
   `).all().map(parseAgent);
+}
+
+function isAgentOnline(agent, nowMs = Date.now()) {
+  const lastSeenMs = Date.parse(agent?.lastSeenAt || "");
+  return Number.isFinite(lastSeenMs) && nowMs - lastSeenMs < 45000;
+}
+
+function mergeAgentWorkspaces(agents) {
+  const byId = new Map();
+  for (const agent of agents) {
+    for (const workspace of agent.workspaces || []) {
+      if (!byId.has(workspace.id)) {
+        byId.set(workspace.id, {
+          ...workspace,
+          agentId: agent.id,
+          agentLastSeenAt: agent.lastSeenAt
+        });
+      }
+    }
+  }
+  return Array.from(byId.values());
 }
 
 function getJobSummary(id) {
