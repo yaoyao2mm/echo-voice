@@ -53,7 +53,7 @@ export async function waitForCodexJob(input = {}) {
   const immediateJob = acquireNextJob({ agentId: agent.id, workspaces: agent.workspaces });
   if (immediateJob) return buildAgentJob(immediateJob);
 
-  const waitMs = Math.max(1000, Math.min(Number(input.waitMs || 25000), 30000));
+  const waitMs = clampWaitMs(input.waitMs);
   return new Promise((resolve) => {
     const timeout = setTimeout(() => {
       events.off("codex-job", handleJob);
@@ -82,7 +82,7 @@ export function completeCodexJob(id, result = {}, options = {}) {
   if (options.agent) updateCodexAgent(options.agent);
   else if (options.agentId) touchAgent(options.agentId);
   const ok = completeStoredJob(id, result, { agentId: options.agentId || options.agent?.id });
-  events.emit("codex-job");
+  if (ok) events.emit("codex-job");
   return ok;
 }
 
@@ -93,4 +93,10 @@ function buildAgentJob(job) {
     prompt: job.prompt,
     createdAt: job.createdAt
   };
+}
+
+function clampWaitMs(value) {
+  const waitMs = Number(value);
+  if (!Number.isFinite(waitMs)) return 25000;
+  return Math.max(1000, Math.min(waitMs, 30000));
 }

@@ -372,11 +372,30 @@ function readEnvFlag(key, fallback) {
 function readDotEnvValue(key) {
   try {
     const text = fs.readFileSync(path.join(rootDir, ".env"), "utf8");
-    const match = text.match(new RegExp(`^${key}=([^\\n]*)`, "m"));
-    return match?.[1]?.trim();
+    const pattern = new RegExp(`^\\s*${escapeRegExp(key)}\\s*=\\s*([^\\n]*)`, "m");
+    const match = text.match(pattern);
+    return match ? parseDotEnvValue(match[1]) : "";
   } catch {
     return "";
   }
+}
+
+function parseDotEnvValue(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (text.startsWith('"') && text.endsWith('"')) {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text.slice(1, -1);
+    }
+  }
+  if (text.startsWith("'") && text.endsWith("'")) return text.slice(1, -1);
+  return text;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function buildDesktopEnv(env) {

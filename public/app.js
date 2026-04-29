@@ -153,7 +153,7 @@ function updateAuthView(message = "") {
     return;
   }
 
-  setActiveView(activeView, { skipStorage: true });
+  setActiveView(activeView, { skipStorage: true, skipRefresh: true });
 }
 
 function setActiveView(view, options = {}) {
@@ -171,7 +171,7 @@ function setActiveView(view, options = {}) {
     panel.hidden = !showWorkspace || panel.dataset.viewPanel !== activeView;
   }
 
-  if (!showWorkspace) return;
+  if (!showWorkspace || options.skipRefresh) return;
   if (activeView === "codex") refreshCodex();
   if (activeView === "history") loadHistory();
 }
@@ -255,14 +255,14 @@ function enterLogin(message = "登录已过期，请重新登录。") {
   updateAuthView(message);
 }
 
-function setCurrentUser(user) {
+function setCurrentUser(user, options = {}) {
   currentUser = user || null;
   if (currentUser) {
     localStorage.setItem("echoUser", JSON.stringify(currentUser));
   } else {
     localStorage.removeItem("echoUser");
   }
-  updateAuthView();
+  if (options.updateView !== false) updateAuthView();
 }
 
 function readStoredUser() {
@@ -328,7 +328,7 @@ async function refreshStatus(options = {}) {
     const refine = status.refine.provider === "none" ? "不整理" : `整理 ${status.refine.provider}`;
     const codex = status.codex?.agentOnline ? "Codex 在线" : status.mode === "relay" ? "等待桌面 agent" : status.platform;
     elements.statusText.textContent = `${refine} · ${codex}`;
-    if (status.user) setCurrentUser(status.user);
+    if (status.user) setCurrentUser(status.user, { updateView: false });
     if (status.codex) renderCodexStatus(status.codex);
   } catch (error) {
     if (handleAuthError(error, "当前浏览器没有有效配对，请扫描桌面端二维码。")) {
@@ -475,8 +475,12 @@ async function copyFinalText() {
     toast("没有可复制的文本");
     return;
   }
-  await navigator.clipboard.writeText(text);
-  toast("已复制");
+  try {
+    await navigator.clipboard.writeText(text);
+    toast("已复制");
+  } catch (error) {
+    toast(error.message || "复制失败，请手动选择文本复制");
+  }
 }
 
 async function queueDraftForCodex() {
@@ -489,7 +493,8 @@ async function queueDraftForCodex() {
   }
 
   elements.codexPrompt.value = text;
-  setActiveView("codex");
+  setActiveView("codex", { skipRefresh: true });
+  await refreshCodex();
   await sendToCodex();
 }
 
@@ -504,6 +509,7 @@ async function refreshCodex() {
     if (handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) return;
     elements.codexStatusText.textContent = "Codex 未连接";
     elements.codexProject.innerHTML = "";
+    elements.sendCodexButton.disabled = true;
     if (error.message && !error.message.includes("relay mode")) toast(error.message);
   }
 }
@@ -566,7 +572,7 @@ async function sendToCodex() {
     const data = await apiPost("/api/codex/jobs", { projectId, prompt });
     selectedCodexJobId = data.job.id;
     toast("已加入任务队列");
-    setActiveView("codex");
+    setActiveView("codex", { skipRefresh: true });
     await loadCodexJobs();
     await showCodexJob(data.job.id);
   } catch (error) {
@@ -574,7 +580,7 @@ async function sendToCodex() {
       toast(error.message);
     }
   } finally {
-    elements.sendCodexButton.disabled = false;
+    elements.sendCodexButton.disabled = !elements.codexProject.value;
   }
 }
 

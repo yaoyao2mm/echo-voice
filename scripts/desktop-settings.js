@@ -371,7 +371,7 @@ async function testRelayRefine(env, sample) {
   }
 
   try {
-    const statusResponse = await httpFetch(`${trimTrailingSlash(env.ECHO_RELAY_URL)}/api/status`, {
+    const statusResponse = await httpFetch(`${trimTrailingSlash(env.ECHO_RELAY_URL)}/api/agent/ping`, {
       headers: {
         "X-Echo-Token": env.ECHO_TOKEN
       },
@@ -386,7 +386,7 @@ async function testRelayRefine(env, sample) {
       };
     }
 
-    const refineResponse = await httpFetch(`${trimTrailingSlash(env.ECHO_RELAY_URL)}/api/refine`, {
+    const refineResponse = await httpFetch(`${trimTrailingSlash(env.ECHO_RELAY_URL)}/api/agent/refine`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -413,8 +413,8 @@ async function testRelayRefine(env, sample) {
       stdout: JSON.stringify(
         {
           scope: "relay server",
-          status: statusJson.refine,
-          refined: refineJson.item?.refined || ""
+          status: refineJson.status || statusJson.refine,
+          refined: refineJson.refined || ""
         },
         null,
         2

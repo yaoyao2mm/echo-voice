@@ -79,8 +79,12 @@ async function copyPairingUrl() {
     writeOutput("Pairing URL is not available.", true);
     return;
   }
-  await navigator.clipboard.writeText(pairingUrl);
-  writeOutput("Pairing URL copied.");
+  try {
+    await navigator.clipboard.writeText(pairingUrl);
+    writeOutput("Pairing URL copied.");
+  } catch (error) {
+    writeOutput(error.message || "Could not copy pairing URL. Select it from the QR panel instead.", true);
+  }
 }
 
 async function loadHealth() {

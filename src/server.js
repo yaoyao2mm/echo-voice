@@ -155,6 +155,33 @@ app.get("/api/agent/ping", (req, res) => {
   });
 });
 
+app.post("/api/agent/refine", async (req, res) => {
+  try {
+    if (config.mode !== "relay") {
+      return res.status(400).json({ error: "Agent refine test is only available in relay mode." });
+    }
+
+    const rawText = String(req.body.rawText || "").trim();
+    if (!rawText) {
+      return res.status(400).json({ error: "rawText is required." });
+    }
+
+    const refined = await refineTranscript({
+      rawText,
+      mode: req.body.mode || "chat",
+      contextHint: req.body.contextHint || "桌面端配置页测试实际 relay 后处理",
+      history: recentHistory(8)
+    });
+    res.json({
+      ok: true,
+      status: getRefineStatus(),
+      refined
+    });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
 app.get("/api/codex/status", (req, res) => {
   if (config.mode !== "relay") {
     return res.status(400).json({ error: "Codex remote control is only available in relay mode." });

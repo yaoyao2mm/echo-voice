@@ -68,14 +68,7 @@ export async function runCodexJob(job, hooks = {}) {
       stdoutBuffer += chunk.toString();
       const lines = stdoutBuffer.split(/\r?\n/);
       stdoutBuffer = lines.pop() || "";
-      for (const line of lines) {
-        const event = parseJsonLine(line);
-        if (shouldUseAsFinalMessage(event)) finalMessage = event.text;
-        if (event?.type === "error" || event?.type === "turn.failed") {
-          explicitError = event.text || explicitError;
-        }
-        hooks.onEvents?.([event]);
-      }
+      for (const line of lines) handleStdoutLine(line);
     });
 
     child.stderr.on("data", (chunk) => {
@@ -94,6 +87,10 @@ export async function runCodexJob(job, hooks = {}) {
     });
 
     child.on("close", (code) => {
+      if (stdoutBuffer) {
+        handleStdoutLine(stdoutBuffer);
+        stdoutBuffer = "";
+      }
       finish({
         ok: code === 0,
         exitCode: code,
@@ -110,6 +107,16 @@ export async function runCodexJob(job, hooks = {}) {
       settled = true;
       clearTimeout(timeout);
       resolve(result);
+    }
+
+    function handleStdoutLine(line) {
+      const event = parseJsonLine(line);
+      if (!event) return;
+      if (shouldUseAsFinalMessage(event)) finalMessage = event.text;
+      if (event.type === "error" || event.type === "turn.failed") {
+        explicitError = event.text || explicitError;
+      }
+      hooks.onEvents?.([event]);
     }
   });
 }
@@ -131,7 +138,7 @@ function buildCodexEnv() {
 
 function parseJsonLine(line) {
   const trimmed = line.trim();
-  if (!trimmed) return { type: "output", text: "" };
+  if (!trimmed) return null;
 
   try {
     const raw = JSON.parse(trimmed);

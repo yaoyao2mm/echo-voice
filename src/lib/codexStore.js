@@ -223,46 +223,47 @@ export function appendEvents(jobId, incomingEvents = [], options = {}) {
   const job = getJobSummary(jobId);
   if (!job) return false;
 
-  const agentId = options.agentId ? normalizeAgentId(options.agentId) : "";
-  if (agentId && job.leasedBy !== agentId) return false;
+  if (!canMutateRunningJob(job, options.agentId)) return false;
 
   const now = nowIso();
   const leaseExpiresAt = new Date(Date.now() + config.codex.leaseMs).toISOString();
   const events = incomingEvents.slice(0, 50).map((event) => normalizeEvent(jobId, event, now));
 
   const write = db.transaction(() => {
+    const update = db.prepare(`
+      UPDATE codex_jobs
+      SET lease_expires_at = @leaseExpiresAt,
+          updated_at = @now
+      WHERE id = @jobId
+        AND status = 'running'
+        AND leased_by = @leasedBy
+    `).run({ jobId, leaseExpiresAt, now, leasedBy: job.leasedBy });
+
+    if (update.changes === 0) return false;
+
     for (const event of events) insertEvent.run(event);
     trimEvents.run(jobId, jobId, config.codex.maxEvents);
-
-    if (job.status === "running") {
-      db.prepare(`
-        UPDATE codex_jobs
-        SET lease_expires_at = @leaseExpiresAt,
-            updated_at = @now
-        WHERE id = @jobId
-      `).run({ jobId, leaseExpiresAt, now });
-    }
+    return true;
   });
 
-  write();
-  return true;
+  return write();
 }
 
 export function completeJob(jobId, result = {}, options = {}) {
   const job = getJobSummary(jobId);
   if (!job) return false;
 
-  const agentId = options.agentId ? normalizeAgentId(options.agentId) : "";
-  if (agentId && job.leasedBy !== agentId) return false;
+  if (!canMutateRunningJob(job, options.agentId)) return false;
 
   const now = nowIso();
-  const status = result.ok === false ? "failed" : "completed";
-  const exitCode = typeof result.exitCode === "number" ? result.exitCode : null;
   const error = String(result.error || "");
+  const exitCode = typeof result.exitCode === "number" ? result.exitCode : null;
+  const succeeded = result.ok === true && !error && (exitCode === null || exitCode === 0);
+  const status = succeeded ? "completed" : "failed";
   const finalMessage = String(result.finalMessage || "").slice(0, 12000);
 
   const finish = db.transaction(() => {
-    db.prepare(`
+    const update = db.prepare(`
       UPDATE codex_jobs
       SET status = @status,
           completed_at = @now,
@@ -273,14 +274,19 @@ export function completeJob(jobId, result = {}, options = {}) {
           lease_expires_at = NULL,
           updated_at = @now
       WHERE id = @jobId
+        AND status = 'running'
+        AND leased_by = @leasedBy
     `).run({
       jobId,
       status,
       now,
       exitCode,
       error,
-      finalMessage
+      finalMessage,
+      leasedBy: job.leasedBy
     });
+
+    if (update.changes === 0) return false;
 
     insertInternalEvents(jobId, [
       {
@@ -288,9 +294,10 @@ export function completeJob(jobId, result = {}, options = {}) {
         text: status === "completed" ? "Codex job completed." : error || "Codex job failed."
       }
     ]);
+    return true;
   });
 
-  finish();
+  if (!finish()) return false;
   trimOldJobs();
   return true;
 }
@@ -487,6 +494,12 @@ function parseJson(value, fallback = undefined) {
 
 function normalizeAgentId(value) {
   return String(value || "default-agent").trim().slice(0, 120) || "default-agent";
+}
+
+function canMutateRunningJob(job, agentId) {
+  const providedAgentId = String(agentId || "").trim();
+  if (job.status !== "running" || !job.leasedBy || !providedAgentId) return false;
+  return job.leasedBy === normalizeAgentId(providedAgentId);
 }
 
 function normalizeWorkspaces(workspaces = []) {
