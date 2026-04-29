@@ -20,6 +20,10 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "--" ]]; then
+  shift
+fi
+
 target="${1:-${ECHO_DEPLOY_TARGET:-}}"
 remote_path="${2:-${ECHO_DEPLOY_PATH:-/opt/echo-voice}}"
 service="${ECHO_DEPLOY_SERVICE:-echo-voice.service}"
