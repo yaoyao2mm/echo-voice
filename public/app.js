@@ -52,6 +52,7 @@ let selectedCodexJobId = "";
 let postprocessEnabled = localStorage.getItem("echoPostprocessEnabled") !== "false";
 let composerBusy = false;
 
+bindViewportMetrics();
 elements.loginForm.addEventListener("submit", login);
 elements.logoutButton.addEventListener("click", logout);
 elements.openPairingButton.addEventListener("click", () => showPairingPanel({ focus: true }));
@@ -241,6 +242,19 @@ function isLoggedIn() {
 
 function displayUser(user) {
   return user?.displayName || user?.username || "";
+}
+
+function bindViewportMetrics() {
+  syncViewportMetrics();
+  window.addEventListener("resize", syncViewportMetrics, { passive: true });
+  window.visualViewport?.addEventListener("resize", syncViewportMetrics, { passive: true });
+  window.visualViewport?.addEventListener("scroll", syncViewportMetrics, { passive: true });
+}
+
+function syncViewportMetrics() {
+  const viewport = window.visualViewport;
+  const nextHeight = Math.round(viewport?.height || window.innerHeight || 0);
+  if (nextHeight > 0) document.documentElement.style.setProperty("--app-height", `${nextHeight}px`);
 }
 
 function showPairingPanel({ focus = false } = {}) {
