@@ -252,11 +252,12 @@ const server = useHttps
 
 server.listen(config.port, config.host, () => {
   const protocol = useHttps ? "https" : "http";
-  const publicUrl = config.publicUrl ? `${config.publicUrl}/?token=${encodeURIComponent(config.token)}` : "";
-  const urls = [
-    ...(publicUrl ? [publicUrl] : []),
-    ...getLanUrls(config.port, config.token, protocol)
-  ];
+  const publicUrl = config.publicUrl || "";
+  const publicPairingUrl = publicUrl ? `${publicUrl}/?token=${encodeURIComponent(config.token)}` : "";
+  const urls =
+    config.mode === "relay"
+      ? [publicUrl || `${protocol}://YOUR_DOMAIN`]
+      : [...(publicPairingUrl ? [publicPairingUrl] : []), ...getLanUrls(config.port, config.token, protocol)];
   const androidUsbUrl = `http://localhost:${config.port}/?token=${encodeURIComponent(config.token)}`;
   console.log(`\nEcho Codex ${config.mode === "relay" ? "relay server" : "desktop agent"} is running.\n`);
   console.log("Open one of these URLs on your phone:\n");
@@ -271,12 +272,16 @@ server.listen(config.port, config.host, () => {
       console.log("\nSet ECHO_PUBLIC_URL=https://YOUR_DOMAIN so the relay prints the correct phone URL.");
     }
     console.log("\nRun this on the computer that should run local Codex:");
-    console.log(`  ECHO_RELAY_URL=${config.publicUrl || `${protocol}://YOUR_DOMAIN`} ECHO_TOKEN=${config.token} pnpm run desktop`);
+    console.log(`  ECHO_RELAY_URL=${config.publicUrl || `${protocol}://YOUR_DOMAIN`} ECHO_TOKEN=<pairing-token> pnpm run desktop`);
   }
-  const qrUrl = publicUrl || (useHttps ? urls[0] : androidUsbUrl);
-  const qrLabel = publicUrl ? "the public URL" : useHttps ? "the first LAN URL" : "Android USB localhost";
-  console.log(`\nPairing QR for ${qrLabel}:\n`);
-  qrcode.generate(qrUrl, { small: true });
+  if (config.mode !== "relay") {
+    const qrUrl = publicPairingUrl || (useHttps ? urls[0] : androidUsbUrl);
+    const qrLabel = publicPairingUrl ? "the public URL" : useHttps ? "the first LAN URL" : "Android USB localhost";
+    console.log(`\nPairing QR for ${qrLabel}:\n`);
+    qrcode.generate(qrUrl, { small: true });
+  } else {
+    console.log("\nRelay mode does not print pairing tokens. Use the desktop settings QR or your saved ECHO_TOKEN.");
+  }
   console.log("\nKeep this terminal running while using the phone UI.\n");
 });
 
