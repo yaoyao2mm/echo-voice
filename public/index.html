@@ -10,23 +10,32 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Echo Codex</title>
-    <link rel="manifest" href="/manifest.webmanifest?v=18" />
-    <link rel="stylesheet" href="/styles.css?v=18" />
+    <link rel="manifest" href="/manifest.webmanifest?v=20" />
+    <link rel="stylesheet" href="/styles.css?v=20" />
   </head>
   <body>
     <main class="shell">
       <header class="topbar">
-        <div>
-          <h1>Echo Codex</h1>
-          <p id="statusText">连接中</p>
-        </div>
-        <div class="topbar-actions">
-          <span id="userBadge" class="user-badge" hidden></span>
-          <button id="logoutButton" class="top-logout-button" type="button" hidden>退出</button>
-          <button id="openPairingButton" class="top-pair-button" type="button" hidden>扫码配对</button>
-          <button id="refreshStatus" class="icon-button" type="button" title="刷新状态" aria-label="刷新状态" hidden>
-            ↻
+        <div class="topbar-brand">
+          <button
+            id="toggleSessionsButton"
+            class="icon-button topbar-session-toggle"
+            type="button"
+            aria-label="打开会话列表"
+            aria-controls="codexSessionSidebar"
+            aria-expanded="false"
+            data-authenticated
+            hidden
+          >
+            ☰
           </button>
+          <div class="topbar-brand-copy">
+            <h1>Echo Codex</h1>
+            <p id="statusText">连接中</p>
+          </div>
+        </div>
+        <div class="topbar-actions" aria-hidden="true">
+          <span class="topbar-mark">Local Codex Workbench</span>
         </div>
       </header>
 
@@ -67,46 +76,114 @@
 
       <section id="codexView" class="codex-section" data-authenticated hidden>
         <button id="sessionBackdrop" class="session-backdrop" type="button" aria-label="关闭会话列表" hidden></button>
-        <button id="sessionRailButton" class="session-rail-button" type="button" aria-label="打开会话列表">
-          <span aria-hidden="true">☰</span>
-          <strong>会话</strong>
-        </button>
-        <aside class="session-sidebar" aria-label="Codex 会话">
+        <aside id="codexSessionSidebar" class="session-sidebar" aria-label="Codex 会话">
           <div class="sidebar-head">
             <div>
-              <span class="section-kicker">会话</span>
-              <strong>Codex</strong>
+              <span class="section-kicker">Echo Workbench</span>
+              <strong>一个侧栏管全部</strong>
+              <p>会话、工程、用户中心和设置统一放在这里。</p>
             </div>
             <div class="sidebar-head-actions">
               <button id="newCodexSessionButton" class="secondary compact-action" type="button">新建</button>
-              <button id="closeSessionsButton" class="icon-button sidebar-close" type="button" title="关闭会话" aria-label="关闭会话">×</button>
             </div>
           </div>
-          <div class="sidebar-tools">
-            <input id="sessionSearch" type="search" autocomplete="off" placeholder="搜索会话" />
-            <div class="session-filter" role="tablist" aria-label="会话筛选">
-              <button id="showActiveSessionsButton" class="active" type="button">最近</button>
-              <button id="showArchivedSessionsButton" type="button">归档</button>
+          <section class="sidebar-panel sidebar-panel-conversations">
+            <div class="sidebar-panel-head">
+              <div>
+                <span class="section-kicker">Conversations</span>
+                <strong>最近会话</strong>
+              </div>
+              <span class="sidebar-panel-meta">当前对话外露，历史都在这里</span>
             </div>
-          </div>
-          <div class="sidebar-status">
-            <strong id="codexStatusText">等待桌面 agent</strong>
-            <p id="codexQueueMeta" class="codex-runtime"></p>
-          </div>
-          <div id="codexJobs" class="codex-jobs"></div>
+            <div class="sidebar-tools">
+              <input id="sessionSearch" type="search" autocomplete="off" placeholder="搜索会话" />
+              <div class="session-filter" role="tablist" aria-label="会话筛选">
+                <button id="showActiveSessionsButton" class="active" type="button">最近</button>
+                <button id="showArchivedSessionsButton" type="button">归档</button>
+              </div>
+            </div>
+            <div class="sidebar-status">
+              <strong id="codexStatusText">等待桌面 agent</strong>
+              <p id="codexQueueMeta" class="codex-runtime"></p>
+            </div>
+            <div id="codexJobs" class="codex-jobs"></div>
+          </section>
+
+          <section class="sidebar-panel sidebar-panel-projects">
+            <div class="sidebar-panel-head">
+              <div>
+                <span class="section-kicker">Projects</span>
+                <strong>切换工程</strong>
+              </div>
+              <span class="sidebar-panel-meta">桌面端授权目录</span>
+            </div>
+            <div id="projectSidebarCard" class="project-sidebar-card">
+              <strong id="projectPickerLabel" class="project-picker-label">等待桌面 agent</strong>
+              <span id="projectPickerMeta" class="project-picker-meta">桌面端启动后会同步可切换项目。</span>
+            </div>
+            <p id="projectSheetStatus" class="sidebar-panel-note">桌面端授权的目录会出现在这里。</p>
+            <div id="projectSheetList" class="project-sheet-list sidebar-project-list" role="listbox" aria-label="项目列表"></div>
+            <select id="codexProject" class="sr-only" tabindex="-1" aria-hidden="true"></select>
+          </section>
+
+          <section class="sidebar-panel sidebar-panel-settings">
+            <div class="sidebar-panel-head">
+              <div>
+                <span class="section-kicker">Settings</span>
+                <strong>工作台设置</strong>
+              </div>
+              <span class="sidebar-panel-meta">影响发送行为</span>
+            </div>
+            <label class="postprocess-toggle sidebar-setting-card" for="postprocessToggle">
+              <input id="postprocessToggle" type="checkbox" role="switch" />
+              <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+              <span class="sidebar-setting-copy">
+                <strong>输入后处理</strong>
+                <span id="postprocessLabel">后处理</span>
+              </span>
+            </label>
+          </section>
+
+          <section class="sidebar-panel sidebar-panel-user">
+            <div class="sidebar-panel-head">
+              <div>
+                <span class="section-kicker">Account</span>
+                <strong>用户中心</strong>
+              </div>
+              <span class="sidebar-panel-meta">账号 / 配对 / 刷新</span>
+            </div>
+            <div class="sidebar-user-card">
+              <div class="sidebar-user-identity">
+                <span id="userBadge" class="user-badge" hidden></span>
+                <p id="sidebarUserMeta" class="sidebar-user-meta">登录后可查看账号与配对状态。</p>
+              </div>
+              <div class="sidebar-user-actions">
+                <button id="openPairingButton" class="top-pair-button" type="button" hidden>扫码配对</button>
+                <button id="refreshStatus" class="secondary compact-action" type="button" hidden>刷新状态</button>
+                <button id="logoutButton" class="top-logout-button" type="button" hidden>退出</button>
+              </div>
+            </div>
+          </section>
         </aside>
 
         <section class="codex-main" aria-label="Codex 当前会话">
-          <div class="status-strip">
-            <button id="toggleSessionsButton" class="secondary session-drawer-button" type="button">会话</button>
-            <div>
+          <section class="workbench-hero">
+            <div class="workbench-hero-copy">
+              <span class="section-kicker">Current Conversation</span>
               <strong id="activeSessionTitle">新会话</strong>
-              <p id="activeSessionMeta" class="codex-runtime">选择一个会话，或者直接发送新任务。</p>
+              <p id="activeSessionMeta" class="codex-runtime">当前只显示一条对话，历史会话从左上角进入。</p>
             </div>
-            <button id="refreshCodex" class="icon-button" type="button" title="刷新 Codex" aria-label="刷新 Codex">
-              ↻
-            </button>
-          </div>
+            <div class="workbench-hero-side">
+              <div class="hero-project-card">
+                <span class="hero-project-kicker">当前工程</span>
+                <strong id="heroProjectLabel">等待桌面 agent</strong>
+                <span id="heroProjectMeta">桌面端启动后会同步可切换项目。</span>
+              </div>
+              <button id="refreshCodex" class="icon-button hero-refresh-button" type="button" title="刷新 Codex" aria-label="刷新 Codex">
+                ↻
+              </button>
+            </div>
+          </section>
 
           <section id="codexJobDetail" class="codex-job-detail">
             <div id="codexRunSummary" class="codex-run-summary"></div>
@@ -118,35 +195,10 @@
           </section>
 
           <section class="composer">
-            <div class="composer-project-row">
-              <div class="composer-project-head">
-                <label class="field-label" for="projectPickerButton">项目</label>
-                <span class="composer-project-caption">切换本机工程目录</span>
-              </div>
-              <button
-                id="projectPickerButton"
-                class="project-picker"
-                type="button"
-                aria-haspopup="dialog"
-                aria-expanded="false"
-                aria-controls="projectSheet"
-              >
-                <span class="project-picker-copy">
-                  <span id="projectPickerLabel" class="project-picker-label">等待桌面 agent</span>
-                  <span id="projectPickerMeta" class="project-picker-meta">桌面端启动后会同步可切换项目。</span>
-                </span>
-                <span class="project-picker-chevron" aria-hidden="true">⌄</span>
-              </button>
-              <select id="codexProject" class="sr-only" tabindex="-1" aria-hidden="true"></select>
-            </div>
             <label class="field-label" for="codexPrompt">任务</label>
             <textarea id="codexPrompt" rows="7" placeholder="说一个灵感、bug 或要交给 Codex 的任务。"></textarea>
             <div class="composer-footer">
-              <label class="postprocess-toggle" for="postprocessToggle">
-                <input id="postprocessToggle" type="checkbox" role="switch" />
-                <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-                <span id="postprocessLabel">后处理</span>
-              </label>
+              <p class="composer-footnote">历史会话在侧边栏里切换；这里始终只服务当前这条对话。</p>
               <button id="sendCodexButton" class="codex-submit" type="button">发送</button>
             </div>
           </section>
@@ -154,39 +206,6 @@
       </section>
     </main>
 
-    <div id="projectSheet" class="project-sheet" hidden aria-hidden="true">
-      <button
-        id="projectSheetBackdrop"
-        class="project-sheet-backdrop"
-        type="button"
-        aria-label="关闭项目选择"
-      ></button>
-      <section
-        class="project-sheet-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="projectSheetTitle"
-      >
-        <div class="project-sheet-grabber" aria-hidden="true"></div>
-        <div class="project-sheet-head">
-          <div>
-            <span class="section-kicker">工作目录</span>
-            <strong id="projectSheetTitle">切换项目</strong>
-            <p id="projectSheetStatus">桌面端授权的目录会出现在这里。</p>
-          </div>
-          <button
-            id="closeProjectSheetButton"
-            class="icon-button project-sheet-close"
-            type="button"
-            aria-label="关闭项目选择"
-          >
-            ×
-          </button>
-        </div>
-        <div id="projectSheetList" class="project-sheet-list" role="listbox" aria-label="项目列表"></div>
-      </section>
-    </div>
-
-    <script src="/app.js?v=18" type="module"></script>
+    <script src="/app.js?v=20" type="module"></script>
   </body>
 </html>

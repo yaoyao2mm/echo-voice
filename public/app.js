@@ -37,19 +37,17 @@ const elements = {
   activeSessionMeta: document.querySelector("#activeSessionMeta"),
   refreshCodex: document.querySelector("#refreshCodex"),
   toggleSessionsButton: document.querySelector("#toggleSessionsButton"),
-  sessionRailButton: document.querySelector("#sessionRailButton"),
-  closeSessionsButton: document.querySelector("#closeSessionsButton"),
   sessionBackdrop: document.querySelector("#sessionBackdrop"),
   sessionSearch: document.querySelector("#sessionSearch"),
   showActiveSessionsButton: document.querySelector("#showActiveSessionsButton"),
   showArchivedSessionsButton: document.querySelector("#showArchivedSessionsButton"),
+  sidebarUserMeta: document.querySelector("#sidebarUserMeta"),
   codexProject: document.querySelector("#codexProject"),
-  projectPickerButton: document.querySelector("#projectPickerButton"),
+  heroProjectLabel: document.querySelector("#heroProjectLabel"),
+  heroProjectMeta: document.querySelector("#heroProjectMeta"),
+  projectSidebarCard: document.querySelector("#projectSidebarCard"),
   projectPickerLabel: document.querySelector("#projectPickerLabel"),
   projectPickerMeta: document.querySelector("#projectPickerMeta"),
-  projectSheet: document.querySelector("#projectSheet"),
-  projectSheetBackdrop: document.querySelector("#projectSheetBackdrop"),
-  closeProjectSheetButton: document.querySelector("#closeProjectSheetButton"),
   projectSheetStatus: document.querySelector("#projectSheetStatus"),
   projectSheetList: document.querySelector("#projectSheetList"),
   codexPrompt: document.querySelector("#codexPrompt"),
@@ -77,7 +75,6 @@ let showArchivedSessions = false;
 let sessionSearchQuery = "";
 let postprocessEnabled = localStorage.getItem("echoPostprocessEnabled") !== "false";
 let composerBusy = false;
-let projectSheetOpen = false;
 
 bindViewportMetrics();
 elements.loginForm.addEventListener("submit", login);
@@ -90,9 +87,7 @@ elements.savePairingButton.addEventListener("click", pairFromInput);
 elements.refreshCodex.addEventListener("click", refreshCodex);
 elements.newCodexSessionButton.addEventListener("click", startNewCodexSession);
 elements.sendCodexButton.addEventListener("click", sendToCodex);
-elements.toggleSessionsButton.addEventListener("click", openSessionSidebar);
-elements.sessionRailButton.addEventListener("click", openSessionSidebar);
-elements.closeSessionsButton.addEventListener("click", closeSessionSidebar);
+elements.toggleSessionsButton.addEventListener("click", toggleSessionSidebar);
 elements.sessionBackdrop.addEventListener("click", closeSessionSidebar);
 elements.sessionSearch.addEventListener("input", () => {
   sessionSearchQuery = elements.sessionSearch.value.trim().toLowerCase();
@@ -100,9 +95,6 @@ elements.sessionSearch.addEventListener("input", () => {
 });
 elements.showActiveSessionsButton.addEventListener("click", () => setSessionArchiveView(false));
 elements.showArchivedSessionsButton.addEventListener("click", () => setSessionArchiveView(true));
-elements.projectPickerButton.addEventListener("click", openProjectSheet);
-elements.projectSheetBackdrop.addEventListener("click", () => closeProjectSheet());
-elements.closeProjectSheetButton.addEventListener("click", () => closeProjectSheet());
 elements.codexProject.addEventListener("change", () => {
   localStorage.setItem("echoCodexProject", elements.codexProject.value);
   syncProjectPicker();
@@ -121,6 +113,7 @@ if ("serviceWorker" in navigator) {
 }
 
 updatePostprocessUi();
+updateSessionSidebarToggle(false);
 await bootUserSession();
 updateAuthView();
 if (isLoggedIn() && token) {
@@ -158,13 +151,19 @@ function updateAuthView(message = "") {
   const paired = Boolean(token);
   const showApp = loggedIn && paired;
 
+  if (!showApp && elements.codexView.classList.contains("sessions-open")) {
+    closeSessionSidebar({ restoreFocus: false });
+  }
+
   elements.loginPanel.hidden = loggedIn;
   elements.pairingPanel.hidden = !loggedIn || paired;
-  elements.openPairingButton.hidden = !loggedIn || paired;
+  elements.openPairingButton.hidden = !loggedIn;
+  elements.openPairingButton.textContent = paired ? "重新配对" : "扫码配对";
   elements.refreshStatus.hidden = !showApp;
   elements.userBadge.hidden = !loggedIn;
   elements.logoutButton.hidden = !authEnabled || !loggedIn;
   elements.userBadge.textContent = loggedIn ? displayUser(currentUser) : "";
+  renderUserCenter();
   for (const node of elements.authenticated) node.hidden = !showApp;
 
   if (!loggedIn) {
@@ -245,7 +244,7 @@ function logout() {
     codexTimer = null;
   }
   stopPairingScanner();
-  closeProjectSheet({ restoreFocus: false });
+  closeSessionSidebar({ restoreFocus: false });
   updateAuthView("已退出，请重新登录。");
 }
 
@@ -259,8 +258,19 @@ function enterLogin(message = "登录已过期，请重新登录。") {
     codexTimer = null;
   }
   stopPairingScanner();
-  closeProjectSheet({ restoreFocus: false });
+  closeSessionSidebar({ restoreFocus: false });
   updateAuthView(message);
+}
+
+function renderUserCenter() {
+  const loggedIn = isLoggedIn();
+  if (!loggedIn) {
+    elements.sidebarUserMeta.textContent = "请先登录，然后连接桌面端。";
+    return;
+  }
+  elements.sidebarUserMeta.textContent = token
+    ? "已连接桌面端，可以在这里刷新状态、重新配对或退出。"
+    : "账号已登录，但还没有连接桌面端。";
 }
 
 function setCurrentUser(user, options = {}) {
@@ -305,6 +315,10 @@ function syncViewportMetrics() {
 function showPairingPanel({ focus = false } = {}) {
   if (!ensureLoggedIn()) return;
   updateAuthView();
+  elements.pairingPanel.hidden = false;
+  if (token && !elements.pairingStatus.textContent.trim()) {
+    elements.pairingStatus.textContent = "重新扫码会覆盖当前桌面端配对。";
+  }
   if (focus) {
     elements.pairingPanel.scrollIntoView({ behavior: "smooth", block: "start" });
     elements.scanPairingButton.focus({ preventScroll: true });
@@ -319,7 +333,6 @@ function enterPairing(message = "配对已失效，请重新扫描桌面端二�
     codexTimer = null;
   }
   stopPairingScanner();
-  closeProjectSheet({ restoreFocus: false });
   updateAuthView(message);
 }
 
@@ -349,6 +362,7 @@ async function refreshStatus(options = {}) {
     const codexOnline = status.codex?.agentOnline;
     elements.statusText.textContent = codexOnline ? "Codex 在线" : status.mode === "relay" ? "等待桌面 agent" : status.platform;
     if (status.user) setCurrentUser(status.user, { updateView: false });
+    renderUserCenter();
     if (status.codex) renderCodexStatus(status.codex);
   } catch (error) {
     if (handleAuthError(error, "当前浏览器没有有效配对，请扫描桌面端二维码。")) {
@@ -515,11 +529,41 @@ function renderCodexStatus(codex) {
 function openSessionSidebar() {
   elements.codexView.classList.add("sessions-open");
   elements.sessionBackdrop.hidden = false;
+  updateSessionSidebarToggle(true);
+  syncBodySheetState();
+  window.requestAnimationFrame(() => {
+    elements.sessionSearch.focus({ preventScroll: true });
+  });
 }
 
-function closeSessionSidebar() {
+function closeSessionSidebar({ restoreFocus = true } = {}) {
   elements.codexView.classList.remove("sessions-open");
   elements.sessionBackdrop.hidden = true;
+  updateSessionSidebarToggle(false);
+  syncBodySheetState();
+  if (restoreFocus) {
+    elements.toggleSessionsButton.focus({ preventScroll: true });
+  }
+}
+
+function toggleSessionSidebar() {
+  if (elements.codexView.classList.contains("sessions-open")) {
+    closeSessionSidebar();
+    return;
+  }
+  openSessionSidebar();
+}
+
+function updateSessionSidebarToggle(isOpen) {
+  const label = isOpen ? "关闭会话列表" : "打开会话列表";
+  elements.toggleSessionsButton.textContent = isOpen ? "✕" : "☰";
+  elements.toggleSessionsButton.setAttribute("aria-label", label);
+  elements.toggleSessionsButton.setAttribute("title", label);
+  elements.toggleSessionsButton.setAttribute("aria-expanded", isOpen ? "true" : "false");
+}
+
+function syncBodySheetState() {
+  document.body.classList.toggle("sheet-open", elements.codexView.classList.contains("sessions-open"));
 }
 
 async function setSessionArchiveView(archived) {
@@ -533,7 +577,11 @@ async function setSessionArchiveView(archived) {
   renderEmptySessionDetail(
     archived
       ? { title: "归档", meta: "归档会话不会出现在最近列表。", body: "选择一个归档会话可以查看详情，也可以恢复到最近列表。" }
-      : { title: "新会话", meta: "选择一个会话，或者直接发送新任务。", body: "发送后会创建独立会话；选中左侧会话时则会继续该会话。" }
+      : {
+          title: "新会话",
+          meta: "外面只保留当前对话，历史会话从左上角切换。",
+          body: "发送后会创建独立会话；切到已有会话时则会继续那条对话。"
+        }
   );
   await loadCodexJobs();
 }
@@ -548,11 +596,11 @@ function startNewCodexSession() {
     elements.showArchivedSessionsButton.classList.remove("active");
     loadCodexJobs().catch(() => {});
   }
-  closeSessionSidebar();
+  closeSessionSidebar({ restoreFocus: false });
   renderEmptySessionDetail({
     title: "新会话",
-    meta: "选择项目后发送任务。",
-    body: "把一个灵感、bug 或任务交给本机 Codex。"
+    meta: "外面保留当前对话，历史会话从左上角切换。",
+    body: "选择项目后发送第一条任务，新的会话会直接显示在这里。"
   });
   for (const button of elements.codexJobs.querySelectorAll(".codex-job")) {
     button.classList.remove("active");
@@ -657,32 +705,36 @@ function updateComposerAvailability() {
       : "发送";
   elements.newCodexSessionButton.disabled = composerBusy || !selectedCodexJobId;
   elements.codexProject.disabled = composerBusy;
-  elements.projectPickerButton.disabled = composerBusy || codexWorkspaces.length === 0;
   elements.codexPrompt.disabled = composerBusy;
 }
 
 function renderProjectPicker(agentOnline) {
   const selectedWorkspace = codexWorkspaces.find((workspace) => workspace.id === elements.codexProject.value) || null;
   const hasProjects = codexWorkspaces.length > 0;
-  elements.projectPickerButton.classList.toggle("empty", !selectedWorkspace);
+  elements.projectSidebarCard.classList.toggle("empty", !selectedWorkspace);
 
   if (!hasProjects) {
     elements.projectPickerLabel.textContent = agentOnline ? "还没有授权工程目录" : "等待桌面 agent";
     elements.projectPickerMeta.textContent = agentOnline
       ? "去桌面端 Codex 设置添加允许的项目。"
       : "桌面端启动后会同步可切换项目。";
+    elements.heroProjectLabel.textContent = elements.projectPickerLabel.textContent;
+    elements.heroProjectMeta.textContent = elements.projectPickerMeta.textContent;
     elements.projectSheetStatus.textContent = "桌面端授权的目录会出现在这里。";
     renderProjectSheetList();
-    closeProjectSheet({ restoreFocus: false });
     return;
   }
 
   if (selectedWorkspace) {
     elements.projectPickerLabel.textContent = workspaceLabel(selectedWorkspace);
     elements.projectPickerMeta.textContent = workspaceMeta(selectedWorkspace);
+    elements.heroProjectLabel.textContent = workspaceLabel(selectedWorkspace);
+    elements.heroProjectMeta.textContent = workspaceMeta(selectedWorkspace);
   } else {
     elements.projectPickerLabel.textContent = "选择项目";
     elements.projectPickerMeta.textContent = `已同步 ${codexWorkspaces.length} 个项目。`;
+    elements.heroProjectLabel.textContent = elements.projectPickerLabel.textContent;
+    elements.heroProjectMeta.textContent = elements.projectPickerMeta.textContent;
   }
 
   elements.projectSheetStatus.textContent = `桌面端已授权 ${codexWorkspaces.length} 个项目，发送前可随时切换。`;
@@ -723,42 +775,12 @@ function renderProjectSheetList() {
   }
 }
 
-function openProjectSheet() {
-  if (elements.projectPickerButton.disabled) return;
-  projectSheetOpen = true;
-  elements.projectSheet.hidden = false;
-  elements.projectSheet.setAttribute("aria-hidden", "false");
-  elements.projectPickerButton.setAttribute("aria-expanded", "true");
-  document.body.classList.add("sheet-open");
-  const active = elements.projectSheetList.querySelector(".project-option.active");
-  const fallback = elements.projectSheetList.querySelector(".project-option");
-  window.requestAnimationFrame(() => {
-    (active || fallback || elements.closeProjectSheetButton).focus({ preventScroll: true });
-  });
-}
-
-function closeProjectSheet({ restoreFocus = true } = {}) {
-  if (!projectSheetOpen && elements.projectSheet.hidden) return;
-  projectSheetOpen = false;
-  elements.projectSheet.hidden = true;
-  elements.projectSheet.setAttribute("aria-hidden", "true");
-  elements.projectPickerButton.setAttribute("aria-expanded", "false");
-  document.body.classList.remove("sheet-open");
-  if (restoreFocus) {
-    elements.projectPickerButton.focus({ preventScroll: true });
-  }
-}
-
 function handleGlobalKeydown(event) {
   if (event.key !== "Escape") return;
   if (elements.codexView.classList.contains("sessions-open")) {
     event.preventDefault();
     closeSessionSidebar();
-    return;
   }
-  if (!projectSheetOpen) return;
-  event.preventDefault();
-  closeProjectSheet();
 }
 
 function selectProject(projectId) {
@@ -768,7 +790,6 @@ function selectProject(projectId) {
   localStorage.setItem("echoCodexProject", projectId);
   syncProjectPicker();
   updateComposerAvailability();
-  closeProjectSheet();
   if (previous && previous !== projectId) {
     toast(`已切换到 ${workspaceLabel(codexWorkspaces.find((workspace) => workspace.id === projectId) || { id: projectId })}`);
   }
@@ -777,10 +798,12 @@ function selectProject(projectId) {
 function syncProjectPicker() {
   const workspace = codexWorkspaces.find((item) => item.id === elements.codexProject.value);
   if (workspace) {
-    elements.projectPickerButton.classList.remove("empty");
     elements.projectPickerLabel.textContent = workspaceLabel(workspace);
     elements.projectPickerMeta.textContent = workspaceMeta(workspace);
+    elements.heroProjectLabel.textContent = workspaceLabel(workspace);
+    elements.heroProjectMeta.textContent = workspaceMeta(workspace);
   }
+  elements.projectSidebarCard.classList.toggle("empty", !workspace);
   renderProjectSheetList();
 }
 
@@ -818,8 +841,12 @@ async function loadCodexJobs() {
       selectedCodexJobId = "";
       renderEmptySessionDetail({
         title: showArchivedSessions ? "归档" : "新会话",
-        meta: showArchivedSessions ? "归档会话会从最近列表中移走。" : "发送第一条任务后，会话会出现在左侧。",
-        body: showArchivedSessions ? "归档用于清理工作台；恢复后可以继续查看和对话。" : "手机负责捕捉想法，本机 Codex 负责执行。"
+        meta: showArchivedSessions
+          ? "归档会话会从最近列表中移走。"
+          : "外面只保留当前对话，历史会话从左上角进入。",
+        body: showArchivedSessions
+          ? "归档用于清理工作台；恢复后可以继续查看和对话。"
+          : "手机负责捕捉想法，本机 Codex 负责执行。"
       });
     }
     return;
@@ -854,7 +881,7 @@ async function loadCodexJobs() {
     renderEmptySessionDetail({
       title: "新会话",
       meta: "当前不会覆盖任何历史会话。",
-      body: "发送后会创建独立会话；选中左侧会话时则会继续该会话。"
+      body: "发送后会创建独立会话；历史会话仍然保留在左上角抽屉里。"
     });
   }
 }
@@ -883,7 +910,7 @@ function renderSessionButton(job) {
   item.querySelector(".session-open").addEventListener("click", () => {
     composingNewSession = false;
     showCodexJob(job.id);
-    closeSessionSidebar();
+    closeSessionSidebar({ restoreFocus: false });
   });
   item.querySelector(".session-archive-action").addEventListener("click", () => archiveSession(job.id, !archived));
   return item;
