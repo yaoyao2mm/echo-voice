@@ -7,7 +7,7 @@ Echo Codex is a phone-first control surface for local Codex:
 3. Capture a rough idea or Codex task on the phone, including through the phone's native voice input keyboard.
 4. Optionally enable phone-side post-processing before queueing the task.
 5. Choose an allowlisted local project.
-6. The desktop agent pulls the task, runs `codex exec --json` locally, and streams progress back to the phone.
+6. The desktop agent pulls the request, talks to local `codex app-server` over stdio, and streams thread/turn progress back to the phone.
 
 The first version is intentionally lightweight: a Node relay, a local desktop agent, and a mobile web/PWA UI. Echo does not own dictation; the phone captures text, the relay can clean or structure it, and the desktop agent runs Codex locally. The longer-term direction is isolated per-task worktrees, so Codex can explore an idea without touching your active checkout until you decide to keep it.
 
@@ -113,7 +113,7 @@ The Overview tab also shows a pairing QR code. Scan it from the phone to open th
 
 If web login is enabled, the phone page asks for the configured user before it accepts the paired token. Browser users send both a login session and the pairing token; desktop agents still authenticate with `ECHO_TOKEN` only.
 
-In internet relay mode, phone-side refinement runs on the relay server. The desktop settings page can test that live relay refinement path, but changing local model fields only affects local mode and local diagnostics. The desktop-side model fields that matter during relay mode are the Codex settings (`ECHO_CODEX_MODEL`, `ECHO_CODEX_PROFILE`, and workspace/sandbox options), because those control the local `codex exec` process.
+In internet relay mode, phone-side refinement runs on the relay server. The desktop settings page can test that live relay refinement path, but changing local model fields only affects local mode and local diagnostics. The desktop-side model fields that matter during relay mode are the Codex settings (`ECHO_CODEX_MODEL`, `ECHO_CODEX_PROFILE`, `ECHO_CODEX_APPROVAL_POLICY`, and workspace/sandbox options), because those control local Codex execution.
 
 ### VPN And Proxy
 
@@ -184,19 +184,22 @@ If no post-processing provider is configured, Echo falls back to a conservative 
 
 ## Mobile Codex Remote
 
-The first Codex remote mode is intentionally conservative:
+The primary Codex remote mode is now interactive:
 
 - The phone can submit prompts, but cannot choose arbitrary filesystem paths or shell commands.
-- The phone composer has a post-processing switch: when it is on, Echo refines the prompt before queueing; when it is off, Echo sends the original input.
-- The phone shows the task queue, current status, latest output, full logs, and final result.
-- The desktop agent only runs `codex exec` inside `ECHO_CODEX_WORKSPACES`.
+- The phone composer has a post-processing switch: when it is on, Echo refines the prompt before sending; when it is off, Echo sends the original input.
+- The phone creates an app-server backed Codex session, shows current status, latest output, full logs, and final result.
+- Pressing "继续" sends another user message into the selected Codex session instead of starting from scratch.
+- Pressing "新会话" clears the selection so the next prompt starts a fresh Codex thread.
+- The desktop agent only starts sessions inside `ECHO_CODEX_WORKSPACES`.
 - The default sandbox is `workspace-write`.
-- The relay persists Codex jobs, agent heartbeats, leases, logs, and final messages in SQLite under `~/.echo-voice/echo.sqlite`.
+- The default interactive approval policy is `on-request`; approval requests are not auto-approved by Echo. The first app-server slice records and declines approval requests until a phone-side approval UI is added.
+- The relay persists Codex jobs, interactive sessions, agent heartbeats, leases, logs, and final messages in SQLite under `~/.echo-voice/echo.sqlite`.
 - Future worktree mode will let each queued task run in a separate local Git worktree before you apply or discard the result.
 
 See [docs/mobile-codex-roadmap.md](docs/mobile-codex-roadmap.md) for the implementation roadmap.
 
-Interactive TUI mirroring is a later layer on top of Codex `app-server`; this MVP uses `codex exec --json` because it is stable enough for one-shot engineering tasks from mobile.
+The legacy one-shot queue still exists internally and in tests, but the phone UI is moving to Codex `app-server` sessions so follow-up context can behave much closer to the desktop Codex client.
 
 ## Product Shape
 

@@ -26,12 +26,36 @@ const insertEvent = db.prepare(`
   VALUES (@jobId, @at, @type, @text, @rawJson)
 `);
 
+const insertSessionEvent = db.prepare(`
+  INSERT INTO codex_session_events (session_id, at, type, text, raw_json)
+  VALUES (@sessionId, @at, @type, @text, @rawJson)
+`);
+
+const insertSessionCommand = db.prepare(`
+  INSERT INTO codex_session_commands (
+    id, session_id, type, payload_json, status, created_at, updated_at
+  ) VALUES (
+    @id, @sessionId, @type, @payloadJson, 'queued', @now, @now
+  )
+`);
+
 const trimEvents = db.prepare(`
   DELETE FROM codex_events
   WHERE job_id = ?
     AND id NOT IN (
       SELECT id FROM codex_events
       WHERE job_id = ?
+      ORDER BY id DESC
+      LIMIT ?
+    )
+`);
+
+const trimSessionEvents = db.prepare(`
+  DELETE FROM codex_session_events
+  WHERE session_id = ?
+    AND id NOT IN (
+      SELECT id FROM codex_session_events
+      WHERE session_id = ?
       ORDER BY id DESC
       LIMIT ?
     )
@@ -51,6 +75,34 @@ const summarizeJobColumns = `
   leased_by AS leasedBy,
   lease_expires_at AS leaseExpiresAt,
   updated_at AS updatedAt
+`;
+
+const summarizeSessionColumns = `
+  id,
+  project_id AS projectId,
+  title,
+  status,
+  app_thread_id AS appThreadId,
+  active_turn_id AS activeTurnId,
+  created_at AS createdAt,
+  updated_at AS updatedAt,
+  last_error AS lastError,
+  final_message AS finalMessage,
+  leased_by AS leasedBy,
+  lease_expires_at AS leaseExpiresAt
+`;
+
+const summarizeSessionCommandColumns = `
+  id,
+  session_id AS sessionId,
+  type,
+  payload_json AS payloadJson,
+  status,
+  created_at AS createdAt,
+  updated_at AS updatedAt,
+  leased_by AS leasedBy,
+  lease_expires_at AS leaseExpiresAt,
+  error
 `;
 
 export function createJob({ projectId, prompt }) {
@@ -142,7 +194,8 @@ export function statusSnapshot() {
     running,
     active: runningJobs[0] || null,
     runningJobs,
-    recent: listJobs(10)
+    recent: listJobs(10),
+    interactive: sessionStatusSnapshot()
   };
 }
 
@@ -309,7 +362,312 @@ export function completeJob(jobId, result = {}, options = {}) {
   return true;
 }
 
+export function createSession({ projectId, prompt }) {
+  const now = nowIso();
+  const sessionId = crypto.randomUUID();
+  const commandId = crypto.randomUUID();
+  const normalizedPrompt = String(prompt || "").trim();
+  const normalizedProjectId = String(projectId || "").trim();
+  const title = normalizedPrompt.split(/\s+/).join(" ").slice(0, 120) || "Codex session";
+
+  const create = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO codex_sessions (
+        id, project_id, title, status, created_at, updated_at
+      ) VALUES (
+        @id, @projectId, @title, 'queued', @now, @now
+      )
+    `).run({
+      id: sessionId,
+      projectId: normalizedProjectId,
+      title,
+      now
+    });
+
+    insertSessionCommand.run({
+      id: commandId,
+      sessionId,
+      type: "start",
+      payloadJson: JSON.stringify({ prompt: normalizedPrompt }),
+      now
+    });
+
+    insertSessionEvent.run(
+      normalizeSessionEvent(sessionId, {
+        type: "user.message",
+        text: normalizedPrompt,
+        raw: { source: "mobile", commandId, type: "start" }
+      }, now)
+    );
+  });
+
+  create();
+  trimOldSessions();
+  return getSessionSummary(sessionId);
+}
+
+export function listSessions(limit = 20) {
+  reclaimExpiredSessionCommandLeases();
+
+  return db.prepare(`
+    SELECT ${summarizeSessionColumns}
+    FROM codex_sessions
+    ORDER BY updated_at DESC, created_at DESC
+    LIMIT ?
+  `).all(Math.max(1, Math.min(Number(limit) || 20, 100))).map(summarizeSession);
+}
+
+export function getSession(id) {
+  reclaimExpiredSessionCommandLeases();
+
+  const session = getSessionSummary(id);
+  if (!session) return null;
+  return {
+    ...session,
+    events: listSessionEvents(id)
+  };
+}
+
+export function enqueueSessionMessage(sessionId, text) {
+  const session = getSessionSummary(sessionId);
+  if (!session) return notFound("Codex session not found.");
+  if (["closed", "failed", "stale"].includes(session.status)) {
+    return conflict("This Codex session is no longer active.");
+  }
+
+  const now = nowIso();
+  const commandId = crypto.randomUUID();
+  const message = String(text || "").trim();
+  if (!message) return badRequest("Codex message is required.");
+
+  const enqueue = db.transaction(() => {
+    insertSessionCommand.run({
+      id: commandId,
+      sessionId,
+      type: "message",
+      payloadJson: JSON.stringify({ text: message }),
+      now
+    });
+
+    db.prepare(`
+      UPDATE codex_sessions
+      SET updated_at = @now,
+          status = CASE WHEN status = 'queued' THEN 'queued' ELSE status END
+      WHERE id = @sessionId
+    `).run({ sessionId, now });
+
+    insertSessionEvent.run(
+      normalizeSessionEvent(sessionId, {
+        type: "user.message",
+        text: message,
+        raw: { source: "mobile", commandId, type: "message" }
+      }, now)
+    );
+  });
+
+  enqueue();
+  return getSession(sessionId);
+}
+
+export function acquireNextSessionCommand({ agentId, workspaces = [] } = {}) {
+  reclaimExpiredSessionCommandLeases();
+
+  const workspaceIds = workspaces.map((workspace) => workspace.id).filter(Boolean);
+  if (workspaceIds.length === 0) return null;
+
+  const leaseHolder = normalizeAgentId(agentId);
+  const now = nowIso();
+  const leaseExpiresAt = new Date(Date.now() + config.codex.leaseMs).toISOString();
+  const placeholders = workspaceIds.map(() => "?").join(",");
+
+  const acquire = db.transaction(() => {
+    const command = db.prepare(`
+      SELECT
+        c.id,
+        c.session_id AS sessionId,
+        c.type,
+        c.payload_json AS payloadJson,
+        c.status,
+        c.created_at AS createdAt,
+        c.updated_at AS updatedAt,
+        c.leased_by AS leasedBy,
+        c.lease_expires_at AS leaseExpiresAt,
+        c.error,
+        s.project_id AS projectId,
+        s.app_thread_id AS appThreadId,
+        s.active_turn_id AS activeTurnId
+      FROM codex_session_commands c
+      JOIN codex_sessions s ON s.id = c.session_id
+      WHERE c.status = 'queued'
+        AND s.status NOT IN ('closed', 'failed', 'stale')
+        AND s.project_id IN (${placeholders})
+      ORDER BY c.created_at ASC
+      LIMIT 1
+    `).get(...workspaceIds);
+
+    if (!command) return null;
+
+    db.prepare(`
+      UPDATE codex_session_commands
+      SET status = 'leased',
+          leased_by = @leasedBy,
+          lease_expires_at = @leaseExpiresAt,
+          updated_at = @now
+      WHERE id = @id
+        AND status = 'queued'
+    `).run({
+      id: command.id,
+      leasedBy: leaseHolder,
+      leaseExpiresAt,
+      now
+    });
+
+    db.prepare(`
+      UPDATE codex_sessions
+      SET status = @status,
+          leased_by = @leasedBy,
+          lease_expires_at = @leaseExpiresAt,
+          updated_at = @now
+      WHERE id = @sessionId
+    `).run({
+      sessionId: command.sessionId,
+      status: command.type === "start" ? "starting" : "running",
+      leasedBy: leaseHolder,
+      leaseExpiresAt,
+      now
+    });
+
+    insertSessionEvent.run(
+      normalizeSessionEvent(command.sessionId, {
+        type: "command.acquired",
+        text: `Desktop agent ${leaseHolder} acquired ${command.type}.`
+      }, now)
+    );
+
+    return buildAgentSessionCommand(command);
+  });
+
+  return acquire();
+}
+
+export function appendSessionEvents(sessionId, incomingEvents = [], options = {}) {
+  const session = getSessionSummary(sessionId);
+  if (!session) return false;
+  if (!canMutateSession(session, options.agentId)) return false;
+
+  const now = nowIso();
+  const leaseExpiresAt = new Date(Date.now() + config.codex.leaseMs).toISOString();
+  const events = incomingEvents.slice(0, 80).map((event) => normalizeSessionEvent(sessionId, event, now));
+  const update = deriveSessionUpdate(incomingEvents, session);
+
+  const write = db.transaction(() => {
+    db.prepare(`
+      UPDATE codex_sessions
+      SET lease_expires_at = @leaseExpiresAt,
+          updated_at = @now,
+          status = COALESCE(@status, status),
+          app_thread_id = COALESCE(@appThreadId, app_thread_id),
+          active_turn_id = CASE WHEN @clearActiveTurnId = 1 THEN NULL ELSE COALESCE(@activeTurnId, active_turn_id) END,
+          last_error = COALESCE(@lastError, last_error),
+          final_message = COALESCE(@finalMessage, final_message)
+      WHERE id = @sessionId
+        AND leased_by = @leasedBy
+    `).run({
+      sessionId,
+      now,
+      leaseExpiresAt,
+      leasedBy: session.leasedBy,
+      status: update.status,
+      appThreadId: update.appThreadId,
+      activeTurnId: update.activeTurnId,
+      clearActiveTurnId: update.clearActiveTurnId ? 1 : 0,
+      lastError: update.lastError,
+      finalMessage: update.finalMessage
+    });
+
+    for (const event of events) insertSessionEvent.run(event);
+    trimSessionEvents.run(sessionId, sessionId, config.codex.maxEvents);
+    return true;
+  });
+
+  return write();
+}
+
+export function completeSessionCommand(commandId, result = {}, options = {}) {
+  const command = getSessionCommandSummary(commandId);
+  if (!command) return false;
+  const providedAgentId = normalizeAgentId(options.agentId);
+  if (command.status !== "leased" || command.leasedBy !== providedAgentId) return false;
+
+  const session = getSessionSummary(command.sessionId);
+  if (!session || !canMutateSession(session, providedAgentId)) return false;
+
+  const now = nowIso();
+  const ok = result.ok === true;
+  const error = String(result.error || "");
+  const status = ok ? "done" : "failed";
+  const resultSessionStatus = ok ? result.sessionStatus || (result.activeTurnId ? "running" : "active") : "failed";
+  const turnAlreadyCompleted = ok && resultSessionStatus === "running" && getLatestSessionEventType(command.sessionId) === "turn/completed";
+  const sessionStatus = turnAlreadyCompleted ? "active" : resultSessionStatus;
+  const activeTurnId = turnAlreadyCompleted ? null : result.activeTurnId || null;
+
+  const complete = db.transaction(() => {
+    db.prepare(`
+      UPDATE codex_session_commands
+      SET status = @status,
+          error = @error,
+          updated_at = @now,
+          leased_by = NULL,
+          lease_expires_at = NULL
+      WHERE id = @commandId
+        AND status = 'leased'
+        AND leased_by = @leasedBy
+    `).run({
+      commandId,
+      status,
+      error,
+      now,
+      leasedBy: providedAgentId
+    });
+
+    db.prepare(`
+      UPDATE codex_sessions
+      SET status = @sessionStatus,
+          app_thread_id = COALESCE(@appThreadId, app_thread_id),
+          active_turn_id = COALESCE(@activeTurnId, active_turn_id),
+          last_error = @lastError,
+          final_message = COALESCE(@finalMessage, final_message),
+          updated_at = @now
+      WHERE id = @sessionId
+        AND leased_by = @leasedBy
+    `).run({
+      sessionId: command.sessionId,
+      sessionStatus,
+      appThreadId: result.appThreadId || null,
+      activeTurnId,
+      lastError: error,
+      finalMessage: result.finalMessage || null,
+      now,
+      leasedBy: providedAgentId
+    });
+
+    insertSessionEvent.run(
+      normalizeSessionEvent(command.sessionId, {
+        type: ok ? "command.completed" : "command.failed",
+        text: ok ? `${command.type} accepted by Codex app-server.` : error || `${command.type} failed.`
+      }, now)
+    );
+  });
+
+  complete();
+  trimOldSessions();
+  return true;
+}
+
 export function resetStoreForTest() {
+  db.prepare("DELETE FROM codex_session_events").run();
+  db.prepare("DELETE FROM codex_session_commands").run();
+  db.prepare("DELETE FROM codex_sessions").run();
   db.prepare("DELETE FROM codex_events").run();
   db.prepare("DELETE FROM codex_jobs").run();
   db.prepare("DELETE FROM codex_agents").run();
@@ -357,6 +715,58 @@ function migrate() {
       workspaces_json TEXT NOT NULL DEFAULT '[]',
       runtime_json TEXT NOT NULL DEFAULT '{}'
     );
+
+    CREATE TABLE IF NOT EXISTS codex_sessions (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      title TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL CHECK (status IN ('queued', 'starting', 'active', 'running', 'failed', 'closed', 'stale')),
+      app_thread_id TEXT,
+      active_turn_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_error TEXT NOT NULL DEFAULT '',
+      final_message TEXT NOT NULL DEFAULT '',
+      leased_by TEXT,
+      lease_expires_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_codex_sessions_status_updated
+      ON codex_sessions(status, updated_at);
+
+    CREATE INDEX IF NOT EXISTS idx_codex_sessions_thread
+      ON codex_sessions(app_thread_id);
+
+    CREATE TABLE IF NOT EXISTS codex_session_commands (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES codex_sessions(id) ON DELETE CASCADE,
+      type TEXT NOT NULL CHECK (type IN ('start', 'message', 'stop')),
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL CHECK (status IN ('queued', 'leased', 'done', 'failed')),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      leased_by TEXT,
+      lease_expires_at TEXT,
+      error TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_codex_session_commands_status_created
+      ON codex_session_commands(status, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_codex_session_commands_session
+      ON codex_session_commands(session_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS codex_session_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL REFERENCES codex_sessions(id) ON DELETE CASCADE,
+      at TEXT NOT NULL,
+      type TEXT NOT NULL,
+      text TEXT NOT NULL DEFAULT '',
+      raw_json TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_codex_session_events_session_id
+      ON codex_session_events(session_id, id);
   `);
 }
 
@@ -457,6 +867,78 @@ function summarizeJob(row) {
   };
 }
 
+function sessionStatusSnapshot() {
+  reclaimExpiredSessionCommandLeases();
+
+  const queuedCommands = db.prepare("SELECT COUNT(*) AS count FROM codex_session_commands WHERE status = 'queued'").get().count;
+  const activeSessions = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM codex_sessions
+    WHERE status IN ('starting', 'active', 'running')
+  `).get().count;
+
+  return {
+    queuedCommands,
+    activeSessions,
+    recent: listSessions(8)
+  };
+}
+
+function getSessionSummary(id) {
+  const row = db.prepare(`
+    SELECT ${summarizeSessionColumns}
+    FROM codex_sessions
+    WHERE id = ?
+  `).get(id);
+  return row ? summarizeSession(row) : null;
+}
+
+function getSessionCommandSummary(id) {
+  const row = db.prepare(`
+    SELECT ${summarizeSessionCommandColumns}
+    FROM codex_session_commands
+    WHERE id = ?
+  `).get(id);
+  return row ? summarizeSessionCommand(row) : null;
+}
+
+function summarizeSession(row) {
+  const lastEvent = db.prepare(`
+    SELECT at, type, text, raw_json AS rawJson
+    FROM codex_session_events
+    WHERE session_id = ?
+    ORDER BY id DESC
+    LIMIT 1
+  `).get(row.id);
+
+  const eventCount = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM codex_session_events
+    WHERE session_id = ?
+  `).get(row.id).count;
+
+  const pendingCommandCount = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM codex_session_commands
+    WHERE session_id = ?
+      AND status IN ('queued', 'leased')
+  `).get(row.id).count;
+
+  return {
+    ...row,
+    eventCount,
+    pendingCommandCount,
+    lastEvent: lastEvent ? parseEvent(lastEvent) : null
+  };
+}
+
+function summarizeSessionCommand(row) {
+  return {
+    ...row,
+    payload: parseJson(row.payloadJson, {})
+  };
+}
+
 function listEvents(jobId) {
   return db.prepare(`
     SELECT at, type, text, raw_json AS rawJson
@@ -464,6 +946,25 @@ function listEvents(jobId) {
     WHERE job_id = ?
     ORDER BY id ASC
   `).all(jobId).map(parseEvent);
+}
+
+function listSessionEvents(sessionId) {
+  return db.prepare(`
+    SELECT at, type, text, raw_json AS rawJson
+    FROM codex_session_events
+    WHERE session_id = ?
+    ORDER BY id ASC
+  `).all(sessionId).map(parseEvent);
+}
+
+function getLatestSessionEventType(sessionId) {
+  return db.prepare(`
+    SELECT type
+    FROM codex_session_events
+    WHERE session_id = ?
+    ORDER BY id DESC
+    LIMIT 1
+  `).get(sessionId)?.type || "";
 }
 
 function insertInternalEvents(jobId, events) {
@@ -483,6 +984,17 @@ function normalizeEvent(jobId, event = {}, fallbackAt) {
   };
 }
 
+function normalizeSessionEvent(sessionId, event = {}, fallbackAt) {
+  const raw = event.raw && typeof event.raw === "object" ? event.raw : undefined;
+  return {
+    sessionId,
+    at: String(event.at || fallbackAt || nowIso()),
+    type: String(event.type || "output").slice(0, 120),
+    text: String(event.text || "").slice(0, 12000),
+    rawJson: raw ? JSON.stringify(raw).slice(0, 30000) : null
+  };
+}
+
 function parseEvent(row) {
   return {
     at: row.at,
@@ -490,6 +1002,62 @@ function parseEvent(row) {
     text: row.text,
     raw: parseJson(row.rawJson)
   };
+}
+
+function buildAgentSessionCommand(command) {
+  const parsed = summarizeSessionCommand(command);
+  return {
+    id: parsed.id,
+    sessionId: parsed.sessionId,
+    type: parsed.type,
+    projectId: command.projectId,
+    appThreadId: command.appThreadId || "",
+    activeTurnId: command.activeTurnId || "",
+    payload: parsed.payload,
+    createdAt: parsed.createdAt
+  };
+}
+
+function deriveSessionUpdate(events, session) {
+  const update = {
+    status: null,
+    appThreadId: null,
+    activeTurnId: null,
+    clearActiveTurnId: false,
+    lastError: null,
+    finalMessage: null
+  };
+
+  for (const event of events || []) {
+    if (event.sessionStatus) update.status = String(event.sessionStatus);
+    if (event.appThreadId) update.appThreadId = String(event.appThreadId);
+    if (event.activeTurnId) update.activeTurnId = String(event.activeTurnId);
+    if (event.clearActiveTurnId) update.clearActiveTurnId = true;
+    if (event.error) update.lastError = String(event.error).slice(0, 12000);
+    if (event.finalMessage) update.finalMessage = String(event.finalMessage).slice(0, 12000);
+
+    const raw = event.raw || {};
+    const method = raw.method || event.type;
+    if (method === "turn/started") {
+      update.status = "running";
+      update.activeTurnId = raw.params?.turn?.id || event.activeTurnId || update.activeTurnId;
+    }
+    if (method === "turn/completed") {
+      const turnStatus = raw.params?.turn?.status;
+      update.clearActiveTurnId = true;
+      update.status = turnStatus === "failed" ? "failed" : "active";
+      const message = raw.params?.turn?.error?.message;
+      if (message) update.lastError = String(message).slice(0, 12000);
+    }
+    if (method === "item/agentMessage/delta" && event.text) {
+      update.finalMessage = `${session.finalMessage || ""}${event.text}`.slice(0, 12000);
+    }
+    if (method === "item/completed" && raw.params?.item?.type === "agentMessage") {
+      update.finalMessage = String(raw.params.item.text || "").slice(0, 12000);
+    }
+  }
+
+  return update;
 }
 
 function parseAgent(row) {
@@ -512,6 +1080,12 @@ function parseJson(value, fallback = undefined) {
 
 function normalizeAgentId(value) {
   return String(value || "default-agent").trim().slice(0, 120) || "default-agent";
+}
+
+function canMutateSession(session, agentId) {
+  const providedAgentId = String(agentId || "").trim();
+  if (!session.leasedBy || !providedAgentId) return false;
+  return session.leasedBy === normalizeAgentId(providedAgentId);
 }
 
 function canMutateRunningJob(job, agentId) {
@@ -537,6 +1111,7 @@ function normalizeRuntime(runtime = {}) {
     ? {
         command: String(runtime.command || "").trim(),
         sandbox: String(runtime.sandbox || "").trim(),
+        approvalPolicy: String(runtime.approvalPolicy || "").trim(),
         model: String(runtime.model || "").trim(),
         profile: String(runtime.profile || "").trim(),
         timeoutMs: Number(runtime.timeoutMs || 0) || null
@@ -564,6 +1139,96 @@ function trimOldJobs() {
     for (const id of jobIds) remove.run(id);
   });
   removeMany(ids);
+}
+
+function reclaimExpiredSessionCommandLeases() {
+  const now = nowIso();
+  const expired = db.prepare(`
+    SELECT c.id, c.session_id AS sessionId, c.type, c.leased_by AS leasedBy
+    FROM codex_session_commands c
+    WHERE c.status = 'leased'
+      AND c.lease_expires_at IS NOT NULL
+      AND c.lease_expires_at < ?
+  `).all(now);
+
+  if (expired.length === 0) return;
+
+  const reclaim = db.transaction(() => {
+    for (const command of expired) {
+      db.prepare(`
+        UPDATE codex_session_commands
+        SET status = 'queued',
+            leased_by = NULL,
+            lease_expires_at = NULL,
+            updated_at = @now
+        WHERE id = @id
+          AND status = 'leased'
+      `).run({ id: command.id, now });
+
+      const nextStatus = command.type === "start" ? "queued" : "active";
+      db.prepare(`
+        UPDATE codex_sessions
+        SET status = @status,
+            leased_by = NULL,
+            lease_expires_at = NULL,
+            updated_at = @now
+        WHERE id = @sessionId
+      `).run({
+        sessionId: command.sessionId,
+        status: nextStatus,
+        now
+      });
+
+      insertSessionEvent.run(
+        normalizeSessionEvent(command.sessionId, {
+          type: "command.lease.expired",
+          text: `Desktop agent ${command.leasedBy || "unknown"} stopped renewing ${command.type}; it returned to the queue.`
+        }, now)
+      );
+    }
+  });
+
+  reclaim();
+}
+
+function trimOldSessions() {
+  const ids = db.prepare(`
+    SELECT id
+    FROM codex_sessions
+    WHERE status IN ('failed', 'closed', 'stale')
+      AND id NOT IN (
+        SELECT id
+        FROM codex_sessions
+        ORDER BY updated_at DESC
+        LIMIT 100
+      )
+  `).all().map((row) => row.id);
+
+  if (ids.length === 0) return;
+
+  const remove = db.prepare("DELETE FROM codex_sessions WHERE id = ?");
+  const removeMany = db.transaction((sessionIds) => {
+    for (const id of sessionIds) remove.run(id);
+  });
+  removeMany(ids);
+}
+
+function badRequest(message) {
+  throwHttpError(400, message);
+}
+
+function notFound(message) {
+  throwHttpError(404, message);
+}
+
+function conflict(message) {
+  throwHttpError(409, message);
+}
+
+function throwHttpError(statusCode, message) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  throw error;
 }
 
 function nowIso() {

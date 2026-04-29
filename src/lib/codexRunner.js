@@ -16,6 +16,7 @@ export function publicCodexRuntime() {
   return {
     command: config.codex.command,
     sandbox: config.codex.sandbox || "workspace-write",
+    approvalPolicy: config.codex.approvalPolicy,
     model: config.codex.model,
     profile: config.codex.profile,
     timeoutMs: config.codex.timeoutMs
@@ -121,7 +122,7 @@ export async function runCodexJob(job, hooks = {}) {
   });
 }
 
-function buildCodexEnv() {
+export function buildCodexEnv() {
   const userInfo = os.userInfo();
   const home = process.env.HOME || os.homedir();
   return buildProxyEnv({

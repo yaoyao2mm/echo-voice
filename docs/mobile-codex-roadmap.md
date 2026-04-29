@@ -9,7 +9,7 @@ Echo should not become a remote shell. It should be a guarded task queue for loc
 - The desktop agent is the only process that can touch local repositories or run Codex.
 - The desktop agent only makes outbound HTTPS requests to the relay.
 - Codex jobs run only inside `ECHO_CODEX_WORKSPACES`.
-- The default runtime is `codex exec --json` with the `workspace-write` sandbox.
+- The default phone runtime is moving to local `codex app-server` over stdio, with `workspace-write` sandboxing and the relay/desktop agent boundary intact. The one-shot `codex exec --json` path remains as a conservative fallback/test path.
 
 This keeps the core promise clear: say or type an idea on the phone, queue it for Codex, run it on the local PC, and watch progress without exposing the local machine to inbound internet traffic.
 
@@ -39,8 +39,8 @@ Echo should feel like the missing mobile companion to the local Codex client:
 
 - No arbitrary remote shell endpoint.
 - No arbitrary filesystem paths from the phone.
-- No public exposure of Codex `app-server`.
-- No remote approval flow in the first stable version.
+- No public exposure of Codex `app-server`; Echo only talks to it as a local desktop child process over stdio.
+- No auto-approval of Codex app-server approval requests. The first interactive slice records and declines them until a dedicated phone approval UI exists.
 - No GitHub self-hosted runner as the primary execution channel.
 
 ## Phase 1: Reliable MVP
@@ -205,11 +205,34 @@ Goal: stop relying on in-memory queues for anything important.
 Current implementation:
 
 - Codex jobs, events, and agents are stored in SQLite at `~/.echo-voice/echo.sqlite`.
+- Interactive Codex sessions, session commands, and session events are stored in SQLite at the same path.
 - The desktop agent stores a stable local id in `~/.echo-voice/desktop-agent-id`.
 - Running jobs are leased to an agent via `leased_by` and `lease_expires_at`.
+- Interactive session commands are also leased to an agent before the desktop process starts or continues a Codex app-server thread.
 - Codex event posts and quiet desktop-agent heartbeats renew the lease.
 - Completion posts clear the lease.
 - Expired leases are returned to `queued` and annotated with a `lease.expired` event.
+
+## Phase 1.5: Interactive App-Server Sessions
+
+Goal: make the mobile experience feel closer to a real Codex client rather than a fire-and-forget queue.
+
+### Current Scope
+
+- The desktop agent starts `codex app-server --listen stdio://` as a local child process.
+- The relay stores sessions and queued session commands.
+- The phone starts a session with the first prompt.
+- Follow-up prompts are sent back into the same Codex thread.
+- The phone receives app-server notifications such as thread lifecycle, turn lifecycle, plan updates, item events, command output deltas, diffs, and final agent messages.
+- Approval requests are surfaced in the log and declined for now.
+
+### Next Tasks
+
+- Add a phone-side approval view for command/file approval requests.
+- Add cancel/interrupt for the active turn.
+- Add explicit "new session" versus "continue session" affordances in a more polished chat timeline.
+- Persist app-server thread ids across desktop agent restarts and resume them before accepting follow-up messages.
+- Add per-session worktree creation once the project allowlist and Git state checks are solid.
 
 ## Phase 5: Desktop Agent Hardening
 

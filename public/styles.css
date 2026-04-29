@@ -351,7 +351,7 @@ textarea:focus {
 
 .composer-footer {
   display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  grid-template-columns: minmax(0, 0.9fr) auto minmax(0, 1.1fr);
   gap: 8px;
   align-items: center;
   min-width: 0;
@@ -431,6 +431,12 @@ textarea:focus {
   border-color: #17191d;
 }
 
+.compact-action {
+  min-height: 44px;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
 .codex-jobs {
   display: grid;
   gap: 8px;
@@ -499,12 +505,14 @@ textarea:focus {
   font-weight: 780;
 }
 
-.status-pill.running {
+.status-pill.running,
+.status-pill.starting {
   background: var(--accent-soft);
   color: var(--accent-strong);
 }
 
-.status-pill.completed {
+.status-pill.completed,
+.status-pill.active {
   background: var(--ok-soft);
   color: var(--ok);
 }
@@ -674,7 +682,7 @@ textarea:focus {
   }
 
   .composer-footer {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr auto 1fr;
   }
 }
 

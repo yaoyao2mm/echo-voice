@@ -17,12 +17,19 @@ import {
 } from "./lib/auth.js";
 import {
   appendCodexEvents,
+  appendCodexSessionEvents,
   codexStatus,
   completeCodexJob,
+  completeCodexSessionCommand,
   createCodexJob,
+  createCodexSession,
+  enqueueCodexSessionMessage,
   getCodexJob,
+  getCodexSession,
   listCodexJobs,
-  waitForCodexJob
+  listCodexSessions,
+  waitForCodexJob,
+  waitForCodexSessionCommand
 } from "./lib/codexQueue.js";
 
 const app = express();
@@ -225,6 +232,55 @@ app.get("/api/codex/jobs/:id", (req, res) => {
   res.json({ job });
 });
 
+app.get("/api/codex/sessions", (req, res) => {
+  if (config.mode !== "relay") {
+    return res.status(400).json({ error: "Codex interactive sessions are only available in relay mode." });
+  }
+
+  res.json({ items: listCodexSessions(30) });
+});
+
+app.post("/api/codex/sessions", (req, res) => {
+  try {
+    if (config.mode !== "relay") {
+      return res.status(400).json({ error: "Codex interactive sessions are only available in relay mode." });
+    }
+
+    const session = createCodexSession({
+      projectId: req.body.projectId,
+      prompt: req.body.prompt
+    });
+    res.json({ session });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.get("/api/codex/sessions/:id", (req, res) => {
+  if (config.mode !== "relay") {
+    return res.status(400).json({ error: "Codex interactive sessions are only available in relay mode." });
+  }
+
+  const session = getCodexSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Codex session not found." });
+  res.json({ session });
+});
+
+app.post("/api/codex/sessions/:id/messages", (req, res) => {
+  try {
+    if (config.mode !== "relay") {
+      return res.status(400).json({ error: "Codex interactive sessions are only available in relay mode." });
+    }
+
+    const session = enqueueCodexSessionMessage(req.params.id, {
+      text: req.body.text || req.body.prompt
+    });
+    res.json({ session });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
 app.post("/api/agent/codex/next", async (req, res) => {
   try {
     if (config.mode !== "relay") {
@@ -262,6 +318,48 @@ app.post("/api/agent/codex/complete", (req, res) => {
   }
 
   const ok = completeCodexJob(req.body.id, req.body.result || {}, {
+    agentId: req.body.agentId
+  });
+  res.json({ ok });
+});
+
+app.post("/api/agent/codex/sessions/next", async (req, res) => {
+  try {
+    if (config.mode !== "relay") {
+      return res.status(400).json({ error: "Codex session agent polling is only available in relay mode." });
+    }
+
+    const command = await waitForCodexSessionCommand({
+      waitMs: Number(req.query.wait || req.body.wait || 25000),
+      agent: {
+        id: req.body.agentId || req.body.agent?.id,
+        workspaces: req.body.workspaces || [],
+        runtime: req.body.runtime || {}
+      }
+    });
+    res.json({ command });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.post("/api/agent/codex/sessions/events", (req, res) => {
+  if (config.mode !== "relay") {
+    return res.status(400).json({ error: "Codex session agent events are only available in relay mode." });
+  }
+
+  const ok = appendCodexSessionEvents(req.body.id, req.body.events || [], {
+    agentId: req.body.agentId
+  });
+  res.json({ ok });
+});
+
+app.post("/api/agent/codex/sessions/commands/complete", (req, res) => {
+  if (config.mode !== "relay") {
+    return res.status(400).json({ error: "Codex session agent completion is only available in relay mode." });
+  }
+
+  const ok = completeCodexSessionCommand(req.body.id, req.body.result || {}, {
     agentId: req.body.agentId
   });
   res.json({ ok });

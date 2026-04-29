@@ -72,6 +72,7 @@ export const config = {
     command: process.env.ECHO_CODEX_COMMAND || "codex",
     workspaces: parseWorkspaces(process.env.ECHO_CODEX_WORKSPACES || process.cwd()),
     sandbox: process.env.ECHO_CODEX_SANDBOX || "workspace-write",
+    approvalPolicy: process.env.ECHO_CODEX_APPROVAL_POLICY || "on-request",
     model: process.env.ECHO_CODEX_MODEL || "",
     profile: process.env.ECHO_CODEX_PROFILE || "",
     timeoutMs: Number(process.env.ECHO_CODEX_TIMEOUT_MS || 30 * 60 * 1000),

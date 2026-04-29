@@ -1,5 +1,6 @@
 import { config } from "./config.js";
 import { loadDesktopAgentId } from "./lib/agentIdentity.js";
+import { CodexInteractiveRuntime } from "./lib/codexInteractiveRunner.js";
 import { publicCodexRuntime, publicWorkspaces, runCodexJob } from "./lib/codexRunner.js";
 import { describeHttpNetwork, formatFetchError, httpFetch } from "./lib/http.js";
 
@@ -31,7 +32,10 @@ if (config.codex.enabled) {
 }
 console.log("Waiting for mobile Codex tasks.\n");
 
-if (config.codex.enabled) runCodexLoop();
+if (config.codex.enabled) {
+  runCodexLoop();
+  runCodexSessionLoop();
+}
 
 async function runCodexLoop() {
   while (true) {
@@ -64,6 +68,40 @@ async function runCodexLoop() {
   }
 }
 
+async function runCodexSessionLoop() {
+  const runtime = new CodexInteractiveRuntime({
+    agentId,
+    onEvents: (id, events) => postJson("/api/agent/codex/sessions/events", { id, agentId, events }).catch(() => {})
+  });
+
+  while (true) {
+    let command = null;
+    try {
+      command = await pollNextCodexSessionCommand();
+      if (!command) continue;
+
+      console.log(`[${new Date().toLocaleTimeString()}] codex session ${command.sessionId} ${command.type}`);
+      const heartbeat = startCodexSessionHeartbeat(command.sessionId);
+      const result = await runtime.handleCommand(command).finally(() => clearInterval(heartbeat));
+      await postJson("/api/agent/codex/sessions/commands/complete", { id: command.id, agentId, result });
+      console.log(`  session ${command.type} ${result.ok ? "accepted" : "failed"}`);
+    } catch (error) {
+      console.error(`[codex session ${new Date().toLocaleTimeString()}] ${formatFetchError(error)}`);
+      if (command?.id) {
+        await postJson("/api/agent/codex/sessions/commands/complete", {
+          id: command.id,
+          agentId,
+          result: {
+            ok: false,
+            error: error.message
+          }
+        }).catch(() => {});
+      }
+      await sleep(2500);
+    }
+  }
+}
+
 async function pollNextCodexJob() {
   const response = await httpFetch(`${config.relayUrl}/api/agent/codex/next?wait=25000`, {
     method: "POST",
@@ -82,10 +120,35 @@ async function pollNextCodexJob() {
   return data.job || null;
 }
 
+async function pollNextCodexSessionCommand() {
+  const response = await httpFetch(`${config.relayUrl}/api/agent/codex/sessions/next?wait=25000`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders()
+    },
+    body: JSON.stringify({
+      agentId,
+      workspaces: publicWorkspaces(),
+      runtime: publicCodexRuntime()
+    }),
+    timeoutMs: 35000
+  });
+  const data = await parseApiResponse(response);
+  return data.command || null;
+}
+
 function startCodexLeaseHeartbeat(jobId) {
   const intervalMs = Math.max(15000, Math.min(Math.floor(config.codex.leaseMs / 2), 30000));
   return setInterval(() => {
     postJson("/api/agent/codex/events", { id: jobId, agentId, events: [] }).catch(() => {});
+  }, intervalMs);
+}
+
+function startCodexSessionHeartbeat(sessionId) {
+  const intervalMs = Math.max(15000, Math.min(Math.floor(config.codex.leaseMs / 2), 30000));
+  return setInterval(() => {
+    postJson("/api/agent/codex/sessions/events", { id: sessionId, agentId, events: [] }).catch(() => {});
   }, intervalMs);
 }
 

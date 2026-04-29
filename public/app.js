@@ -37,6 +37,7 @@ const elements = {
   codexPrompt: document.querySelector("#codexPrompt"),
   postprocessToggle: document.querySelector("#postprocessToggle"),
   postprocessLabel: document.querySelector("#postprocessLabel"),
+  newCodexSessionButton: document.querySelector("#newCodexSessionButton"),
   sendCodexButton: document.querySelector("#sendCodexButton"),
   codexJobs: document.querySelector("#codexJobs"),
   codexJobDetail: document.querySelector("#codexJobDetail"),
@@ -49,6 +50,8 @@ let pairingStream = null;
 let pairingScanActive = false;
 let pairingScanBusy = false;
 let selectedCodexJobId = "";
+let selectedCodexSession = null;
+let composingNewSession = false;
 let postprocessEnabled = localStorage.getItem("echoPostprocessEnabled") !== "false";
 let composerBusy = false;
 
@@ -61,6 +64,7 @@ elements.scanPairingButton.addEventListener("click", startPairingScanner);
 elements.stopScanButton.addEventListener("click", stopPairingScanner);
 elements.savePairingButton.addEventListener("click", pairFromInput);
 elements.refreshCodex.addEventListener("click", refreshCodex);
+elements.newCodexSessionButton.addEventListener("click", startNewCodexSession);
 elements.sendCodexButton.addEventListener("click", sendToCodex);
 elements.codexProject.addEventListener("change", () => {
   localStorage.setItem("echoCodexProject", elements.codexProject.value);
@@ -436,7 +440,7 @@ function renderCodexStatus(codex) {
   const workspaces = codex.workspaces || [];
   elements.codexStatusText.textContent = codex.agentOnline ? "本机 Codex 在线" : "等待桌面 agent";
   elements.codexQueueMeta.textContent = codex.agentOnline
-    ? `排队 ${codex.queued || 0} · 运行 ${codex.running || 0} · 项目 ${workspaces.length}`
+    ? `会话 ${codex.interactive?.activeSessions || 0} · 待处理 ${codex.interactive?.queuedCommands || 0} · 项目 ${workspaces.length}`
     : "打开桌面端后自动同步";
 
   const selected = localStorage.getItem("echoCodexProject") || elements.codexProject.value;
@@ -461,6 +465,18 @@ function renderCodexStatus(codex) {
   updateComposerAvailability();
 }
 
+function startNewCodexSession() {
+  selectedCodexJobId = "";
+  selectedCodexSession = null;
+  composingNewSession = true;
+  elements.codexJobDetail.hidden = true;
+  for (const button of elements.codexJobs.querySelectorAll(".codex-job")) {
+    button.classList.remove("active");
+  }
+  updateComposerAvailability();
+  elements.codexPrompt.focus({ preventScroll: true });
+}
+
 async function sendToCodex() {
   if (!ensurePaired()) return;
 
@@ -480,12 +496,14 @@ async function sendToCodex() {
   try {
     const prompt = postprocessEnabled ? await refinePromptForCodex(rawPrompt) : rawPrompt;
     setComposerBusy(true, "发送中");
-    const data = await apiPost("/api/codex/jobs", { projectId, prompt });
-    selectedCodexJobId = data.job.id;
+    const data = await sendCodexPrompt({ projectId, prompt });
+    selectedCodexJobId = data.session.id;
+    selectedCodexSession = data.session;
+    composingNewSession = false;
     elements.codexPrompt.value = "";
     toast("已发送");
     await loadCodexJobs();
-    await showCodexJob(data.job.id);
+    await showCodexJob(data.session.id);
     await refreshStatus({ silentAuthFailure: true });
   } catch (error) {
     if (!handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
@@ -494,6 +512,19 @@ async function sendToCodex() {
   } finally {
     setComposerBusy(false);
   }
+}
+
+async function sendCodexPrompt({ projectId, prompt }) {
+  if (canContinueSelectedSession()) {
+    return apiPost(`/api/codex/sessions/${encodeURIComponent(selectedCodexJobId)}/messages`, { text: prompt });
+  }
+  return apiPost("/api/codex/sessions", { projectId, prompt });
+}
+
+function canContinueSelectedSession() {
+  if (composingNewSession) return false;
+  if (!selectedCodexJobId || !selectedCodexSession) return false;
+  return !["failed", "closed", "stale"].includes(selectedCodexSession.status);
 }
 
 async function refinePromptForCodex(rawText) {
@@ -521,7 +552,7 @@ async function refinePromptForCodex(rawText) {
 function setComposerBusy(isBusy, label = "") {
   composerBusy = isBusy;
   if (label) elements.statusText.textContent = label;
-  elements.sendCodexButton.textContent = isBusy ? label || "处理中" : "发送";
+  elements.sendCodexButton.textContent = isBusy ? label || "处理中" : canContinueSelectedSession() ? "继续" : "发送";
   updateComposerAvailability();
   if (!isBusy) refreshStatus({ silentAuthFailure: true });
 }
@@ -529,22 +560,31 @@ function setComposerBusy(isBusy, label = "") {
 function updateComposerAvailability() {
   const hasProject = Boolean(elements.codexProject.value);
   elements.sendCodexButton.disabled = composerBusy || !hasProject;
+  elements.sendCodexButton.textContent = composerBusy
+    ? elements.sendCodexButton.textContent
+    : canContinueSelectedSession()
+      ? "继续"
+      : "发送";
+  elements.newCodexSessionButton.disabled = composerBusy || !selectedCodexJobId;
   elements.codexProject.disabled = composerBusy;
   elements.codexPrompt.disabled = composerBusy;
 }
 
 async function loadCodexJobs() {
-  const data = await apiGet("/api/codex/jobs");
+  const data = await apiGet("/api/codex/sessions");
   const jobs = data.items.slice(0, 8);
   elements.codexJobs.innerHTML = "";
   if (jobs.length === 0) {
-    elements.codexJobs.innerHTML = `<div class="empty-state">任务队列为空</div>`;
+    elements.codexJobs.innerHTML = `<div class="empty-state">还没有 Codex 会话</div>`;
     elements.codexJobDetail.hidden = true;
+    selectedCodexSession = null;
     return;
   }
 
-  if (!selectedCodexJobId || !jobs.some((job) => job.id === selectedCodexJobId)) {
+  if (!selectedCodexJobId && !composingNewSession) {
     selectedCodexJobId = jobs[0].id;
+  } else if (selectedCodexJobId && !jobs.some((job) => job.id === selectedCodexJobId)) {
+    selectedCodexJobId = composingNewSession ? "" : jobs[0].id;
   }
 
   for (const job of jobs) {
@@ -558,22 +598,31 @@ async function loadCodexJobs() {
       <strong>${escapeHtml(job.projectId)} · ${escapeHtml(formatRelativeTime(job.completedAt || job.startedAt || job.createdAt))}</strong>
       <span>${escapeHtml(jobPreview(job))}</span>
     `;
-    button.addEventListener("click", () => showCodexJob(job.id));
+    button.addEventListener("click", () => {
+      composingNewSession = false;
+      showCodexJob(job.id);
+    });
     elements.codexJobs.append(button);
   }
 
   if (selectedCodexJobId) {
     await showCodexJob(selectedCodexJobId, { keepSelection: true });
+  } else {
+    selectedCodexSession = null;
+    elements.codexJobDetail.hidden = true;
   }
 }
 
 function statusLabel(status) {
   return {
     queued: "排队中",
+    starting: "启动中",
+    active: "可继续",
     running: "运行中",
     completed: "已完成",
     failed: "失败",
     cancelled: "已取消",
+    closed: "已关闭",
     stale: "已过期"
   }[status] || status || "未知";
 }
@@ -585,9 +634,10 @@ async function showCodexJob(id, options = {}) {
       button.classList.toggle("active", button.dataset.jobId === id);
     }
   }
-  const data = await apiGet(`/api/codex/jobs/${encodeURIComponent(id)}`);
-  const job = data.job;
-  const errorText = humanizeCodexError(job.error);
+  const data = await apiGet(`/api/codex/sessions/${encodeURIComponent(id)}`);
+  const job = data.session;
+  selectedCodexSession = job;
+  const errorText = humanizeCodexError(job.error || job.lastError);
   const output = jobOutput(job, errorText);
   elements.codexJobDetail.hidden = false;
   elements.codexRunSummary.innerHTML = `
@@ -597,7 +647,7 @@ async function showCodexJob(id, options = {}) {
       <span>${escapeHtml(formatRelativeTime(job.completedAt || job.startedAt || job.createdAt))}</span>
     </div>
     <div class="run-block-title">任务</div>
-    <div class="run-prompt">${escapeHtml(job.prompt || "")}</div>
+    <div class="run-prompt">${escapeHtml(sessionPrompt(job))}</div>
     <div class="run-block-title">输出</div>
     <div class="${escapeHtml(output.className)}">${escapeHtml(output.text)}</div>
   `;
@@ -609,6 +659,7 @@ async function showCodexJob(id, options = {}) {
     ...(job.events || []).slice(-80).map((event) => `${event.at || ""} ${event.type || ""}\n${event.text || ""}`)
   ].filter(Boolean);
   elements.codexLog.textContent = lines.join("\n\n");
+  updateComposerAvailability();
 }
 
 function jobOutput(job, errorText = "") {
@@ -619,10 +670,13 @@ function jobOutput(job, errorText = "") {
   if (event?.text) return { className: "run-output", text: event.text };
 
   if (job.status === "queued") {
-    return { className: "run-output muted", text: "已进入队列，等待桌面 agent 领取。" };
+    return { className: "run-output muted", text: "已进入会话队列，等待桌面 agent 领取。" };
   }
-  if (job.status === "running") {
+  if (job.status === "starting" || job.status === "running") {
     return { className: "run-output muted", text: "桌面 Codex 正在运行，输出会自动刷新到这里。" };
+  }
+  if (job.status === "active") {
+    return { className: "run-output muted", text: "这一轮已结束，可以继续补充新消息。" };
   }
   return { className: "run-output muted", text: "暂无输出。" };
 }
@@ -635,9 +689,15 @@ function latestVisibleEvent(events) {
 }
 
 function jobPreview(job) {
-  if (job.error) return humanizeCodexError(job.error).split("\n")[0].slice(0, 140);
+  const error = job.error || job.lastError || "";
+  if (error) return humanizeCodexError(error).split("\n")[0].slice(0, 140);
   if (job.finalMessage) return job.finalMessage.slice(0, 140);
-  return job.prompt.slice(0, 140);
+  return sessionPrompt(job).slice(0, 140);
+}
+
+function sessionPrompt(session) {
+  const userEvent = (session.events || []).find((event) => event.type === "user.message");
+  return userEvent?.text || session.title || "";
 }
 
 function formatRelativeTime(value) {

@@ -116,3 +116,67 @@ test("status advertises only online agent workspaces", () => {
   assert.equal(onlineStatus.runtime.command, "codex");
   assert.equal(onlineStatus.agents.filter((agent) => agent.online).length, 2);
 });
+
+test("interactive Codex sessions lease commands and keep thread state", async () => {
+  store.resetStoreForTest();
+
+  const agent = {
+    id: "session-agent",
+    workspaces: [{ id: "demo", path: process.cwd() }]
+  };
+
+  const created = queue.createCodexSession({ projectId: "demo", prompt: "先看一下这个项目" });
+  assert.equal(created.status, "queued");
+
+  const startCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  assert.equal(startCommand.sessionId, created.id);
+  assert.equal(startCommand.type, "start");
+  assert.equal(startCommand.payload.prompt, "先看一下这个项目");
+
+  assert.equal(
+    queue.appendCodexSessionEvents(
+      created.id,
+      [{ type: "thread.started", text: "started", appThreadId: "thr_1", sessionStatus: "active" }],
+      { agentId: "session-agent" }
+    ),
+    true
+  );
+  assert.equal(
+    queue.completeCodexSessionCommand(
+      startCommand.id,
+      { ok: true, appThreadId: "thr_1", activeTurnId: "turn_1", sessionStatus: "running" },
+      { agentId: "session-agent" }
+    ),
+    true
+  );
+
+  const running = queue.getCodexSession(created.id);
+  assert.equal(running.appThreadId, "thr_1");
+  assert.equal(running.activeTurnId, "turn_1");
+  assert.equal(running.status, "running");
+
+  assert.equal(
+    queue.appendCodexSessionEvents(
+      created.id,
+      [
+        {
+          type: "turn/completed",
+          text: "Turn completed.",
+          raw: { method: "turn/completed", params: { threadId: "thr_1", turn: { status: "completed" } } }
+        }
+      ],
+      { agentId: "session-agent" }
+    ),
+    true
+  );
+  assert.equal(queue.getCodexSession(created.id).status, "active");
+  assert.equal(queue.getCodexSession(created.id).activeTurnId, null);
+
+  const afterMessage = queue.enqueueCodexSessionMessage(created.id, { text: "继续修复 UI" });
+  assert.equal(afterMessage.pendingCommandCount, 1);
+
+  const messageCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  assert.equal(messageCommand.type, "message");
+  assert.equal(messageCommand.appThreadId, "thr_1");
+  assert.equal(messageCommand.payload.text, "继续修复 UI");
+});
