@@ -61,6 +61,7 @@ const elements = {
   refreshCodex: document.querySelector("#refreshCodex"),
   toggleSessionsButton: document.querySelector("#toggleSessionsButton"),
   sessionBackdrop: document.querySelector("#sessionBackdrop"),
+  codexMain: document.querySelector(".codex-main"),
   sessionSearch: document.querySelector("#sessionSearch"),
   showActiveSessionsButton: document.querySelector("#showActiveSessionsButton"),
   showArchivedSessionsButton: document.querySelector("#showArchivedSessionsButton"),
@@ -104,8 +105,7 @@ let composerBusy = false;
 let codexAgentRuntime = {};
 let runtimePreferences = readStoredRuntimePreferences();
 let runtimeDirty = false;
-let lastWindowScrollY = 0;
-let lastThreadScrollY = 0;
+let lastTopbarScrollY = 0;
 let topbarScrollAccumulator = 0;
 let topbarCollapsed = false;
 
@@ -189,6 +189,10 @@ function updateAuthView(message = "") {
   const loggedIn = isLoggedIn();
   const paired = Boolean(token);
   const showApp = loggedIn && paired;
+
+  if (!showApp) {
+    resetTopbarScrollTracking({ forceVisible: true });
+  }
 
   if (!showApp && elements.codexView.classList.contains("sessions-open")) {
     closeSessionSidebar({ restoreFocus: false });
@@ -357,37 +361,40 @@ function syncViewportMetrics() {
 
 function bindTopbarScrollState() {
   resetTopbarScrollTracking({ forceVisible: true });
-  window.addEventListener(
+  elements.codexMain?.addEventListener(
     "scroll",
     () => {
-      syncTopbarVisibility("window");
+      syncTopbarVisibility();
     },
     { passive: true }
   );
-  elements.codexRunSummary?.addEventListener(
-    "scroll",
+  window.addEventListener(
+    "resize",
     () => {
-      syncTopbarVisibility("thread");
+      resetTopbarScrollTracking({ forceVisible: true });
     },
     { passive: true }
   );
 }
 
 function resetTopbarScrollTracking(options = {}) {
-  lastWindowScrollY = Math.max(window.scrollY || 0, 0);
-  lastThreadScrollY = elements.codexRunSummary?.scrollTop || 0;
+  lastTopbarScrollY = currentTopbarScrollY();
   topbarScrollAccumulator = 0;
   if (options.forceVisible) {
     setTopbarCollapsed(false);
   }
 }
 
-function syncTopbarVisibility(source = "thread", options = {}) {
-  const currentY = source === "window" ? Math.max(window.scrollY || 0, 0) : elements.codexRunSummary?.scrollTop || 0;
-  const lastY = source === "window" ? lastWindowScrollY : lastThreadScrollY;
+function syncTopbarVisibility(options = {}) {
+  if (!usesCompactTopbarMode()) {
+    resetTopbarScrollTracking({ forceVisible: true });
+    return;
+  }
+
+  const currentY = currentTopbarScrollY();
+  const lastY = lastTopbarScrollY;
   const delta = currentY - lastY;
-  if (source === "window") lastWindowScrollY = currentY;
-  else lastThreadScrollY = currentY;
+  lastTopbarScrollY = currentY;
   if (options.forceVisible || currentY <= 8 || elements.codexView.classList.contains("sessions-open")) {
     topbarScrollAccumulator = 0;
     setTopbarCollapsed(false);
@@ -406,6 +413,17 @@ function syncTopbarVisibility(source = "thread", options = {}) {
     topbarScrollAccumulator = 0;
     setTopbarCollapsed(false);
   }
+}
+
+function currentTopbarScrollY() {
+  if (usesCompactTopbarMode()) {
+    return Math.max(elements.codexMain?.scrollTop || 0, 0);
+  }
+  return Math.max(window.scrollY || 0, 0);
+}
+
+function usesCompactTopbarMode() {
+  return window.matchMedia("(max-width: 760px)").matches && !elements.codexView.hidden;
 }
 
 function setTopbarCollapsed(collapsed) {

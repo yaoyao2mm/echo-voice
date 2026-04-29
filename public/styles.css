@@ -3232,3 +3232,79 @@ body.topbar-collapsed .topbar {
     font-size: 12px;
   }
 }
+
+/* v29 mobile single-scroll frame */
+
+@media (max-width: 760px) {
+  .shell {
+    padding-top: calc(var(--topbar-height, 72px) + 12px);
+    transition: padding-top 240ms ease;
+  }
+
+  body.topbar-collapsed .shell {
+    padding-top: calc(var(--safe-top) + 8px);
+  }
+
+  .topbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 26;
+    margin: 0;
+    padding: calc(var(--safe-top) + 12px) var(--shell-pad-right) 10px var(--shell-pad-left);
+    transition:
+      transform 240ms ease,
+      opacity 180ms ease,
+      background 220ms ease;
+  }
+
+  body.topbar-collapsed .topbar {
+    transform: translateY(calc(-1 * (var(--topbar-height, 72px) + 6px)));
+    opacity: 0;
+    margin-bottom: 0;
+    pointer-events: none;
+  }
+
+  .codex-section {
+    min-height: calc(var(--app-height) - var(--topbar-height, 72px) - 12px);
+    align-items: stretch;
+  }
+
+  .codex-section.sessions-open .codex-main {
+    overflow: hidden;
+  }
+
+  .codex-main {
+    height: calc(var(--app-height) - var(--topbar-height, 72px) - 12px);
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .codex-main::-webkit-scrollbar {
+    display: none;
+  }
+
+  .codex-job-detail {
+    display: block;
+    overflow: visible;
+  }
+
+  .codex-run-summary {
+    height: auto;
+    overflow: visible;
+    padding-bottom: 6px;
+  }
+
+  .session-sidebar {
+    top: calc(var(--topbar-height, 72px) + 8px);
+    max-height: calc(var(--app-height) - var(--topbar-height, 72px) - 20px);
+  }
+
+  .session-backdrop {
+    inset: calc(var(--topbar-height, 72px) + 2px) 0 0 0;
+  }
+}
