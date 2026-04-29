@@ -10,8 +10,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Echo Codex</title>
-    <link rel="manifest" href="/manifest.webmanifest?v=21" />
-    <link rel="stylesheet" href="/styles.css?v=21" />
+    <link rel="manifest" href="/manifest.webmanifest?v=22" />
+    <link rel="stylesheet" href="/styles.css?v=22" />
   </head>
   <body>
     <main class="shell">
@@ -75,9 +75,9 @@
         <button id="sessionBackdrop" class="session-backdrop" type="button" aria-label="关闭会话列表" hidden></button>
         <aside id="codexSessionSidebar" class="session-sidebar" aria-label="Codex 会话">
           <div class="sidebar-head">
-            <strong>Workbench</strong>
+            <strong>对话</strong>
             <div class="sidebar-head-actions">
-              <button id="newCodexSessionButton" class="secondary compact-action" type="button">新建</button>
+              <button id="newCodexSessionButton" class="secondary compact-action" type="button">新话题</button>
             </div>
           </div>
           <section class="sidebar-panel sidebar-panel-conversations">
@@ -144,23 +144,10 @@
         </aside>
 
         <section class="codex-main" aria-label="Codex 当前会话">
-          <section class="session-toolbar">
-            <div class="session-toolbar-copy">
+          <section class="conversation-head">
+            <div class="conversation-head-copy">
               <strong id="activeSessionTitle">新会话</strong>
               <p id="activeSessionMeta" class="codex-runtime">选择工程、模型和推理强度后直接发送。</p>
-            </div>
-            <div class="session-toolbar-actions">
-              <label class="toolbar-select" for="codexModel">
-                <span>模型</span>
-                <select id="codexModel" aria-label="选择模型"></select>
-              </label>
-              <label class="toolbar-select" for="codexReasoningEffort">
-                <span>推理</span>
-                <select id="codexReasoningEffort" aria-label="选择推理强度"></select>
-              </label>
-              <button id="refreshCodex" class="icon-button session-refresh-button" type="button" title="刷新 Codex" aria-label="刷新 Codex">
-                ↻
-              </button>
             </div>
           </section>
 
@@ -174,19 +161,34 @@
           </section>
 
           <section class="composer">
-            <div class="composer-context">
-              <span class="composer-context-kicker">当前工程</span>
-              <strong id="composerProjectLabel">等待桌面 agent</strong>
+            <div class="composer-controls">
+              <div class="composer-project-pill">
+                <span class="composer-control-label">工程</span>
+                <strong id="composerProjectLabel">等待桌面 agent</strong>
+              </div>
+              <label class="composer-inline-select" for="codexModel">
+                <span class="composer-control-label">模型</span>
+                <select id="codexModel" aria-label="选择模型"></select>
+              </label>
+              <label class="composer-inline-select" for="codexReasoningEffort">
+                <span class="composer-control-label">推理</span>
+                <select id="codexReasoningEffort" aria-label="选择推理强度"></select>
+              </label>
+              <button id="refreshCodex" class="icon-button composer-refresh-button" type="button" title="刷新 Codex" aria-label="刷新 Codex">
+                ↻
+              </button>
             </div>
-            <textarea id="codexPrompt" rows="7" placeholder="说一个灵感、bug 或要交给 Codex 的任务。"></textarea>
-            <div class="composer-footer">
-              <button id="sendCodexButton" class="codex-submit" type="button">发送</button>
+            <div class="composer-input-shell">
+              <textarea id="codexPrompt" rows="7" placeholder="给 Codex 发消息，继续当前话题，或者开启新话题。"></textarea>
+              <div class="composer-footer">
+                <button id="sendCodexButton" class="codex-submit" type="button">发送</button>
+              </div>
             </div>
           </section>
         </section>
       </section>
     </main>
 
-    <script src="/app.js?v=21" type="module"></script>
+    <script src="/app.js?v=22" type="module"></script>
   </body>
 </html>

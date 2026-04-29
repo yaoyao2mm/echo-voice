@@ -728,7 +728,7 @@ function startNewCodexSession() {
     title: "新会话",
     body: "选择工程、模型和推理强度后直接发送。"
   });
-  for (const button of elements.codexJobs.querySelectorAll(".codex-job")) {
+  for (const button of elements.codexJobs.querySelectorAll(".conversation-item")) {
     button.classList.remove("active");
   }
   updateComposerAvailability();
@@ -832,7 +832,7 @@ function updateComposerAvailability() {
     : canContinueSelectedSession()
       ? "继续"
       : "发送";
-  elements.newCodexSessionButton.disabled = composerBusy || !selectedCodexJobId;
+  elements.newCodexSessionButton.disabled = composerBusy;
   elements.codexProject.disabled = composerBusy;
   elements.codexModel.disabled = composerBusy;
   elements.codexReasoningEffort.disabled = composerBusy;
@@ -985,20 +985,8 @@ async function loadCodexJobs() {
     selectedCodexJobId = composingNewSession ? "" : preferredSession(jobs)?.id || jobs[0].id;
   }
 
-  for (const group of sessionGroups(jobs)) {
-    if (group.items.length === 0) continue;
-    const section = document.createElement("section");
-    section.className = "session-group";
-    section.innerHTML = `
-      <div class="session-group-title">
-        <span>${escapeHtml(group.title)}</span>
-        <span>${escapeHtml(group.items.length)}</span>
-      </div>
-    `;
-    for (const job of group.items) {
-      section.append(renderSessionButton(job));
-    }
-    elements.codexJobs.append(section);
+  for (const job of jobs) {
+    elements.codexJobs.append(renderSessionButton(job));
   }
 
   if (selectedCodexJobId) {
@@ -1013,31 +1001,33 @@ async function loadCodexJobs() {
 function renderSessionButton(job) {
   const item = document.createElement("div");
   item.dataset.jobId = job.id;
-  item.className = "codex-job";
+  item.className = "conversation-item";
   item.classList.toggle("active", job.id === selectedCodexJobId);
   const archived = Boolean(job.archivedAt);
   const canArchive = !["queued", "starting", "running"].includes(job.status) && !job.pendingApprovalCount && !job.pendingCommandCount;
   item.innerHTML = `
-    <button class="session-open" type="button">
-      <div class="session-meta-row">
-        <span class="status-pill ${escapeHtml(job.status)}">${escapeHtml(statusLabel(job.status))}</span>
-        <span class="session-time">${escapeHtml(formatRelativeTime(sessionTime(job)))}</span>
+    <button class="conversation-item-open" type="button">
+      <div class="conversation-item-head">
+        <strong>${escapeHtml(jobTitle(job))}</strong>
+        <span class="conversation-item-time">${escapeHtml(formatRelativeTime(sessionTime(job)))}</span>
       </div>
-      <strong>${escapeHtml(jobTitle(job))}</strong>
-      <span class="session-secondary">${escapeHtml(sessionProjectLabel(job.projectId))}${sessionRuntimeLabel(job.runtime) ? ` · ${escapeHtml(sessionRuntimeLabel(job.runtime))}` : ""}</span>
-      <span class="session-preview">${escapeHtml(jobPreview(job))}</span>
-      ${job.pendingApprovalCount ? `<span class="approval-count">${escapeHtml(job.pendingApprovalCount)} 个待审批</span>` : ""}
+      <div class="conversation-item-meta">
+        <span class="conversation-item-status ${escapeHtml(job.status)}">${escapeHtml(statusLabel(job.status))}</span>
+        <span>${escapeHtml(sessionProjectLabel(job.projectId))}</span>
+      </div>
+      <span class="conversation-item-preview">${escapeHtml(jobPreview(job))}</span>
+      ${job.pendingApprovalCount ? `<span class="conversation-item-alert">${escapeHtml(job.pendingApprovalCount)} 个待审批</span>` : ""}
     </button>
-    <button class="session-archive-action" type="button" ${canArchive || archived ? "" : "disabled"}>
+    <button class="conversation-item-archive" type="button" ${canArchive || archived ? "" : "disabled"}>
       ${archived ? "恢复" : "归档"}
     </button>
   `;
-  item.querySelector(".session-open").addEventListener("click", () => {
+  item.querySelector(".conversation-item-open").addEventListener("click", () => {
     composingNewSession = false;
     showCodexJob(job.id);
     closeSessionSidebar({ restoreFocus: false });
   });
-  item.querySelector(".session-archive-action").addEventListener("click", () => archiveSession(job.id, !archived));
+  item.querySelector(".conversation-item-archive").addEventListener("click", () => archiveSession(job.id, !archived));
   return item;
 }
 
@@ -1128,7 +1118,7 @@ function statusLabel(status) {
 async function showCodexJob(id, options = {}) {
   selectedCodexJobId = id;
   if (!options.keepSelection) {
-    for (const button of elements.codexJobs.querySelectorAll(".codex-job")) {
+    for (const button of elements.codexJobs.querySelectorAll(".conversation-item")) {
       button.classList.toggle("active", button.dataset.jobId === id);
     }
   }
@@ -1139,21 +1129,13 @@ async function showCodexJob(id, options = {}) {
     applyRuntimeDraft(job.runtime || runtimePreferences, { persist: false, dirty: false });
   }
   const errorText = humanizeCodexError(job.error || job.lastError);
-  const output = jobOutput(job, errorText);
   elements.codexJobDetail.hidden = false;
   elements.runLog.hidden = false;
   elements.activeSessionTitle.textContent = jobTitle(job);
   elements.codexRunSummary.innerHTML = `
-    <div class="run-summary-head">
-      <span class="status-pill ${escapeHtml(job.status)}">${escapeHtml(statusLabel(job.status))}</span>
-      <strong>${escapeHtml(sessionProjectLabel(job.projectId))}</strong>
-      ${sessionRuntimeLabel(job.runtime) ? `<span class="runtime-pill">${escapeHtml(sessionRuntimeLabel(job.runtime))}</span>` : ""}
-      <span>${escapeHtml(formatRelativeTime(sessionTime(job)))}</span>
+    <div class="conversation-thread">
+      ${renderConversationThread(job, errorText)}
     </div>
-    <div class="run-block-title">任务</div>
-    <div class="run-prompt">${escapeHtml(sessionPrompt(job))}</div>
-    <div class="run-block-title">输出</div>
-    <div class="${escapeHtml(output.className)}">${escapeHtml(output.text)}</div>
   `;
   renderApprovals(job);
   const lines = [
@@ -1176,9 +1158,14 @@ function renderEmptySessionDetail({ title, body }) {
   elements.runLog.hidden = true;
   elements.codexLog.textContent = "";
   elements.codexRunSummary.innerHTML = `
-    <div class="empty-session">
-      <strong>${escapeHtml(title)}</strong>
-      <p>${escapeHtml(body)}</p>
+    <div class="conversation-thread conversation-thread-empty">
+      <div class="thread-status-row">
+        <span class="thread-status-pill">新话题</span>
+      </div>
+      <div class="thread-welcome">
+        <strong>${escapeHtml(title)}</strong>
+        <p>${escapeHtml(body)}</p>
+      </div>
     </div>
   `;
   refreshActiveSessionHeader();
@@ -1190,10 +1177,10 @@ function renderApprovals(session) {
   elements.codexApprovals.innerHTML = "";
   for (const approval of approvals) {
     const node = document.createElement("div");
-    node.className = "approval-panel";
+    node.className = "approval-inline-card";
     node.innerHTML = `
-      <div class="approval-copy">
-        <strong>${escapeHtml(approvalTitle(approval))}</strong>
+      <div class="approval-inline-copy">
+        <span class="thread-status-pill warn">${escapeHtml(approvalTitle(approval))}</span>
         <p>${escapeHtml(approval.prompt || approval.method || "Codex 请求审批")}</p>
         <pre>${escapeHtml(approvalDetail(approval))}</pre>
       </div>
@@ -1236,6 +1223,149 @@ function approvalDetail(approval) {
   if (payload.grantRoot) return String(payload.grantRoot);
   if (payload.changes) return payload.changes.map((change) => change.path || change.kind || "").filter(Boolean).join("\n");
   return JSON.stringify(payload, null, 2).slice(0, 1600);
+}
+
+function renderConversationThread(job, errorText = "") {
+  const timeline = buildConversationTimeline(job, errorText);
+  return timeline.map(renderConversationEntry).join("");
+}
+
+function buildConversationTimeline(job, errorText = "") {
+  const timeline = [];
+  const events = Array.isArray(job.events) ? job.events : [];
+
+  for (const event of events) {
+    const userText = event.type === "user.message" ? String(event.text || "").trim() : "";
+    if (userText) {
+      timeline.push({
+        kind: "message",
+        role: "user",
+        text: userText,
+        at: event.at || job.createdAt || ""
+      });
+      continue;
+    }
+
+    const assistantText = assistantMessageText(event);
+    if (!assistantText) continue;
+    if (lastTimelineMessageText(timeline, "assistant") === assistantText) continue;
+    timeline.push({
+      kind: "message",
+      role: "assistant",
+      text: assistantText,
+      at: event.at || job.updatedAt || ""
+    });
+  }
+
+  const draftAssistantText = activeAssistantDraft(job, timeline);
+  if (draftAssistantText) {
+    timeline.push({
+      kind: "message",
+      role: "assistant",
+      text: draftAssistantText,
+      at: job.updatedAt || job.createdAt || "",
+      draft: job.status === "starting" || job.status === "running"
+    });
+  }
+
+  if (errorText && !timeline.some((entry) => entry.kind === "error" && entry.text === errorText)) {
+    timeline.push({
+      kind: "error",
+      text: errorText,
+      at: job.updatedAt || job.createdAt || ""
+    });
+  }
+
+  const statusHint = conversationStatusHint(job, timeline.length > 0);
+  if (statusHint) {
+    timeline.push({
+      kind: "status",
+      text: statusHint
+    });
+  }
+
+  if (timeline.length === 0) {
+    timeline.push({
+      kind: "empty",
+      title: "还没有消息",
+      body: "从下面发第一句话开始。"
+    });
+  }
+
+  return timeline;
+}
+
+function renderConversationEntry(entry) {
+  if (entry.kind === "status") {
+    return `
+      <div class="thread-status-row">
+        <span class="thread-status-pill">${escapeHtml(entry.text)}</span>
+      </div>
+    `;
+  }
+
+  if (entry.kind === "error") {
+    return `
+      <article class="thread-message thread-message-system">
+        <div class="thread-bubble thread-bubble-error">${escapeHtml(entry.text)}</div>
+      </article>
+    `;
+  }
+
+  if (entry.kind === "empty") {
+    return `
+      <div class="thread-welcome">
+        <strong>${escapeHtml(entry.title)}</strong>
+        <p>${escapeHtml(entry.body)}</p>
+      </div>
+    `;
+  }
+
+  const roleLabel = entry.role === "user" ? "你" : "Codex";
+  const roleClass = entry.role === "user" ? "thread-message-user" : "thread-message-assistant";
+  const bubbleClass = entry.role === "user" ? "thread-bubble-user" : "thread-bubble-assistant";
+  const draftBadge = entry.draft ? '<span class="thread-draft-badge">回复中</span>' : "";
+  const timeLabel = entry.at ? formatMessageTime(entry.at) : "";
+
+  return `
+    <article class="thread-message ${roleClass}">
+      <div class="thread-message-meta">
+        <span class="thread-message-role">${roleLabel}</span>
+        ${draftBadge}
+        ${timeLabel ? `<span class="thread-message-time">${escapeHtml(timeLabel)}</span>` : ""}
+      </div>
+      <div class="thread-bubble ${bubbleClass}">${escapeHtml(entry.text)}</div>
+    </article>
+  `;
+}
+
+function assistantMessageText(event) {
+  const item = event.raw?.params?.item;
+  if (event.type === "item/completed" && item?.type === "agentMessage") {
+    return String(item.text || event.text || "").trim();
+  }
+  return "";
+}
+
+function activeAssistantDraft(job, timeline) {
+  const current = String(job.finalMessage || "").trim();
+  if (!current) return "";
+  if (lastTimelineMessageText(timeline, "assistant") === current) return "";
+  return current;
+}
+
+function lastTimelineMessageText(timeline, role) {
+  const item = [...timeline].reverse().find((entry) => entry.kind === "message" && entry.role === role);
+  return item?.text || "";
+}
+
+function conversationStatusHint(job, hasTimeline) {
+  if (job.status === "queued") return "已发送，等待桌面端接手。";
+  if (job.status === "starting") return "Codex 正在启动这轮对话。";
+  if (job.status === "running") return hasTimeline ? "Codex 正在继续回复。" : "Codex 正在思考。";
+  if (job.status === "active" && hasTimeline) return "这轮结束了，可以继续追问。";
+  if (job.status === "failed" && !job.lastError) return "这轮对话失败了。";
+  return "";
 }
 
 function jobOutput(job, errorText = "") {
@@ -1308,6 +1438,13 @@ function formatRelativeTime(value) {
   const hours = Math.round(minutes / 60);
   if (hours < 24) return `${hours} 小时前`;
   return date.toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
+}
+
+function formatMessageTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
 }
 
 function sessionProjectLabel(projectId) {
