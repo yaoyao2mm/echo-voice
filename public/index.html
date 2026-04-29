@@ -10,8 +10,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Echo Codex</title>
-    <link rel="manifest" href="/manifest.webmanifest?v=25" />
-    <link rel="stylesheet" href="/styles.css?v=25" />
+    <link rel="manifest" href="/manifest.webmanifest?v=26" />
+    <link rel="stylesheet" href="/styles.css?v=26" />
   </head>
   <body>
     <main class="shell">
@@ -149,7 +149,7 @@
           <section class="conversation-head">
             <div class="conversation-head-copy">
               <strong id="activeSessionTitle">新会话</strong>
-              <p id="activeSessionMeta" class="codex-runtime">选择工程、模型和推理强度后直接发送。</p>
+              <p id="activeSessionMeta" class="codex-runtime">选择工程、权限、模型和推理强度后直接发送。</p>
             </div>
           </section>
 
@@ -171,6 +171,10 @@
                     <span class="composer-inline-kicker">工程</span>
                     <strong id="composerProjectLabel">等待桌面 agent</strong>
                   </div>
+                  <label class="composer-inline-control composer-inline-select composer-inline-permission" for="codexPermissionMode">
+                    <span class="composer-inline-kicker">权限</span>
+                    <select id="codexPermissionMode" aria-label="选择权限模式"></select>
+                  </label>
                   <label class="composer-inline-control composer-inline-select" for="codexModel">
                     <span class="composer-inline-kicker">模型</span>
                     <select id="codexModel" aria-label="选择模型"></select>
@@ -188,6 +192,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=25" type="module"></script>
+    <script src="/app.js?v=26" type="module"></script>
   </body>
 </html>

@@ -67,11 +67,20 @@ test("interactive Codex sessions lease commands and keep thread state", async ()
   const created = queue.createCodexSession({
     projectId: "demo",
     prompt: "先看一下这个项目",
-    runtime: { model: "gpt-5.4", reasoningEffort: "high" }
+    runtime: {
+      model: "gpt-5.4",
+      reasoningEffort: "high",
+      profile: "approve",
+      sandbox: "workspace-write",
+      approvalPolicy: "on-request"
+    }
   });
   assert.equal(created.status, "queued");
   assert.equal(created.runtime.model, "gpt-5.4");
   assert.equal(created.runtime.reasoningEffort, "high");
+  assert.equal(created.runtime.profile, "approve");
+  assert.equal(created.runtime.sandbox, "workspace-write");
+  assert.equal(created.runtime.approvalPolicy, "on-request");
 
   const startCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
   assert.equal(startCommand.sessionId, created.id);
@@ -79,6 +88,9 @@ test("interactive Codex sessions lease commands and keep thread state", async ()
   assert.equal(startCommand.payload.prompt, "先看一下这个项目");
   assert.equal(startCommand.runtime.model, "gpt-5.4");
   assert.equal(startCommand.runtime.reasoningEffort, "high");
+  assert.equal(startCommand.runtime.profile, "approve");
+  assert.equal(startCommand.runtime.sandbox, "workspace-write");
+  assert.equal(startCommand.runtime.approvalPolicy, "on-request");
 
   assert.equal(
     queue.appendCodexSessionEvents(
@@ -156,11 +168,20 @@ test("interactive Codex sessions lease commands and keep thread state", async ()
 
   const afterMessage = queue.enqueueCodexSessionMessage(created.id, {
     text: "继续修复 UI",
-    runtime: { model: "gpt-5.3-codex", reasoningEffort: "xhigh" }
+    runtime: {
+      model: "gpt-5.3-codex",
+      reasoningEffort: "xhigh",
+      profile: "strict",
+      sandbox: "read-only",
+      approvalPolicy: "on-request"
+    }
   });
   assert.equal(afterMessage.pendingCommandCount, 1);
   assert.equal(afterMessage.runtime.model, "gpt-5.3-codex");
   assert.equal(afterMessage.runtime.reasoningEffort, "xhigh");
+  assert.equal(afterMessage.runtime.profile, "strict");
+  assert.equal(afterMessage.runtime.sandbox, "read-only");
+  assert.equal(afterMessage.runtime.approvalPolicy, "on-request");
 
   const messageCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
   assert.equal(messageCommand.type, "message");
@@ -168,6 +189,9 @@ test("interactive Codex sessions lease commands and keep thread state", async ()
   assert.equal(messageCommand.payload.text, "继续修复 UI");
   assert.equal(messageCommand.runtime.model, "gpt-5.3-codex");
   assert.equal(messageCommand.runtime.reasoningEffort, "xhigh");
+  assert.equal(messageCommand.runtime.profile, "strict");
+  assert.equal(messageCommand.runtime.sandbox, "read-only");
+  assert.equal(messageCommand.runtime.approvalPolicy, "on-request");
 });
 
 test("interactive Codex approvals wait for mobile decisions", async () => {

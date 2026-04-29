@@ -3085,6 +3085,10 @@ body.topbar-collapsed .topbar {
   flex: 0 1 auto;
 }
 
+.composer-inline-permission select {
+  max-width: 76px;
+}
+
 .composer-inline-select select {
   min-height: 28px;
   border: 0;
@@ -3124,6 +3128,7 @@ body.topbar-collapsed .topbar {
 
 .composer-submit-inline {
   margin-left: auto;
+  min-width: 66px;
 }
 
 @media (max-width: 760px) {
@@ -3173,12 +3178,16 @@ body.topbar-collapsed .topbar {
   }
 
   .composer-inline-select select {
-    max-width: 94px;
+    max-width: 84px;
+  }
+
+  .composer-inline-permission select {
+    max-width: 68px;
   }
 
   .codex-submit {
-    min-width: 72px;
+    min-width: 64px;
     min-height: 38px;
-    padding: 0 14px;
+    padding: 0 12px;
   }
 }

@@ -21,6 +21,12 @@ const REASONING_OPTIONS = [
   { value: "high", label: "高" },
   { value: "xhigh", label: "极高" }
 ];
+const PERMISSION_MODE_OPTIONS = [
+  { value: "", label: "默认" },
+  { value: "strict", label: "严格" },
+  { value: "approve", label: "批准" },
+  { value: "full", label: "全部" }
+];
 if (tokenFromUrl) {
   window.history.replaceState({}, "", window.location.pathname);
 }
@@ -60,6 +66,7 @@ const elements = {
   showArchivedSessionsButton: document.querySelector("#showArchivedSessionsButton"),
   sidebarUserMeta: document.querySelector("#sidebarUserMeta"),
   codexProject: document.querySelector("#codexProject"),
+  codexPermissionMode: document.querySelector("#codexPermissionMode"),
   codexModel: document.querySelector("#codexModel"),
   codexReasoningEffort: document.querySelector("#codexReasoningEffort"),
   composerProjectLabel: document.querySelector("#composerProjectLabel"),
@@ -126,6 +133,7 @@ elements.codexProject.addEventListener("change", () => {
   refreshActiveSessionHeader();
   updateComposerAvailability();
 });
+elements.codexPermissionMode.addEventListener("change", handleRuntimeControlChange);
 elements.codexModel.addEventListener("change", handleRuntimeControlChange);
 elements.codexReasoningEffort.addEventListener("change", handleRuntimeControlChange);
 document.addEventListener("keydown", handleGlobalKeydown);
@@ -391,6 +399,7 @@ function setTopbarCollapsed(collapsed) {
 }
 
 function initRuntimeControls() {
+  populateRuntimeSelect(elements.codexPermissionMode, PERMISSION_MODE_OPTIONS);
   populateRuntimeSelect(elements.codexModel, MODEL_OPTIONS);
   populateRuntimeSelect(elements.codexReasoningEffort, REASONING_OPTIONS);
   applyRuntimeDraft(runtimePreferences, { persist: false, dirty: false });
@@ -416,14 +425,28 @@ function handleRuntimeControlChange() {
 }
 
 function currentRuntimeDraft() {
-  return normalizeRuntimeChoice({
+  const next = normalizeRuntimeChoice({
+    permissionMode: elements.codexPermissionMode.value,
     model: elements.codexModel.value,
     reasoningEffort: elements.codexReasoningEffort.value
   });
+  const preset = permissionRuntimeForMode(next.permissionMode);
+  return {
+    ...next,
+    profile: next.permissionMode || "",
+    sandbox: next.permissionMode ? preset.sandbox : "",
+    approvalPolicy: next.permissionMode ? preset.approvalPolicy : ""
+  };
 }
 
 function applyRuntimeDraft(runtime = {}, options = {}) {
   const next = normalizeRuntimeChoice(runtime);
+  ensureRuntimeOption(
+    elements.codexPermissionMode,
+    PERMISSION_MODE_OPTIONS,
+    next.permissionMode,
+    permissionModeDisplayName(next.permissionMode)
+  );
   ensureRuntimeOption(elements.codexModel, MODEL_OPTIONS, next.model, modelDisplayName(next.model));
   ensureRuntimeOption(
     elements.codexReasoningEffort,
@@ -431,6 +454,7 @@ function applyRuntimeDraft(runtime = {}, options = {}) {
     next.reasoningEffort,
     reasoningDisplayName(next.reasoningEffort)
   );
+  elements.codexPermissionMode.value = next.permissionMode;
   elements.codexModel.value = next.model;
   elements.codexReasoningEffort.value = next.reasoningEffort;
   runtimeDirty = Boolean(options.dirty);
@@ -442,17 +466,21 @@ function applyRuntimeDraft(runtime = {}, options = {}) {
 }
 
 function refreshRuntimeDefaultOptions() {
+  const permissionOption = elements.codexPermissionMode.querySelector('option[value=""]');
   const modelOption = elements.codexModel.querySelector('option[value=""]');
   const reasoningOption = elements.codexReasoningEffort.querySelector('option[value=""]');
+  if (permissionOption) {
+    permissionOption.textContent = codexAgentRuntime.permissionMode
+      ? `默认 · ${permissionModeDisplayName(codexAgentRuntime.permissionMode)}`
+      : "默认";
+  }
   if (modelOption) {
-    modelOption.textContent = codexAgentRuntime.model
-      ? `桌面默认 · ${modelDisplayName(codexAgentRuntime.model)}`
-      : "桌面默认";
+    modelOption.textContent = codexAgentRuntime.model ? `默认 · ${modelDisplayName(codexAgentRuntime.model)}` : "默认";
   }
   if (reasoningOption) {
     reasoningOption.textContent = codexAgentRuntime.reasoningEffort
-      ? `桌面默认 · ${reasoningDisplayName(codexAgentRuntime.reasoningEffort)}`
-      : "桌面默认";
+      ? `默认 · ${reasoningDisplayName(codexAgentRuntime.reasoningEffort)}`
+      : "默认";
   }
 }
 
@@ -470,9 +498,15 @@ function ensureRuntimeOption(select, options, value, fallbackLabel) {
 function normalizeRuntimeChoice(runtime = {}) {
   const knownModelValues = new Set(MODEL_OPTIONS.map((option) => option.value));
   const knownReasoningValues = new Set(REASONING_OPTIONS.map((option) => option.value));
+  const permissionMode = normalizePermissionMode(
+    runtime.permissionMode || runtime.permissionsMode || runtime.profile || permissionModeFromRuntime(runtime)
+  );
   const model = String(runtime.model || "").trim();
   const reasoningEffort = String(runtime.reasoningEffort || runtime.effort || "").trim().toLowerCase();
   return {
+    permissionMode,
+    sandbox: normalizeSandboxModeValue(runtime.sandbox),
+    approvalPolicy: normalizeApprovalPolicyValue(runtime.approvalPolicy),
     model: knownModelValues.has(model) || model ? model : "",
     reasoningEffort: knownReasoningValues.has(reasoningEffort) || reasoningEffort ? reasoningEffort : ""
   };
@@ -480,6 +514,7 @@ function normalizeRuntimeChoice(runtime = {}) {
 
 function readStoredRuntimePreferences() {
   return normalizeRuntimeChoice({
+    permissionMode: localStorage.getItem("echoCodexPermissionMode") || "",
     model: localStorage.getItem("echoCodexModel") || "",
     reasoningEffort: localStorage.getItem("echoCodexReasoningEffort") || ""
   });
@@ -487,6 +522,8 @@ function readStoredRuntimePreferences() {
 
 function writeStoredRuntimePreferences(runtime = {}) {
   const next = normalizeRuntimeChoice(runtime);
+  if (next.permissionMode) localStorage.setItem("echoCodexPermissionMode", next.permissionMode);
+  else localStorage.removeItem("echoCodexPermissionMode");
   if (next.model) localStorage.setItem("echoCodexModel", next.model);
   else localStorage.removeItem("echoCodexModel");
   if (next.reasoningEffort) localStorage.setItem("echoCodexReasoningEffort", next.reasoningEffort);
@@ -784,7 +821,7 @@ function startNewCodexSession() {
   closeSessionSidebar({ restoreFocus: false });
   renderEmptySessionDetail({
     title: "新会话",
-    body: "选择工程、模型和推理强度后直接发送。"
+    body: "选择工程、权限、模型和推理强度后直接发送。"
   });
   for (const button of elements.codexJobs.querySelectorAll(".conversation-item")) {
     button.classList.remove("active");
@@ -892,6 +929,7 @@ function updateComposerAvailability() {
       : "发送";
   elements.newCodexSessionButton.disabled = composerBusy;
   elements.codexProject.disabled = composerBusy;
+  elements.codexPermissionMode.disabled = composerBusy;
   elements.codexModel.disabled = composerBusy;
   elements.codexReasoningEffort.disabled = composerBusy;
   elements.codexPrompt.disabled = composerBusy;
@@ -1483,7 +1521,7 @@ function refreshActiveSessionHeader() {
     parts.push(session.archivedAt ? "已归档" : statusLabel(session.status));
     parts.push(formatRelativeTime(sessionTime(session)));
   }
-  elements.activeSessionMeta.textContent = parts.filter(Boolean).join(" · ") || "选择工程、模型和推理强度后直接发送。";
+  elements.activeSessionMeta.textContent = parts.filter(Boolean).join(" · ") || "选择工程、权限、模型和推理强度后直接发送。";
   refreshComposerMeta();
 }
 
@@ -1534,9 +1572,51 @@ function sessionProjectLabel(projectId) {
 function sessionRuntimeLabel(runtime = {}) {
   const normalized = normalizeRuntimeChoice(runtime);
   const parts = [];
+  if (normalized.permissionMode) parts.push(permissionModeDisplayName(normalized.permissionMode));
   if (normalized.model) parts.push(modelDisplayName(normalized.model));
   if (normalized.reasoningEffort) parts.push(`推理 ${reasoningDisplayName(normalized.reasoningEffort)}`);
   return parts.join(" · ");
+}
+
+function normalizePermissionMode(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "readonly" || normalized === "read-only" || normalized === "suggest") return "strict";
+  if (normalized === "approve" || normalized === "approved" || normalized === "auto" || normalized === "auto-edit") return "approve";
+  if (normalized === "full" || normalized === "full-auto" || normalized === "fullaccess") return "full";
+  return PERMISSION_MODE_OPTIONS.some((option) => option.value === normalized) ? normalized : "";
+}
+
+function permissionModeFromRuntime(runtime = {}) {
+  const sandbox = normalizeSandboxModeValue(runtime.sandbox);
+  if (sandbox === "read-only") return "strict";
+  if (sandbox === "danger-full-access") return "full";
+  if (sandbox === "workspace-write") return "approve";
+  return "";
+}
+
+function permissionRuntimeForMode(mode) {
+  const normalized = normalizePermissionMode(mode);
+  if (normalized === "strict") return { sandbox: "read-only", approvalPolicy: "on-request" };
+  if (normalized === "full") return { sandbox: "danger-full-access", approvalPolicy: "never" };
+  if (normalized === "approve") return { sandbox: "workspace-write", approvalPolicy: "on-request" };
+  return { sandbox: "", approvalPolicy: "" };
+}
+
+function normalizeSandboxModeValue(value) {
+  const normalized = String(value || "").trim();
+  if (normalized === "workspaceWrite") return "workspace-write";
+  if (normalized === "dangerFullAccess") return "danger-full-access";
+  if (normalized === "readOnly") return "read-only";
+  return normalized;
+}
+
+function normalizeApprovalPolicyValue(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function permissionModeDisplayName(value) {
+  const normalized = normalizePermissionMode(value);
+  return PERMISSION_MODE_OPTIONS.find((option) => option.value === normalized)?.label || normalized;
 }
 
 function modelDisplayName(value) {
