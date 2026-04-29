@@ -3603,3 +3603,320 @@ body.topbar-collapsed .topbar {
     inset: calc(var(--topbar-height, 72px) + 2px) 0 0 0;
   }
 }
+
+/* v38 sidebar simplification */
+
+.session-sidebar {
+  top: calc(var(--topbar-height, 72px) + 8px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  gap: 0;
+  min-height: calc(var(--app-height) - var(--topbar-height, 72px) - 20px);
+  max-height: calc(var(--app-height) - var(--topbar-height, 72px) - 20px);
+  border: 1px solid rgba(126, 106, 84, 0.12);
+  border-radius: 0;
+  background: rgba(251, 248, 242, 0.96);
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.sidebar-head,
+.sidebar-panel {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.sidebar-head {
+  align-items: center;
+  padding: 16px 18px 14px;
+  border-bottom: 1px solid rgba(126, 106, 84, 0.08);
+}
+
+.sidebar-head strong {
+  font-size: 16px;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+.sidebar-head-actions {
+  gap: 6px;
+}
+
+.sidebar-add-button,
+.sidebar-section-toggle {
+  width: 34px;
+  min-height: 34px;
+  border: 1px solid rgba(126, 106, 84, 0.12);
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.sidebar-add-button:hover,
+.sidebar-add-button:focus-visible,
+.sidebar-section-toggle:hover,
+.sidebar-section-toggle:focus-visible,
+.sidebar-section-toggle[aria-expanded="true"] {
+  background: rgba(23, 20, 17, 0.06);
+}
+
+.sidebar-section-toggle svg {
+  width: 16px;
+  height: 16px;
+}
+
+.sidebar-panel {
+  display: grid;
+  gap: 10px;
+  padding: 14px 18px;
+  min-height: 0;
+}
+
+.sidebar-panel + .sidebar-panel {
+  border-top: 1px solid rgba(126, 106, 84, 0.08);
+}
+
+.sidebar-panel-head {
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sidebar-panel-head strong {
+  margin: 0;
+  color: var(--muted-2);
+  font-size: 11px;
+  font-weight: 780;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sidebar-panel-conversations {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  padding-bottom: 0;
+}
+
+.sidebar-tools {
+  gap: 0;
+  border: 0;
+  padding: 0;
+}
+
+.session-filter {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid rgba(126, 106, 84, 0.1);
+  border-radius: 12px;
+  background: rgba(236, 228, 216, 0.42);
+  padding: 2px;
+}
+
+.session-filter button {
+  min-height: 34px;
+  border-radius: 10px;
+  font-weight: 700;
+}
+
+.session-filter button.active {
+  background: rgba(255, 252, 247, 0.96);
+  box-shadow: none;
+}
+
+.sidebar-status {
+  display: grid;
+  gap: 4px;
+  border: 0;
+  padding: 0;
+}
+
+.codex-jobs {
+  display: grid;
+  gap: 0;
+  min-height: 0;
+  max-height: none;
+  overflow: auto;
+  padding: 4px 0 0;
+}
+
+.empty-state {
+  border-top: 1px dashed rgba(126, 106, 84, 0.14);
+  border-radius: 0;
+  background: transparent;
+  padding: 14px 0;
+}
+
+.conversation-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  border-top: 1px solid rgba(126, 106, 84, 0.08);
+  border-bottom: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 12px 0;
+}
+
+.conversation-item:first-child {
+  border-top: 1px solid rgba(126, 106, 84, 0.08);
+}
+
+.conversation-item.active {
+  background: rgba(23, 20, 17, 0.035);
+  box-shadow: inset 2px 0 0 rgba(191, 97, 39, 0.8);
+}
+
+.conversation-item-archive {
+  border-radius: 8px;
+}
+
+.project-sidebar-card {
+  display: grid;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.project-sheet-list.sidebar-project-list {
+  gap: 0;
+  max-height: min(240px, 28vh);
+  overflow: auto;
+  padding: 0;
+}
+
+.project-sheet-empty {
+  border: 0;
+  border-top: 1px dashed rgba(126, 106, 84, 0.14);
+  border-radius: 0;
+  background: transparent;
+  padding: 12px 0;
+}
+
+.project-option {
+  gap: 10px;
+  border: 0;
+  border-top: 1px solid rgba(126, 106, 84, 0.08);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 12px 0;
+}
+
+.project-option:hover {
+  border-color: transparent;
+  background: rgba(23, 20, 17, 0.03);
+  box-shadow: none;
+}
+
+.project-option.active {
+  border-color: transparent;
+  background: rgba(23, 20, 17, 0.035);
+  box-shadow: inset 2px 0 0 rgba(191, 97, 39, 0.8);
+}
+
+.sidebar-panel-user {
+  padding-bottom: 16px;
+}
+
+.sidebar-user-body[hidden] {
+  display: none !important;
+}
+
+.sidebar-user-card {
+  display: grid;
+  gap: 12px;
+  padding-top: 8px;
+}
+
+.sidebar-user-identity {
+  display: grid;
+  gap: 8px;
+}
+
+.sidebar-user-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.sidebar-user-actions > * {
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 38px;
+  border-radius: 10px;
+  padding: 0 12px;
+}
+
+.sidebar-utility-toggle {
+  min-height: 44px;
+  border: 1px solid rgba(126, 106, 84, 0.12);
+  border-radius: 10px;
+  background: transparent;
+  padding: 10px 12px;
+}
+
+.sidebar-setting-copy {
+  gap: 2px;
+}
+
+.user-badge {
+  max-width: 100%;
+  width: fit-content;
+  border: 1px solid rgba(197, 106, 45, 0.16);
+  background: rgba(255, 247, 239, 0.84);
+  color: var(--accent-strong);
+  padding: 6px 10px;
+}
+
+@media (max-width: 760px) {
+  .session-sidebar {
+    position: fixed;
+    top: var(--topbar-height, 72px);
+    bottom: 0;
+    left: 0;
+    z-index: 18;
+    width: min(320px, calc(100vw - 56px));
+    min-height: 0;
+    max-height: none;
+    border: 0;
+    border-right: 1px solid rgba(126, 106, 84, 0.12);
+    border-radius: 0;
+    background: rgba(251, 248, 242, 0.98);
+    box-shadow: 18px 0 40px rgba(38, 25, 14, 0.14);
+    padding: 0;
+    transform: translateX(-100%);
+    transition: transform 180ms ease;
+  }
+
+  .codex-section.sessions-open .session-sidebar {
+    transform: translateX(0);
+  }
+
+  .session-backdrop {
+    inset: var(--topbar-height, 72px) 0 0 0;
+    background: rgba(20, 18, 16, 0.24);
+    backdrop-filter: none;
+  }
+
+  .sidebar-head,
+  .sidebar-panel {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .codex-jobs,
+  .project-sheet-list.sidebar-project-list {
+    overscroll-behavior: contain;
+  }
+}
+
+@media (max-width: 420px) {
+  .session-sidebar {
+    width: calc(100vw - 48px);
+  }
+}

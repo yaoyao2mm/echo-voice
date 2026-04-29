@@ -38,11 +38,6 @@ function bindEvents() {
   });
 
   document.querySelector("#networkTest").addEventListener("click", () => runAction("/api/test/network", "Testing network..."));
-  document.querySelector("#refineTest").addEventListener("click", () =>
-    runAction("/api/test/refine", "Testing refinement...", {
-      text: "嗯我想把这个需求整理成适合 Codex 执行的任务，不要太啰嗦。"
-    })
-  );
   document.querySelector("#restartAgent").addEventListener("click", () => runAction("/api/desktop/restart", "Restarting desktop agent..."));
   document.querySelector("#reloadState").addEventListener("click", loadState);
   document.querySelector("#refreshHealth").addEventListener("click", loadHealth);
@@ -299,8 +294,6 @@ function formatState(state) {
     `env: ${state.envFile}`,
     `relay: ${valueOf(fields, "ECHO_RELAY_URL") || "-"}`,
     `proxy: ${valueOf(fields, "ECHO_PROXY_URL") || "direct"}`,
-    `postprocess: ${state.meta?.postprocessScope || "local"}`,
-    `local refine: ${valueOf(fields, "POSTPROCESS_PROVIDER") || "auto"}`,
     `codex: ${valueOf(fields, "ECHO_CODEX_ENABLED") || "true"}`
   ];
   return lines.join("\n");

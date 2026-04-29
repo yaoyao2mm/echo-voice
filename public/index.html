@@ -10,8 +10,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Echo Codex</title>
-    <link rel="manifest" href="/manifest.webmanifest?v=38" />
-    <link rel="stylesheet" href="/styles.css?v=38" />
+    <link rel="manifest" href="/manifest.webmanifest?v=39" />
+    <link rel="stylesheet" href="/styles.css?v=39" />
   </head>
   <body>
     <main class="shell">
@@ -99,7 +99,6 @@
               <strong>会话</strong>
             </div>
             <div class="sidebar-tools">
-              <input id="sessionSearch" type="search" autocomplete="off" placeholder="搜索会话" />
               <div class="session-filter" role="tablist" aria-label="会话筛选">
                 <button id="showActiveSessionsButton" class="active" type="button">最近</button>
                 <button id="showArchivedSessionsButton" type="button">归档</button>
@@ -128,25 +127,35 @@
           <section class="sidebar-panel sidebar-panel-user">
             <div class="sidebar-panel-head">
               <strong>用户中心</strong>
+              <button
+                id="sidebarUserToggle"
+                class="icon-button sidebar-section-toggle"
+                type="button"
+                aria-label="展开用户中心"
+                aria-controls="sidebarUserBody"
+                aria-expanded="false"
+                title="用户中心"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm0 2c-3.314 0-6 1.79-6 4v1h12v-1c0-2.21-2.686-4-6-4Z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </button>
             </div>
-            <div class="sidebar-user-card">
-              <div class="sidebar-user-identity">
-                <span id="userBadge" class="user-badge" hidden></span>
-                <p id="sidebarUserMeta" class="sidebar-user-meta">登录后可查看账号与配对状态。</p>
+            <div id="sidebarUserBody" class="sidebar-user-body" hidden>
+              <div class="sidebar-user-card">
+                <div class="sidebar-user-identity">
+                  <span id="userBadge" class="user-badge" hidden></span>
+                  <p id="sidebarUserMeta" class="sidebar-user-meta">登录后可查看账号与配对状态。</p>
+                </div>
+                <div class="sidebar-user-actions">
+                  <button id="openPairingButton" class="top-pair-button" type="button" hidden>扫码配对</button>
+                  <button id="refreshStatus" class="secondary compact-action" type="button" hidden>刷新状态</button>
+                  <button id="logoutButton" class="top-logout-button" type="button" hidden>退出</button>
+                </div>
               </div>
-              <div class="sidebar-user-actions">
-                <button id="openPairingButton" class="top-pair-button" type="button" hidden>扫码配对</button>
-                <button id="refreshStatus" class="secondary compact-action" type="button" hidden>刷新状态</button>
-                <button id="logoutButton" class="top-logout-button" type="button" hidden>退出</button>
-              </div>
-              <label class="postprocess-toggle sidebar-utility-toggle" for="postprocessToggle">
-                <input id="postprocessToggle" type="checkbox" role="switch" />
-                <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-                <span class="sidebar-setting-copy">
-                  <strong>输入后处理</strong>
-                  <span id="postprocessLabel">后处理</span>
-                </span>
-              </label>
             </div>
           </section>
         </aside>
@@ -213,6 +222,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=38" type="module"></script>
+    <script src="/app.js?v=39" type="module"></script>
   </body>
 </html>

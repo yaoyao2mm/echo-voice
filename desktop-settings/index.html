@@ -14,7 +14,6 @@
       </div>
       <div class="topActions">
         <button type="button" id="networkTest">测试网络</button>
-        <button type="button" id="refineTest">测试实际后处理</button>
         <button type="button" id="restartAgent">重启桌面端</button>
       </div>
     </header>
@@ -25,7 +24,6 @@
         <button type="button" class="tab active" data-tab="overview">概览</button>
         <button type="button" class="tab" data-tab="connection">连接</button>
         <button type="button" class="tab" data-tab="network">VPN</button>
-        <button type="button" class="tab" data-tab="refine">本机模型</button>
         <button type="button" class="tab" data-tab="codex">Codex</button>
       </nav>
 
@@ -105,68 +103,6 @@
             <label>
               Timeout ms
               <input data-key="ECHO_HTTP_TIMEOUT_MS" type="number" min="1000" max="300000" step="1000" />
-            </label>
-          </div>
-        </section>
-
-        <section class="panel" data-panel="refine">
-          <div class="sectionHeader">
-            <div>
-              <h2>本机模型</h2>
-              <p>本机 local 模式和诊断用的文本后处理模型。</p>
-            </div>
-            <button type="submit">保存配置</button>
-          </div>
-          <div class="notice">
-            这里的后处理配置只影响本机 local 模式和本机测试。若手机连接的是公网 relay，实际后处理模型由服务器配置决定。
-          </div>
-          <div class="grid">
-            <label>
-              Provider
-              <select data-key="POSTPROCESS_PROVIDER">
-                <option value="auto">auto</option>
-                <option value="volcengine">volcengine</option>
-                <option value="openai">openai</option>
-                <option value="ollama">ollama</option>
-                <option value="rules">rules</option>
-                <option value="none">none</option>
-              </select>
-            </label>
-            <label>
-              Volcengine API Key
-              <input data-key="METIO_VOLCENGINE_CODING_API_KEY" data-secret="true" type="password" autocomplete="new-password" />
-              <span class="secretState" data-secret-state="METIO_VOLCENGINE_CODING_API_KEY"></span>
-              <span class="inlineCheck"><input type="checkbox" data-clear-secret="METIO_VOLCENGINE_CODING_API_KEY" /> 清空</span>
-            </label>
-            <label>
-              Volcengine Base URL
-              <input data-key="METIO_VOLCENGINE_CODING_OPENAI_BASE_URL" autocomplete="off" />
-            </label>
-            <label>
-              Volcengine Model
-              <input data-key="METIO_VOLCENGINE_CODING_CHAT_MODEL" autocomplete="off" />
-            </label>
-            <label>
-              LLM API Key
-              <input data-key="LLM_API_KEY" data-secret="true" type="password" autocomplete="new-password" />
-              <span class="secretState" data-secret-state="LLM_API_KEY"></span>
-              <span class="inlineCheck"><input type="checkbox" data-clear-secret="LLM_API_KEY" /> 清空</span>
-            </label>
-            <label>
-              LLM Base URL
-              <input data-key="LLM_BASE_URL" autocomplete="off" />
-            </label>
-            <label>
-              LLM Model
-              <input data-key="LLM_MODEL" autocomplete="off" />
-            </label>
-            <label>
-              Ollama URL
-              <input data-key="OLLAMA_BASE_URL" autocomplete="off" />
-            </label>
-            <label>
-              Ollama Model
-              <input data-key="OLLAMA_MODEL" autocomplete="off" />
             </label>
           </div>
         </section>

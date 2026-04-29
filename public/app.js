@@ -5,7 +5,6 @@ let token = tokenFromUrl || localStorage.getItem("echoToken") || "";
 let sessionToken = localStorage.getItem("echoSession") || "";
 let currentUser = readStoredUser();
 let authEnabled = true;
-const mobileRefineTimeoutMs = 10000;
 const MAX_COMPOSER_ATTACHMENTS = 3;
 const MAX_COMPOSER_ATTACHMENT_BYTES = 6 * 1024 * 1024;
 const MODEL_OPTIONS = [
@@ -65,9 +64,10 @@ const elements = {
   toggleSessionsButton: document.querySelector("#toggleSessionsButton"),
   sessionBackdrop: document.querySelector("#sessionBackdrop"),
   codexScrollSurface: document.querySelector("#codexJobDetail"),
-  sessionSearch: document.querySelector("#sessionSearch"),
   showActiveSessionsButton: document.querySelector("#showActiveSessionsButton"),
   showArchivedSessionsButton: document.querySelector("#showArchivedSessionsButton"),
+  sidebarUserToggle: document.querySelector("#sidebarUserToggle"),
+  sidebarUserBody: document.querySelector("#sidebarUserBody"),
   topbarProjectChip: document.querySelector(".topbar-project-chip"),
   sidebarUserMeta: document.querySelector("#sidebarUserMeta"),
   codexProject: document.querySelector("#codexProject"),
@@ -85,8 +85,6 @@ const elements = {
   projectSheetList: document.querySelector("#projectSheetList"),
   codexPrompt: document.querySelector("#codexPrompt"),
   composer: document.querySelector(".composer"),
-  postprocessToggle: document.querySelector("#postprocessToggle"),
-  postprocessLabel: document.querySelector("#postprocessLabel"),
   newCodexSessionButton: document.querySelector("#newCodexSessionButton"),
   sendCodexButton: document.querySelector("#sendCodexButton"),
   codexJobs: document.querySelector("#codexJobs"),
@@ -106,8 +104,6 @@ let selectedCodexSession = null;
 let composingNewSession = false;
 let codexWorkspaces = [];
 let showArchivedSessions = false;
-let sessionSearchQuery = "";
-let postprocessEnabled = localStorage.getItem("echoPostprocessEnabled") !== "false";
 let composerBusy = false;
 let codexAgentRuntime = {};
 let runtimePreferences = readStoredRuntimePreferences();
@@ -132,12 +128,9 @@ elements.newCodexSessionButton.addEventListener("click", startNewCodexSession);
 elements.sendCodexButton.addEventListener("click", sendToCodex);
 elements.toggleSessionsButton.addEventListener("click", toggleSessionSidebar);
 elements.sessionBackdrop.addEventListener("click", closeSessionSidebar);
-elements.sessionSearch.addEventListener("input", () => {
-  sessionSearchQuery = elements.sessionSearch.value.trim().toLowerCase();
-  loadCodexJobs().catch(() => {});
-});
 elements.showActiveSessionsButton.addEventListener("click", () => setSessionArchiveView(false));
 elements.showArchivedSessionsButton.addEventListener("click", () => setSessionArchiveView(true));
+elements.sidebarUserToggle.addEventListener("click", toggleSidebarUserMenu);
 elements.codexProject.addEventListener("change", () => {
   localStorage.setItem("echoCodexProject", elements.codexProject.value);
   syncProjectPicker();
@@ -152,18 +145,11 @@ elements.composerAttachmentButton.addEventListener("click", openComposerAttachme
 elements.composerAttachmentInput.addEventListener("change", handleComposerAttachmentInput);
 elements.codexPrompt.addEventListener("paste", handleComposerPaste);
 document.addEventListener("keydown", handleGlobalKeydown);
-elements.postprocessToggle.addEventListener("change", () => {
-  postprocessEnabled = elements.postprocessToggle.checked;
-  localStorage.setItem("echoPostprocessEnabled", postprocessEnabled ? "true" : "false");
-  updatePostprocessUi();
-  toast(postprocessEnabled ? "后处理已开启" : "后处理已关闭");
-});
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
 }
 
-updatePostprocessUi();
 renderComposerAttachments();
 updateSessionSidebarToggle(false);
 await bootUserSession();
@@ -845,14 +831,12 @@ function openSessionSidebar() {
   elements.sessionBackdrop.hidden = false;
   updateSessionSidebarToggle(true);
   syncBodySheetState();
-  window.requestAnimationFrame(() => {
-    elements.sessionSearch.focus({ preventScroll: true });
-  });
 }
 
 function closeSessionSidebar({ restoreFocus = true } = {}) {
   elements.codexView.classList.remove("sessions-open");
   elements.sessionBackdrop.hidden = true;
+  setSidebarUserMenuOpen(false);
   updateSessionSidebarToggle(false);
   syncBodySheetState();
   resetTopbarScrollTracking({ forceVisible: true });
@@ -879,6 +863,17 @@ function updateSessionSidebarToggle(isOpen) {
 
 function syncBodySheetState() {
   document.body.classList.toggle("sheet-open", elements.codexView.classList.contains("sessions-open"));
+}
+
+function toggleSidebarUserMenu() {
+  setSidebarUserMenuOpen(elements.sidebarUserBody.hidden);
+}
+
+function setSidebarUserMenuOpen(isOpen) {
+  elements.sidebarUserBody.hidden = !isOpen;
+  elements.sidebarUserToggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+  elements.sidebarUserToggle.setAttribute("aria-label", isOpen ? "收起用户中心" : "展开用户中心");
+  elements.sidebarUserToggle.setAttribute("title", isOpen ? "收起用户中心" : "展开用户中心");
 }
 
 async function setSessionArchiveView(archived) {
@@ -941,11 +936,9 @@ async function sendToCodex() {
   }
 
   localStorage.setItem("echoCodexProject", projectId);
-  setComposerBusy(true, postprocessEnabled ? "整理中" : "发送中");
+  setComposerBusy(true, "发送中");
   try {
-    const prompt = rawPrompt && postprocessEnabled ? await refinePromptForCodex(rawPrompt) : rawPrompt;
-    setComposerBusy(true, "发送中");
-    const data = await sendCodexPrompt({ projectId, prompt, runtime, attachments });
+    const data = await sendCodexPrompt({ projectId, prompt: rawPrompt, runtime, attachments });
     if (showArchivedSessions) {
       showArchivedSessions = false;
       elements.showActiveSessionsButton.classList.add("active");
@@ -1020,28 +1013,6 @@ function composerActionLabel() {
   if (selectedSessionNeedsExplicitNew()) return "先新建";
   if (!canContinueSelectedSession()) return "发送";
   return sessionHasPendingWork(selectedCodexSession) ? "继续排队" : "继续";
-}
-
-async function refinePromptForCodex(rawText) {
-  try {
-    const data = await apiPost(
-      "/api/refine",
-      {
-        rawText,
-        mode: "chat",
-        contextHint: "手机端 Codex 任务输入",
-        includeHistory: false
-      },
-      { timeoutMs: mobileRefineTimeoutMs }
-    );
-    const refined = String(data.item?.refined || data.item?.raw || rawText).trim();
-    if (refined) elements.codexPrompt.value = refined;
-    return refined || rawText;
-  } catch (error) {
-    if (isAuthError(error)) throw error;
-    toast("后处理失败，已发送原文");
-    return rawText;
-  }
 }
 
 function openComposerAttachmentPicker() {
@@ -1318,14 +1289,10 @@ function workspacePathLabel(workspace) {
 
 async function loadCodexJobs() {
   const data = await apiGet(`/api/codex/sessions?archived=${showArchivedSessions ? "true" : "false"}`);
-  const jobs = data.items.slice(0, 30).filter(matchesSessionSearch);
+  const jobs = data.items.slice(0, 30);
   elements.codexJobs.innerHTML = "";
   if (jobs.length === 0) {
-    const emptyCopy = sessionSearchQuery
-      ? "没有匹配的会话"
-      : showArchivedSessions
-        ? "还没有归档会话"
-        : "还没有 Codex 会话";
+    const emptyCopy = showArchivedSessions ? "还没有归档会话" : "还没有 Codex 会话";
     elements.codexJobs.innerHTML = `<div class="empty-state">${escapeHtml(emptyCopy)}</div>`;
     selectedCodexSession = null;
     if (!composingNewSession) {
@@ -1406,24 +1373,6 @@ async function archiveSession(sessionId, archived) {
       toast(error.message);
     }
   }
-}
-
-function matchesSessionSearch(job) {
-  if (!sessionSearchQuery) return true;
-  const haystack = [
-    jobTitle(job),
-    job.projectId,
-    sessionProjectLabel(job.projectId),
-    jobPreview(job),
-    sessionRuntimeLabel(job.runtime),
-    job.status,
-    job.finalMessage,
-    job.lastError
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-  return haystack.includes(sessionSearchQuery);
 }
 
 function preferredSession(jobs) {
@@ -1876,13 +1825,12 @@ function refreshComposerMeta() {
   const session = composingNewSession ? null : selectedCodexSession;
   const runtime = runtimeDirty ? currentRuntimeDraft() : session?.runtime || runtimePreferences;
   const runtimeLabel = sessionRuntimeLabel(runtime) || "桌面默认";
-  const modeLabel = postprocessEnabled ? "后处理" : "原文";
   if (session && !sessionCanAcceptFollowUp(session)) {
-    elements.composerActionsMeta.textContent = `当前会话不可继续，请先从左上角新建会话 · ${runtimeLabel} · ${modeLabel}`;
+    elements.composerActionsMeta.textContent = `当前会话不可继续，请先从左上角新建会话 · ${runtimeLabel}`;
     return;
   }
   const lead = session ? (sessionHasPendingWork(session) ? "继续当前话题，接在这一轮后面" : "继续当前话题") : "发送后创建新话题";
-  elements.composerActionsMeta.textContent = `${lead} · ${sessionProjectLabel(session?.projectId || elements.codexProject.value)} · ${runtimeLabel} · ${modeLabel}`;
+  elements.composerActionsMeta.textContent = `${lead} · ${sessionProjectLabel(session?.projectId || elements.codexProject.value)} · ${runtimeLabel}`;
 }
 
 function refreshTopbarProjectChip() {
@@ -1994,13 +1942,6 @@ function humanizeCodexError(error) {
     return `${text}\n\n处理方式：检查桌面端 Codex command，必要时填入 codex 的绝对路径。`;
   }
   return text;
-}
-
-function updatePostprocessUi() {
-  elements.postprocessToggle.checked = postprocessEnabled;
-  elements.postprocessLabel.textContent = postprocessEnabled ? "后处理" : "原文";
-  elements.postprocessToggle.closest(".postprocess-toggle")?.classList.toggle("off", !postprocessEnabled);
-  refreshComposerMeta();
 }
 
 function isAuthError(error) {
