@@ -176,3 +176,25 @@ export function buildUserTextInput(text) {
     text_elements: []
   };
 }
+
+export function buildUserImageInput(url) {
+  return {
+    type: "image",
+    url: String(url || "")
+  };
+}
+
+export function buildUserInputs(text, attachments = []) {
+  const inputs = [];
+  const normalizedText = String(text || "").trim();
+  if (normalizedText) inputs.push(buildUserTextInput(normalizedText));
+
+  for (const attachment of Array.isArray(attachments) ? attachments : []) {
+    if (attachment?.type !== "image") continue;
+    const url = String(attachment.url || "").trim();
+    if (!url) continue;
+    inputs.push(buildUserImageInput(url));
+  }
+
+  return inputs;
+}

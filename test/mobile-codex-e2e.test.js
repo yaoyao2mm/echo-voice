@@ -34,12 +34,13 @@ rl.on("line", (line) => {
     return;
   }
   if (message.method === "turn/start") {
-    const text = message.params.input?.[0]?.text || "";
+    const text = message.params.input?.find((item) => item.type === "text")?.text || "";
+    const imageCount = (message.params.input || []).filter((item) => item.type === "image").length;
     const turn = { id: "turn_mobile_e2e", items: [], status: "inProgress", error: null, startedAt: 1, completedAt: null, durationMs: null };
     send({ id: message.id, result: { turn } });
     send({ method: "turn/started", params: { threadId: message.params.threadId, turn } });
     send({ method: "item/agentMessage/delta", params: { threadId: message.params.threadId, turnId: turn.id, itemId: "msg_1", delta: "Fake interactive Codex finished: " } });
-    send({ method: "item/completed", params: { threadId: message.params.threadId, turnId: turn.id, item: { type: "agentMessage", id: "msg_1", text: "Fake interactive Codex finished: " + text } } });
+    send({ method: "item/completed", params: { threadId: message.params.threadId, turnId: turn.id, item: { type: "agentMessage", id: "msg_1", text: "Fake interactive Codex finished: " + text + " [images:" + imageCount + "]" } } });
     send({ method: "turn/completed", params: { threadId: message.params.threadId, turn: { ...turn, status: "completed", completedAt: 2 } } });
   }
 });
@@ -87,7 +88,8 @@ test("mobile relay flow runs an interactive Codex session end to end", async () 
 
   const created = queue.createCodexSession({
     projectId: "e2e",
-    prompt: "请修复移动端发送任务链路"
+    prompt: "请修复移动端发送任务链路",
+    attachments: [{ type: "image", url: "data:image/png;base64,AAAA", name: "mobile.png", mimeType: "image/png", sizeBytes: 4 }]
   });
   assert.equal(created.status, "queued");
 
@@ -102,9 +104,11 @@ test("mobile relay flow runs an interactive Codex session end to end", async () 
 
   const completed = queue.getCodexSession(created.id);
   assert.equal(completed.status, "active");
-  assert.equal(completed.finalMessage, "Fake interactive Codex finished: 请修复移动端发送任务链路");
+  assert.equal(completed.finalMessage, "Fake interactive Codex finished: 请修复移动端发送任务链路 [images:1]");
   assert.equal(completed.events.some((event) => event.type === "thread.started"), true);
   assert.equal(completed.events.some((event) => event.type === "turn/completed"), true);
+  const userEvent = completed.events.find((event) => event.type === "user.message");
+  assert.equal(userEvent.raw.attachments.length, 1);
   assert.equal(queue.listCodexSessions(5)[0].id, created.id);
 
   runtime.stop();

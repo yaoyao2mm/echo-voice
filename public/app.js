@@ -6,6 +6,8 @@ let sessionToken = localStorage.getItem("echoSession") || "";
 let currentUser = readStoredUser();
 let authEnabled = true;
 const mobileRefineTimeoutMs = 10000;
+const MAX_COMPOSER_ATTACHMENTS = 3;
+const MAX_COMPOSER_ATTACHMENT_BYTES = 6 * 1024 * 1024;
 const MODEL_OPTIONS = [
   { value: "", label: "桌面默认" },
   { value: "gpt-5.5", label: "GPT-5.5" },
@@ -61,7 +63,7 @@ const elements = {
   refreshCodex: document.querySelector("#refreshCodex"),
   toggleSessionsButton: document.querySelector("#toggleSessionsButton"),
   sessionBackdrop: document.querySelector("#sessionBackdrop"),
-  codexMain: document.querySelector(".codex-main"),
+  codexScrollSurface: document.querySelector("#codexJobDetail"),
   sessionSearch: document.querySelector("#sessionSearch"),
   showActiveSessionsButton: document.querySelector("#showActiveSessionsButton"),
   showArchivedSessionsButton: document.querySelector("#showArchivedSessionsButton"),
@@ -72,6 +74,9 @@ const elements = {
   codexModel: document.querySelector("#codexModel"),
   codexReasoningEffort: document.querySelector("#codexReasoningEffort"),
   composerProjectLabel: document.querySelector("#composerProjectLabel"),
+  composerAttachmentButton: document.querySelector("#composerAttachmentButton"),
+  composerAttachmentInput: document.querySelector("#composerAttachmentInput"),
+  composerAttachmentTray: document.querySelector("#composerAttachmentTray"),
   projectSidebarCard: document.querySelector("#projectSidebarCard"),
   projectPickerLabel: document.querySelector("#projectPickerLabel"),
   projectPickerMeta: document.querySelector("#projectPickerMeta"),
@@ -108,6 +113,9 @@ let runtimeDirty = false;
 let lastTopbarScrollY = 0;
 let topbarScrollAccumulator = 0;
 let topbarCollapsed = false;
+let composerAttachments = [];
+let stableViewportHeight = 0;
+let composerFocusScrollTimer = null;
 
 bindViewportMetrics();
 bindTopbarScrollState();
@@ -139,6 +147,12 @@ elements.codexProject.addEventListener("change", () => {
 elements.codexPermissionMode.addEventListener("change", handleRuntimeControlChange);
 elements.codexModel.addEventListener("change", handleRuntimeControlChange);
 elements.codexReasoningEffort.addEventListener("change", handleRuntimeControlChange);
+elements.codexPrompt.addEventListener("input", updateComposerAvailability);
+elements.codexPrompt.addEventListener("focus", () => setComposerEditing(true));
+elements.codexPrompt.addEventListener("blur", () => setComposerEditing(false));
+elements.composerAttachmentButton.addEventListener("click", openComposerAttachmentPicker);
+elements.composerAttachmentInput.addEventListener("change", handleComposerAttachmentInput);
+elements.codexPrompt.addEventListener("paste", handleComposerPaste);
 document.addEventListener("keydown", handleGlobalKeydown);
 elements.postprocessToggle.addEventListener("change", () => {
   postprocessEnabled = elements.postprocessToggle.checked;
@@ -152,6 +166,7 @@ if ("serviceWorker" in navigator) {
 }
 
 updatePostprocessUi();
+renderComposerAttachments();
 updateSessionSidebarToggle(false);
 await bootUserSession();
 updateAuthView();
@@ -352,7 +367,12 @@ function bindViewportMetrics() {
 
 function syncViewportMetrics() {
   const viewport = window.visualViewport;
-  const nextHeight = Math.round(viewport?.height || window.innerHeight || 0);
+  const rawHeight = Math.round(viewport?.height || window.innerHeight || 0);
+  const composerFocused = document.activeElement === elements.codexPrompt;
+  const keyboardLikelyOpen =
+    composerFocused && stableViewportHeight > 0 && rawHeight > 0 && rawHeight < stableViewportHeight - 120;
+  if (!keyboardLikelyOpen && rawHeight > 0) stableViewportHeight = rawHeight;
+  const nextHeight = keyboardLikelyOpen ? stableViewportHeight : rawHeight;
   if (nextHeight > 0) document.documentElement.style.setProperty("--app-height", `${nextHeight}px`);
   if (elements.topbar) {
     document.documentElement.style.setProperty("--topbar-height", `${Math.round(elements.topbar.offsetHeight || 0)}px`);
@@ -361,7 +381,7 @@ function syncViewportMetrics() {
 
 function bindTopbarScrollState() {
   resetTopbarScrollTracking({ forceVisible: true });
-  elements.codexMain?.addEventListener(
+  elements.codexScrollSurface?.addEventListener(
     "scroll",
     () => {
       syncTopbarVisibility();
@@ -417,7 +437,7 @@ function syncTopbarVisibility(options = {}) {
 
 function currentTopbarScrollY() {
   if (usesCompactTopbarMode()) {
-    return Math.max(elements.codexMain?.scrollTop || 0, 0);
+    return Math.max(elements.codexScrollSurface?.scrollTop || 0, 0);
   }
   return Math.max(window.scrollY || 0, 0);
 }
@@ -430,6 +450,17 @@ function setTopbarCollapsed(collapsed) {
   if (topbarCollapsed === collapsed) return;
   topbarCollapsed = collapsed;
   document.body.classList.toggle("topbar-collapsed", collapsed);
+}
+
+function setComposerEditing(editing) {
+  document.body.classList.toggle("composer-editing", Boolean(editing));
+  if (!editing) return;
+  if (composerFocusScrollTimer) window.clearTimeout(composerFocusScrollTimer);
+  composerFocusScrollTimer = window.setTimeout(() => {
+    composerFocusScrollTimer = null;
+    if (document.activeElement !== elements.codexPrompt) return;
+    elements.codexPrompt.scrollIntoView({ block: "nearest" });
+  }, 140);
 }
 
 function initRuntimeControls() {
@@ -845,6 +876,7 @@ function startNewCodexSession() {
   selectedCodexJobId = "";
   selectedCodexSession = null;
   composingNewSession = true;
+  clearComposerAttachments({ silent: true });
   applyRuntimeDraft(runtimePreferences, { persist: false, dirty: false });
   if (showArchivedSessions) {
     showArchivedSessions = false;
@@ -869,10 +901,11 @@ async function sendToCodex() {
   if (!ensurePaired()) return;
 
   const rawPrompt = elements.codexPrompt.value.trim();
+  const attachments = currentComposerAttachmentsPayload();
   const projectId = elements.codexProject.value;
   const runtime = currentRuntimeDraft();
-  if (!rawPrompt) {
-    toast("请先填写任务");
+  if (!rawPrompt && attachments.length === 0) {
+    toast("请先填写任务或附上截图");
     return;
   }
   if (!projectId) {
@@ -883,9 +916,9 @@ async function sendToCodex() {
   localStorage.setItem("echoCodexProject", projectId);
   setComposerBusy(true, postprocessEnabled ? "整理中" : "发送中");
   try {
-    const prompt = postprocessEnabled ? await refinePromptForCodex(rawPrompt) : rawPrompt;
+    const prompt = rawPrompt && postprocessEnabled ? await refinePromptForCodex(rawPrompt) : rawPrompt;
     setComposerBusy(true, "发送中");
-    const data = await sendCodexPrompt({ projectId, prompt, runtime });
+    const data = await sendCodexPrompt({ projectId, prompt, runtime, attachments });
     if (showArchivedSessions) {
       showArchivedSessions = false;
       elements.showActiveSessionsButton.classList.add("active");
@@ -897,6 +930,7 @@ async function sendToCodex() {
     runtimeDirty = false;
     applyRuntimeDraft(selectedCodexSession.runtime || runtime, { persist: false, dirty: false });
     elements.codexPrompt.value = "";
+    clearComposerAttachments({ silent: true });
     toast("已发送");
     await loadCodexJobs();
     await showCodexJob(data.session.id);
@@ -910,18 +944,55 @@ async function sendToCodex() {
   }
 }
 
-async function sendCodexPrompt({ projectId, prompt, runtime }) {
+async function sendCodexPrompt({ projectId, prompt, runtime, attachments }) {
   if (canContinueSelectedSession()) {
-    return apiPost(`/api/codex/sessions/${encodeURIComponent(selectedCodexJobId)}/messages`, { text: prompt, runtime });
+    return apiPost(`/api/codex/sessions/${encodeURIComponent(selectedCodexJobId)}/messages`, {
+      text: prompt,
+      runtime,
+      attachments
+    });
   }
-  return apiPost("/api/codex/sessions", { projectId, prompt, runtime });
+  if (!canStartNewSessionFromComposer()) {
+    throw new Error("当前会话不能继续，请先从左上角新建会话。");
+  }
+  return apiPost("/api/codex/sessions", { projectId, prompt, runtime, attachments });
 }
 
 function canContinueSelectedSession() {
+  return sessionCanAcceptFollowUp(selectedSessionForComposer());
+}
+
+function selectedSessionForComposer() {
+  if (composingNewSession) return null;
+  if (!selectedCodexJobId || !selectedCodexSession) return null;
+  return selectedCodexSession;
+}
+
+function sessionCanAcceptFollowUp(session) {
+  if (!session || session.archivedAt) return false;
+  return !["closed", "failed", "stale"].includes(session.status);
+}
+
+function canStartNewSessionFromComposer() {
+  if (composingNewSession) return true;
+  return !selectedCodexJobId && !selectedCodexSession;
+}
+
+function selectedSessionNeedsExplicitNew() {
   if (composingNewSession) return false;
   if (!selectedCodexJobId || !selectedCodexSession) return false;
-  if (selectedCodexSession.archivedAt) return false;
-  return selectedCodexSession.status === "active";
+  return !canContinueSelectedSession();
+}
+
+function sessionHasPendingWork(session) {
+  if (!session) return false;
+  return ["queued", "starting", "running"].includes(session.status) || Number(session.pendingCommandCount || 0) > 0;
+}
+
+function composerActionLabel() {
+  if (selectedSessionNeedsExplicitNew()) return "先新建";
+  if (!canContinueSelectedSession()) return "发送";
+  return sessionHasPendingWork(selectedCodexSession) ? "继续排队" : "继续";
 }
 
 async function refinePromptForCodex(rawText) {
@@ -946,28 +1017,145 @@ async function refinePromptForCodex(rawText) {
   }
 }
 
+function openComposerAttachmentPicker() {
+  if (composerBusy) return;
+  elements.composerAttachmentInput.click();
+}
+
+async function handleComposerAttachmentInput(event) {
+  const files = Array.from(event.target.files || []);
+  event.target.value = "";
+  await addComposerAttachmentFiles(files);
+}
+
+async function handleComposerPaste(event) {
+  const files = Array.from(event.clipboardData?.files || []).filter((file) => file.type.startsWith("image/"));
+  if (files.length === 0) return;
+  event.preventDefault();
+  await addComposerAttachmentFiles(files);
+}
+
+async function addComposerAttachmentFiles(files = []) {
+  const imageFiles = files.filter((file) => file && file.type.startsWith("image/"));
+  if (imageFiles.length === 0) {
+    if (files.length) toast("只能附加图片");
+    return;
+  }
+
+  const remaining = MAX_COMPOSER_ATTACHMENTS - composerAttachments.length;
+  if (remaining <= 0) {
+    toast(`最多附加 ${MAX_COMPOSER_ATTACHMENTS} 张截图`);
+    return;
+  }
+
+  const accepted = [];
+  for (const file of imageFiles.slice(0, remaining)) {
+    if (file.size > MAX_COMPOSER_ATTACHMENT_BYTES) {
+      toast(`截图不能超过 ${Math.round(MAX_COMPOSER_ATTACHMENT_BYTES / 1024 / 1024)} MB`);
+      continue;
+    }
+    try {
+      const url = await fileToDataUrl(file);
+      accepted.push({
+        id: crypto.randomUUID(),
+        name: file.name || "截图",
+        mimeType: file.type || "image/png",
+        sizeBytes: file.size || 0,
+        url
+      });
+    } catch {
+      toast("读取截图失败，请重试");
+    }
+  }
+
+  if (accepted.length === 0) return;
+  composerAttachments = [...composerAttachments, ...accepted].slice(0, MAX_COMPOSER_ATTACHMENTS);
+  renderComposerAttachments();
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("file read failed"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderComposerAttachments() {
+  const hasAttachments = composerAttachments.length > 0;
+  elements.composerAttachmentTray.hidden = !hasAttachments;
+  elements.composerAttachmentButton.classList.toggle("active", hasAttachments);
+  elements.composerAttachmentButton.setAttribute(
+    "aria-label",
+    hasAttachments ? `已附加 ${composerAttachments.length} 张截图` : "附加截图"
+  );
+  elements.composerAttachmentTray.innerHTML = hasAttachments
+    ? composerAttachments
+        .map(
+          (attachment) => `
+            <div class="composer-attachment-chip" data-attachment-id="${escapeHtml(attachment.id)}">
+              <img src="${escapeHtml(attachment.url)}" alt="${escapeHtml(attachment.name)}" />
+              <button type="button" class="composer-attachment-remove" aria-label="移除 ${escapeHtml(attachment.name)}">×</button>
+            </div>
+          `
+        )
+        .join("")
+    : "";
+
+  for (const button of elements.composerAttachmentTray.querySelectorAll(".composer-attachment-remove")) {
+    button.addEventListener("click", () => {
+      const chip = button.closest("[data-attachment-id]");
+      if (!chip) return;
+      removeComposerAttachment(chip.dataset.attachmentId || "");
+    });
+  }
+}
+
+function removeComposerAttachment(id) {
+  composerAttachments = composerAttachments.filter((attachment) => attachment.id !== id);
+  renderComposerAttachments();
+}
+
+function clearComposerAttachments(options = {}) {
+  if (composerAttachments.length === 0 && options.silent) return;
+  composerAttachments = [];
+  renderComposerAttachments();
+}
+
+function currentComposerAttachmentsPayload() {
+  return composerAttachments.map((attachment) => ({
+    type: "image",
+    url: attachment.url,
+    name: attachment.name,
+    mimeType: attachment.mimeType,
+    sizeBytes: attachment.sizeBytes
+  }));
+}
+
 function setComposerBusy(isBusy, label = "") {
   composerBusy = isBusy;
   if (label) elements.statusText.textContent = label;
-  elements.sendCodexButton.textContent = isBusy ? label || "处理中" : canContinueSelectedSession() ? "继续" : "发送";
+  elements.sendCodexButton.textContent = isBusy ? label || "处理中" : composerActionLabel();
   updateComposerAvailability();
   if (!isBusy) refreshStatus({ silentAuthFailure: true });
 }
 
 function updateComposerAvailability() {
   const hasProject = Boolean(elements.codexProject.value);
-  elements.sendCodexButton.disabled = composerBusy || !hasProject;
+  const hasDraft = Boolean(elements.codexPrompt.value.trim()) || composerAttachments.length > 0;
+  const blockedBySelectedSession = selectedSessionNeedsExplicitNew();
+  elements.sendCodexButton.disabled = composerBusy || !hasProject || !hasDraft || blockedBySelectedSession;
   elements.sendCodexButton.textContent = composerBusy
     ? elements.sendCodexButton.textContent
-    : canContinueSelectedSession()
-      ? "继续"
-      : "发送";
+    : composerActionLabel();
   elements.newCodexSessionButton.disabled = composerBusy;
   elements.codexProject.disabled = composerBusy;
   elements.codexPermissionMode.disabled = composerBusy;
   elements.codexModel.disabled = composerBusy;
   elements.codexReasoningEffort.disabled = composerBusy;
   elements.codexPrompt.disabled = composerBusy;
+  elements.composerAttachmentButton.disabled = composerBusy;
   refreshComposerMeta();
   refreshTopbarProjectChip();
 }
@@ -1253,6 +1441,7 @@ function statusLabel(status) {
 
 async function showCodexJob(id, options = {}) {
   selectedCodexJobId = id;
+  clearComposerAttachments({ silent: true });
   if (!options.keepSelection) {
     for (const button of elements.codexJobs.querySelectorAll(".conversation-item")) {
       button.classList.toggle("active", button.dataset.jobId === id);
@@ -1374,11 +1563,13 @@ function buildConversationTimeline(job, errorText = "") {
 
   for (const event of events) {
     const userText = event.type === "user.message" ? String(event.text || "").trim() : "";
-    if (userText) {
+    const userAttachments = event.type === "user.message" ? userMessageAttachments(event) : [];
+    if (userText || userAttachments.length > 0) {
       timeline.push({
         kind: "message",
         role: "user",
         text: userText,
+        attachments: userAttachments,
         at: event.at || job.createdAt || ""
       });
       continue;
@@ -1464,6 +1655,8 @@ function renderConversationEntry(entry) {
   const bubbleClass = entry.role === "user" ? "thread-bubble-user" : "thread-bubble-assistant";
   const draftBadge = entry.draft ? '<span class="thread-draft-badge">回复中</span>' : "";
   const timeLabel = entry.at ? formatMessageTime(entry.at) : "";
+  const hasText = Boolean(entry.text);
+  const attachmentsHtml = renderConversationAttachments(entry.attachments || []);
 
   return `
     <article class="thread-message ${roleClass}">
@@ -1472,7 +1665,8 @@ function renderConversationEntry(entry) {
         ${draftBadge}
         ${timeLabel ? `<span class="thread-message-time">${escapeHtml(timeLabel)}</span>` : ""}
       </div>
-      <div class="thread-bubble ${bubbleClass}">${escapeHtml(entry.text)}</div>
+      ${hasText ? `<div class="thread-bubble ${bubbleClass}">${escapeHtml(entry.text)}</div>` : ""}
+      ${attachmentsHtml}
     </article>
   `;
 }
@@ -1497,7 +1691,36 @@ function lastTimelineMessageText(timeline, role) {
   return item?.text || "";
 }
 
+function userMessageAttachments(event) {
+  const attachments = Array.isArray(event.raw?.attachments) ? event.raw.attachments : [];
+  return attachments.filter((attachment) => attachment?.type === "image" && typeof attachment.url === "string");
+}
+
+function renderConversationAttachments(attachments = []) {
+  if (!attachments.length) return "";
+  return `
+    <div class="thread-attachments">
+      ${attachments
+        .map(
+          (attachment, index) => `
+            <figure class="thread-attachment">
+              <img
+                src="${escapeHtml(attachment.url)}"
+                alt="${escapeHtml(attachment.name || `截图 ${index + 1}`)}"
+                loading="lazy"
+              />
+            </figure>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
 function conversationStatusHint(job, hasTimeline) {
+  if (job.pendingApprovalCount > 0) return "等待你的审批后继续。";
+  if (job.pendingCommandCount > 0 && job.status === "running") return "新消息已记住，会接在当前回复里继续。";
+  if (job.pendingCommandCount > 0 && job.status === "active") return "新消息已排队，等待桌面端继续这一话题。";
   if (job.status === "queued") return "已发送，等待桌面端接手。";
   if (job.status === "starting") return "Codex 正在启动这轮对话。";
   if (job.status === "running") return hasTimeline ? "Codex 正在继续回复。" : "Codex 正在思考。";
@@ -1540,12 +1763,49 @@ function jobPreview(job) {
 }
 
 function jobTitle(job) {
-  return String(job.title || sessionPrompt(job) || "Codex 会话").split(/\s+/).join(" ").slice(0, 72);
+  return compactSessionTitle(sessionPrompt(job) || job.title || "Codex 会话");
 }
 
 function sessionPrompt(session) {
   const userEvent = (session.events || []).find((event) => event.type === "user.message");
   return userEvent?.text || session.title || "";
+}
+
+function compactSessionTitle(value) {
+  const normalized = String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/没有办法|没办法/g, "无法")
+    .replace(/上下滑动/g, "上下滚动")
+    .replace(/这个|那个/g, "")
+    .trim();
+  if (!normalized) return "Codex 会话";
+
+  const sentence = normalized
+    .split(/[\r\n]+|[。！？!?；;]/)
+    .map((part) => part.trim())
+    .find(Boolean) || normalized;
+
+  const clause = firstTitleClause(sentence) || sentence;
+  const cleaned = clause
+    .replace(/^(?:现在|目前|帮我|麻烦|请你|请|顺手|另外|还有|然后|再)\s*/u, "")
+    .trim();
+
+  return truncateSessionTitle(cleaned || sentence || normalized);
+}
+
+function firstTitleClause(text) {
+  const separators = [/但是|不过|然后|另外|还有|顺手|同时|并且|而且|以及/u, /[，,：:]/u];
+  for (const separator of separators) {
+    const match = text.match(separator);
+    if (match?.index > 6) return text.slice(0, match.index).trim();
+  }
+  return text.trim();
+}
+
+function truncateSessionTitle(text) {
+  const compact = String(text || "").trim();
+  if (!compact) return "Codex 会话";
+  return compact.length > 28 ? `${compact.slice(0, 28).trimEnd()}…` : compact;
 }
 
 function sessionTime(session) {
@@ -1580,7 +1840,11 @@ function refreshComposerMeta() {
   const runtime = runtimeDirty ? currentRuntimeDraft() : session?.runtime || runtimePreferences;
   const runtimeLabel = sessionRuntimeLabel(runtime) || "桌面默认";
   const modeLabel = postprocessEnabled ? "后处理" : "原文";
-  const lead = session ? "继续当前话题" : "发送后创建新话题";
+  if (session && !sessionCanAcceptFollowUp(session)) {
+    elements.composerActionsMeta.textContent = `当前会话不可继续，请先从左上角新建会话 · ${runtimeLabel} · ${modeLabel}`;
+    return;
+  }
+  const lead = session ? (sessionHasPendingWork(session) ? "继续当前话题，接在这一轮后面" : "继续当前话题") : "发送后创建新话题";
   elements.composerActionsMeta.textContent = `${lead} · ${sessionProjectLabel(session?.projectId || elements.codexProject.value)} · ${runtimeLabel} · ${modeLabel}`;
 }
 

@@ -29,8 +29,9 @@ export function codexStatus() {
 export function createCodexSession(input) {
   const prompt = String(input.prompt || "").trim();
   const projectId = String(input.projectId || "").trim();
-  if (!prompt) {
-    const error = new Error("Codex session prompt is required.");
+  const attachments = Array.isArray(input.attachments) ? input.attachments : [];
+  if (!prompt && attachments.length === 0) {
+    const error = new Error("Codex session prompt or screenshot is required.");
     error.statusCode = 400;
     throw error;
   }
@@ -40,7 +41,7 @@ export function createCodexSession(input) {
     throw error;
   }
 
-  const session = createStoredSession({ projectId, prompt, runtime: input.runtime || {} });
+  const session = createStoredSession({ projectId, prompt, attachments, runtime: input.runtime || {} });
   events.emit("codex-session-command");
   return session;
 }
@@ -48,6 +49,7 @@ export function createCodexSession(input) {
 export function enqueueCodexSessionMessage(id, input = {}) {
   const session = enqueueStoredSessionMessage(id, {
     text: input.text || input.prompt || "",
+    attachments: input.attachments,
     runtime: input.runtime || {}
   });
   events.emit("codex-session-command");

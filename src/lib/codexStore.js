@@ -388,14 +388,18 @@ export function completeJob(jobId, result = {}, options = {}) {
   return true;
 }
 
-export function createSession({ projectId, prompt, runtime }) {
+export function createSession({ projectId, prompt, attachments, runtime }) {
   const now = nowIso();
   const sessionId = crypto.randomUUID();
   const commandId = crypto.randomUUID();
   const normalizedPrompt = String(prompt || "").trim();
   const normalizedProjectId = String(projectId || "").trim();
+  const normalizedAttachments = normalizeSessionAttachments(attachments);
   const normalizedRuntime = normalizeRuntime(runtime);
-  const title = normalizedPrompt.split(/\s+/).join(" ").slice(0, 120) || "Codex session";
+  if (!normalizedPrompt && normalizedAttachments.length === 0) {
+    return badRequest("Codex session prompt or screenshot is required.");
+  }
+  const title = sessionTitleFromInput(normalizedPrompt, normalizedAttachments);
 
   const create = db.transaction(() => {
     db.prepare(`
@@ -416,7 +420,7 @@ export function createSession({ projectId, prompt, runtime }) {
       id: commandId,
       sessionId,
       type: "start",
-      payloadJson: JSON.stringify({ prompt: normalizedPrompt }),
+      payloadJson: JSON.stringify({ prompt: normalizedPrompt, attachments: normalizedAttachments }),
       now
     });
 
@@ -424,7 +428,7 @@ export function createSession({ projectId, prompt, runtime }) {
       normalizeSessionEvent(sessionId, {
         type: "user.message",
         text: normalizedPrompt,
-        raw: { source: "mobile", commandId, type: "start" }
+        raw: { source: "mobile", commandId, type: "start", attachments: normalizedAttachments }
       }, now)
     );
   });
@@ -435,7 +439,7 @@ export function createSession({ projectId, prompt, runtime }) {
 }
 
 export function listSessions(limit = 20, options = {}) {
-  reclaimExpiredSessionCommandLeases();
+  refreshInteractiveSessionState();
   const archived = Boolean(options.archived);
 
   return db.prepare(`
@@ -448,7 +452,7 @@ export function listSessions(limit = 20, options = {}) {
 }
 
 export function getSession(id) {
-  reclaimExpiredSessionCommandLeases();
+  refreshInteractiveSessionState();
 
   const session = getSessionSummary(id);
   if (!session) return null;
@@ -460,6 +464,7 @@ export function getSession(id) {
 }
 
 export function archiveSession(id, input = {}) {
+  refreshInteractiveSessionState();
   const session = getSessionSummary(id);
   if (!session) return notFound("Codex session not found.");
 
@@ -496,6 +501,7 @@ export function archiveSession(id, input = {}) {
 }
 
 export function enqueueSessionMessage(sessionId, input = {}) {
+  refreshInteractiveSessionState();
   const session = getSessionSummary(sessionId);
   if (!session) return notFound("Codex session not found.");
   if (session.archivedAt) return conflict("Restore this Codex session before continuing it.");
@@ -506,15 +512,16 @@ export function enqueueSessionMessage(sessionId, input = {}) {
   const now = nowIso();
   const commandId = crypto.randomUUID();
   const message = String(input.text || input.prompt || "").trim();
+  const attachments = normalizeSessionAttachments(input.attachments);
   const runtime = normalizeRuntime(Object.keys(input.runtime || {}).length > 0 ? input.runtime : session.runtime);
-  if (!message) return badRequest("Codex message is required.");
+  if (!message && attachments.length === 0) return badRequest("Codex message or screenshot is required.");
 
   const enqueue = db.transaction(() => {
     insertSessionCommand.run({
       id: commandId,
       sessionId,
       type: "message",
-      payloadJson: JSON.stringify({ text: message }),
+      payloadJson: JSON.stringify({ text: message, attachments }),
       now
     });
 
@@ -530,7 +537,7 @@ export function enqueueSessionMessage(sessionId, input = {}) {
       normalizeSessionEvent(sessionId, {
         type: "user.message",
         text: message,
-        raw: { source: "mobile", commandId, type: "message" }
+        raw: { source: "mobile", commandId, type: "message", attachments }
       }, now)
     );
   });
@@ -540,7 +547,7 @@ export function enqueueSessionMessage(sessionId, input = {}) {
 }
 
 export function acquireNextSessionCommand({ agentId, workspaces = [] } = {}) {
-  reclaimExpiredSessionCommandLeases();
+  refreshInteractiveSessionState();
 
   const workspaceIds = workspaces.map((workspace) => workspace.id).filter(Boolean);
   if (workspaceIds.length === 0) return null;
@@ -630,11 +637,13 @@ export function appendSessionEvents(sessionId, incomingEvents = [], options = {}
   const leaseExpiresAt = new Date(Date.now() + config.codex.leaseMs).toISOString();
   const events = incomingEvents.slice(0, 80).map((event) => normalizeSessionEvent(sessionId, event, now));
   const update = deriveSessionUpdate(incomingEvents, session);
+  const releaseLease = update.releaseLease && !sessionHasLeasedCommand(sessionId);
 
   const write = db.transaction(() => {
     db.prepare(`
       UPDATE codex_sessions
-      SET lease_expires_at = @leaseExpiresAt,
+      SET leased_by = CASE WHEN @releaseLease = 1 THEN NULL ELSE leased_by END,
+          lease_expires_at = CASE WHEN @releaseLease = 1 THEN NULL ELSE @leaseExpiresAt END,
           updated_at = @now,
           status = COALESCE(@status, status),
           app_thread_id = COALESCE(@appThreadId, app_thread_id),
@@ -652,6 +661,7 @@ export function appendSessionEvents(sessionId, incomingEvents = [], options = {}
       appThreadId: update.appThreadId,
       activeTurnId: update.activeTurnId,
       clearActiveTurnId: update.clearActiveTurnId ? 1 : 0,
+      releaseLease: releaseLease ? 1 : 0,
       lastError: update.lastError,
       finalMessage: update.finalMessage
     });
@@ -681,6 +691,8 @@ export function completeSessionCommand(commandId, result = {}, options = {}) {
   const turnAlreadyCompleted = ok && resultSessionStatus === "running" && getLatestSessionEventType(command.sessionId) === "turn/completed";
   const sessionStatus = turnAlreadyCompleted ? "active" : resultSessionStatus;
   const activeTurnId = turnAlreadyCompleted ? null : result.activeTurnId || null;
+  const clearActiveTurnId = sessionStatus !== "running";
+  const releaseLease = sessionStatus !== "running";
 
   const complete = db.transaction(() => {
     db.prepare(`
@@ -705,9 +717,11 @@ export function completeSessionCommand(commandId, result = {}, options = {}) {
       UPDATE codex_sessions
       SET status = @sessionStatus,
           app_thread_id = COALESCE(@appThreadId, app_thread_id),
-          active_turn_id = COALESCE(@activeTurnId, active_turn_id),
+          active_turn_id = CASE WHEN @clearActiveTurnId = 1 THEN NULL ELSE COALESCE(@activeTurnId, active_turn_id) END,
           last_error = @lastError,
           final_message = COALESCE(@finalMessage, final_message),
+          leased_by = CASE WHEN @releaseLease = 1 THEN NULL ELSE leased_by END,
+          lease_expires_at = CASE WHEN @releaseLease = 1 THEN NULL ELSE lease_expires_at END,
           updated_at = @now
       WHERE id = @sessionId
         AND leased_by = @leasedBy
@@ -716,6 +730,8 @@ export function completeSessionCommand(commandId, result = {}, options = {}) {
       sessionStatus,
       appThreadId: result.appThreadId || null,
       activeTurnId,
+      clearActiveTurnId: clearActiveTurnId ? 1 : 0,
+      releaseLease: releaseLease ? 1 : 0,
       lastError: error,
       finalMessage: result.finalMessage || null,
       now,
@@ -1072,13 +1088,12 @@ function summarizeJob(row) {
   return {
     ...row,
     eventCount,
-    lastEvent: lastEvent ? parseEvent(lastEvent) : null
+    lastEvent: lastEvent ? parseEvent(lastEvent, { includeRaw: false }) : null
   };
 }
 
 function sessionStatusSnapshot() {
-  reclaimExpiredSessionCommandLeases();
-  expireOldApprovals();
+  refreshInteractiveSessionState();
 
   const queuedCommands = db.prepare("SELECT COUNT(*) AS count FROM codex_session_commands WHERE status = 'queued'").get().count;
   const activeSessions = db.prepare(`
@@ -1151,7 +1166,7 @@ function summarizeSession(row) {
     eventCount,
     pendingCommandCount,
     pendingApprovalCount,
-    lastEvent: lastEvent ? parseEvent(lastEvent) : null
+    lastEvent: lastEvent ? parseEvent(lastEvent, { includeRaw: false }) : null
   };
 }
 
@@ -1217,6 +1232,17 @@ function getLatestSessionEventType(sessionId) {
   `).get(sessionId)?.type || "";
 }
 
+function sessionHasLeasedCommand(sessionId) {
+  return (
+    db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM codex_session_commands
+      WHERE session_id = ?
+        AND status = 'leased'
+    `).get(sessionId).count > 0
+  );
+}
+
 function insertInternalEvents(jobId, events) {
   const at = nowIso();
   for (const event of events) insertEvent.run(normalizeEvent(jobId, event, at));
@@ -1241,16 +1267,16 @@ function normalizeSessionEvent(sessionId, event = {}, fallbackAt) {
     at: String(event.at || fallbackAt || nowIso()),
     type: String(event.type || "output").slice(0, 120),
     text: String(event.text || "").slice(0, 12000),
-    rawJson: raw ? JSON.stringify(raw).slice(0, 30000) : null
+    rawJson: raw ? JSON.stringify(raw) : null
   };
 }
 
-function parseEvent(row) {
+function parseEvent(row, options = {}) {
   return {
     at: row.at,
     type: row.type,
     text: row.text,
-    raw: parseJson(row.rawJson)
+    raw: options.includeRaw === false ? null : parseJson(row.rawJson)
   };
 }
 
@@ -1275,6 +1301,7 @@ function deriveSessionUpdate(events, session) {
     appThreadId: null,
     activeTurnId: null,
     clearActiveTurnId: false,
+    releaseLease: false,
     lastError: null,
     finalMessage: null
   };
@@ -1298,6 +1325,7 @@ function deriveSessionUpdate(events, session) {
     if (method === "turn/completed") {
       const turnStatus = raw.params?.turn?.status;
       update.clearActiveTurnId = true;
+      update.releaseLease = true;
       update.status = turnStatus === "failed" ? "failed" : "active";
       const message = raw.params?.turn?.error?.message;
       if (message) update.lastError = String(message).slice(0, 12000);
@@ -1387,6 +1415,42 @@ function normalizeRuntime(runtime = {}) {
     : {};
 }
 
+function normalizeSessionAttachments(attachments = []) {
+  if (!Array.isArray(attachments)) return [];
+
+  const normalized = [];
+  for (const attachment of attachments) {
+    if (normalized.length >= 3) break;
+    if (attachment?.type !== "image") continue;
+    const url = String(attachment.url || "").trim();
+    if (!url.startsWith("data:image/")) continue;
+    if (url.length > 10_000_000) continue;
+    normalized.push({
+      type: "image",
+      url,
+      name: String(attachment.name || `截图 ${normalized.length + 1}`).trim().slice(0, 120) || `截图 ${normalized.length + 1}`,
+      mimeType: String(attachment.mimeType || "").trim().slice(0, 120),
+      sizeBytes: clampAttachmentSizeBytes(attachment.sizeBytes)
+    });
+  }
+
+  return normalized;
+}
+
+function clampAttachmentSizeBytes(value) {
+  const size = Number(value);
+  if (!Number.isFinite(size) || size <= 0) return 0;
+  return Math.min(Math.round(size), 20 * 1024 * 1024);
+}
+
+function sessionTitleFromInput(prompt, attachments = []) {
+  const normalizedPrompt = String(prompt || "").split(/\s+/).join(" ").slice(0, 120);
+  if (normalizedPrompt) return normalizedPrompt;
+  if (attachments.length === 1) return "1 张截图";
+  if (attachments.length > 1) return `${attachments.length} 张截图`;
+  return "Codex session";
+}
+
 function trimOldJobs() {
   const ids = db.prepare(`
     SELECT id
@@ -1434,9 +1498,15 @@ function reclaimExpiredSessionCommandLeases() {
       `).run({ id: command.id, now });
 
       const nextStatus = command.type === "start" ? "queued" : "active";
+      const leaseError =
+        command.type === "start"
+          ? ""
+          : `Desktop agent ${command.leasedBy || "unknown"} stopped renewing this turn; you can continue the same conversation.`;
       db.prepare(`
         UPDATE codex_sessions
         SET status = @status,
+            active_turn_id = CASE WHEN @clearActiveTurnId = 1 THEN NULL ELSE active_turn_id END,
+            last_error = CASE WHEN @lastError = '' THEN last_error ELSE @lastError END,
             leased_by = NULL,
             lease_expires_at = NULL,
             updated_at = @now
@@ -1444,6 +1514,8 @@ function reclaimExpiredSessionCommandLeases() {
       `).run({
         sessionId: command.sessionId,
         status: nextStatus,
+        clearActiveTurnId: command.type === "start" ? 0 : 1,
+        lastError: leaseError,
         now
       });
 
@@ -1457,6 +1529,75 @@ function reclaimExpiredSessionCommandLeases() {
   });
 
   reclaim();
+}
+
+function reclaimExpiredSessionLeases() {
+  const now = nowIso();
+  const expired = db.prepare(`
+    SELECT
+      s.id,
+      s.status,
+      s.app_thread_id AS appThreadId,
+      s.leased_by AS leasedBy
+    FROM codex_sessions s
+    WHERE s.leased_by IS NOT NULL
+      AND s.lease_expires_at IS NOT NULL
+      AND s.lease_expires_at < ?
+      AND NOT EXISTS (
+        SELECT 1
+        FROM codex_session_commands c
+        WHERE c.session_id = s.id
+          AND c.status = 'leased'
+      )
+  `).all(now);
+
+  if (expired.length === 0) return;
+
+  const reclaim = db.transaction(() => {
+    for (const session of expired) {
+      const resetToQueued = session.status === "starting" && !session.appThreadId;
+      const nextStatus = resetToQueued ? "queued" : "active";
+      const leaseError =
+        nextStatus === "active"
+          ? `Desktop agent ${session.leasedBy || "unknown"} stopped renewing this session; the last turn may have been interrupted.`
+          : "";
+
+      db.prepare(`
+        UPDATE codex_sessions
+        SET status = @status,
+            active_turn_id = CASE WHEN @clearActiveTurnId = 1 THEN NULL ELSE active_turn_id END,
+            last_error = CASE WHEN @lastError = '' THEN last_error ELSE @lastError END,
+            leased_by = NULL,
+            lease_expires_at = NULL,
+            updated_at = @now
+        WHERE id = @sessionId
+      `).run({
+        sessionId: session.id,
+        status: nextStatus,
+        clearActiveTurnId: nextStatus === "active" ? 1 : 0,
+        lastError: leaseError,
+        now
+      });
+
+      insertSessionEvent.run(
+        normalizeSessionEvent(session.id, {
+          type: "session.lease.expired",
+          text:
+            nextStatus === "queued"
+              ? `Desktop agent ${session.leasedBy || "unknown"} stopped renewing this session before Codex started; it returned to the queue.`
+              : `Desktop agent ${session.leasedBy || "unknown"} stopped renewing this session; the conversation is ready to continue.`
+        }, now)
+      );
+    }
+  });
+
+  reclaim();
+}
+
+function refreshInteractiveSessionState() {
+  reclaimExpiredSessionCommandLeases();
+  reclaimExpiredSessionLeases();
+  expireOldApprovals();
 }
 
 function trimOldSessions() {

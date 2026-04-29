@@ -1,5 +1,5 @@
 import { config } from "../config.js";
-import { CodexAppServerClient, buildUserTextInput } from "./codexAppServerClient.js";
+import { CodexAppServerClient, buildUserInputs } from "./codexAppServerClient.js";
 
 export class CodexInteractiveRuntime {
   constructor(options = {}) {
@@ -49,7 +49,8 @@ export class CodexInteractiveRuntime {
     ]);
 
     const prompt = String(command.payload?.prompt || "").trim();
-    if (!prompt) {
+    const attachments = Array.isArray(command.payload?.attachments) ? command.payload.attachments : [];
+    if (!prompt && attachments.length === 0) {
       return { ok: true, appThreadId, sessionStatus: "active" };
     }
 
@@ -57,6 +58,7 @@ export class CodexInteractiveRuntime {
       sessionId: command.sessionId,
       threadId: appThreadId,
       text: prompt,
+      attachments,
       workspace,
       runtime
     });
@@ -67,12 +69,14 @@ export class CodexInteractiveRuntime {
     const runtime = this.#runtimeFor(command);
     const appThreadId = await this.#ensureThread(command, workspace, runtime);
     const text = String(command.payload?.text || "").trim();
-    if (!text) throw new Error("Codex session message is empty.");
+    const attachments = Array.isArray(command.payload?.attachments) ? command.payload.attachments : [];
+    if (!text && attachments.length === 0) throw new Error("Codex session message is empty.");
 
     const turn = await this.#startOrSteerTurn({
       sessionId: command.sessionId,
       threadId: appThreadId,
       text,
+      attachments,
       workspace,
       runtime
     });
@@ -90,8 +94,9 @@ export class CodexInteractiveRuntime {
     return { ok: true, appThreadId, sessionStatus: "active" };
   }
 
-  async #startOrSteerTurn({ sessionId, threadId, text, workspace, runtime }) {
-    const input = [buildUserTextInput(text)];
+  async #startOrSteerTurn({ sessionId, threadId, text, attachments, workspace, runtime }) {
+    const input = buildUserInputs(text, attachments);
+    if (input.length === 0) throw new Error("Codex turn input is empty.");
     const activeTurnId = this.activeTurns.get(threadId);
     if (activeTurnId) {
       const result = await this.client.request(

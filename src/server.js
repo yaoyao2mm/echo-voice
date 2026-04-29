@@ -34,7 +34,7 @@ const app = express();
 
 await loadHistory();
 
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "32mb" }));
 app.use(express.static("public", {
   etag: false,
   lastModified: false,
@@ -213,6 +213,7 @@ app.post("/api/codex/sessions", (req, res) => {
     const session = createCodexSession({
       projectId: req.body.projectId,
       prompt: req.body.prompt,
+      attachments: req.body.attachments,
       runtime: req.body.runtime || {}
     });
     res.json({ session });
@@ -239,6 +240,7 @@ app.post("/api/codex/sessions/:id/messages", (req, res) => {
 
     const session = enqueueCodexSessionMessage(req.params.id, {
       text: req.body.text || req.body.prompt,
+      attachments: req.body.attachments,
       runtime: req.body.runtime || {}
     });
     res.json({ session });

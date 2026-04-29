@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { CodexAppServerClient, buildUserTextInput } from "../src/lib/codexAppServerClient.js";
+import { CodexAppServerClient, buildUserInputs } from "../src/lib/codexAppServerClient.js";
 
 test("CodexAppServerClient speaks newline-delimited app-server JSON-RPC", async () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "echo-app-server-client-"));
@@ -57,7 +57,7 @@ rl.on("line", (line) => {
   });
   const turn = await client.request("turn/start", {
     threadId: thread.thread.id,
-    input: [buildUserTextInput("hi")]
+    input: buildUserInputs("hi", [{ type: "image", url: "data:image/png;base64,AAAA" }])
   });
 
   await new Promise((resolve) => setTimeout(resolve, 25));

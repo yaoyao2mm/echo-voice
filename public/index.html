@@ -10,8 +10,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Echo Codex</title>
-    <link rel="manifest" href="/manifest.webmanifest?v=29" />
-    <link rel="stylesheet" href="/styles.css?v=29" />
+    <link rel="manifest" href="/manifest.webmanifest?v=30" />
+    <link rel="stylesheet" href="/styles.css?v=30" />
   </head>
   <body>
     <main class="shell">
@@ -170,7 +170,23 @@
 
           <section class="composer">
             <div class="composer-shell">
-              <textarea id="codexPrompt" rows="7" placeholder="给 Codex 发消息，继续当前话题，或者开启新话题。"></textarea>
+              <div class="composer-editor">
+                <textarea id="codexPrompt" rows="7" placeholder="给 Codex 发消息，继续当前话题，或者开启新话题。"></textarea>
+                <button id="composerAttachmentButton" class="composer-attachment-button" type="button" aria-label="附加截图">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M8.5 12.5 15 6a3.5 3.5 0 1 1 5 5l-8.5 8.5a5 5 0 0 1-7-7l9-9"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="1.9"
+                    />
+                  </svg>
+                </button>
+                <input id="composerAttachmentInput" class="sr-only" type="file" accept="image/*" multiple />
+              </div>
+              <div id="composerAttachmentTray" class="composer-attachment-tray" hidden></div>
               <div class="composer-dock">
                 <div class="composer-toolbar" aria-label="当前会话配置">
                   <label class="composer-inline-control composer-inline-select composer-inline-permission" for="codexPermissionMode">
@@ -194,6 +210,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=29" type="module"></script>
+    <script src="/app.js?v=30" type="module"></script>
   </body>
 </html>

@@ -67,6 +67,7 @@ test("interactive Codex sessions lease commands and keep thread state", async ()
   const created = queue.createCodexSession({
     projectId: "demo",
     prompt: "先看一下这个项目",
+    attachments: [{ type: "image", url: "data:image/png;base64,AAAA", name: "screen.png", mimeType: "image/png", sizeBytes: 4 }],
     runtime: {
       model: "gpt-5.4",
       reasoningEffort: "high",
@@ -86,6 +87,8 @@ test("interactive Codex sessions lease commands and keep thread state", async ()
   assert.equal(startCommand.sessionId, created.id);
   assert.equal(startCommand.type, "start");
   assert.equal(startCommand.payload.prompt, "先看一下这个项目");
+  assert.equal(startCommand.payload.attachments.length, 1);
+  assert.equal(startCommand.payload.attachments[0].url, "data:image/png;base64,AAAA");
   assert.equal(startCommand.runtime.model, "gpt-5.4");
   assert.equal(startCommand.runtime.reasoningEffort, "high");
   assert.equal(startCommand.runtime.profile, "approve");
@@ -113,6 +116,27 @@ test("interactive Codex sessions lease commands and keep thread state", async ()
   assert.equal(running.appThreadId, "thr_1");
   assert.equal(running.activeTurnId, "turn_1");
   assert.equal(running.status, "running");
+  assert.equal(running.leasedBy, "session-agent");
+
+  const duringRun = queue.enqueueCodexSessionMessage(created.id, {
+    text: "先把这个条件也带上"
+  });
+  assert.equal(duringRun.status, "running");
+  assert.equal(duringRun.pendingCommandCount, 1);
+
+  const steeredCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  assert.equal(steeredCommand.type, "message");
+  assert.equal(steeredCommand.appThreadId, "thr_1");
+  assert.equal(steeredCommand.activeTurnId, "turn_1");
+  assert.equal(steeredCommand.payload.text, "先把这个条件也带上");
+  assert.equal(
+    queue.completeCodexSessionCommand(
+      steeredCommand.id,
+      { ok: true, appThreadId: "thr_1", activeTurnId: "turn_1", sessionStatus: "running" },
+      { agentId: "session-agent" }
+    ),
+    true
+  );
 
   assert.equal(
     queue.appendCodexSessionEvents(
@@ -165,9 +189,11 @@ test("interactive Codex sessions lease commands and keep thread state", async ()
   );
   assert.equal(queue.getCodexSession(created.id).status, "active");
   assert.equal(queue.getCodexSession(created.id).activeTurnId, null);
+  assert.equal(queue.getCodexSession(created.id).leasedBy, null);
 
   const afterMessage = queue.enqueueCodexSessionMessage(created.id, {
     text: "继续修复 UI",
+    attachments: [{ type: "image", url: "data:image/png;base64,BBBB", name: "detail.png", mimeType: "image/png", sizeBytes: 4 }],
     runtime: {
       model: "gpt-5.3-codex",
       reasoningEffort: "xhigh",
@@ -187,11 +213,69 @@ test("interactive Codex sessions lease commands and keep thread state", async ()
   assert.equal(messageCommand.type, "message");
   assert.equal(messageCommand.appThreadId, "thr_1");
   assert.equal(messageCommand.payload.text, "继续修复 UI");
+  assert.equal(messageCommand.payload.attachments.length, 1);
+  assert.equal(messageCommand.payload.attachments[0].url, "data:image/png;base64,BBBB");
   assert.equal(messageCommand.runtime.model, "gpt-5.3-codex");
   assert.equal(messageCommand.runtime.reasoningEffort, "xhigh");
   assert.equal(messageCommand.runtime.profile, "strict");
   assert.equal(messageCommand.runtime.sandbox, "read-only");
   assert.equal(messageCommand.runtime.approvalPolicy, "on-request");
+});
+
+test("interactive Codex sessions can start from screenshots only", async () => {
+  store.resetStoreForTest();
+
+  const agent = {
+    id: "image-only-agent",
+    workspaces: [{ id: "demo", path: process.cwd() }]
+  };
+
+  const created = queue.createCodexSession({
+    projectId: "demo",
+    attachments: [{ type: "image", url: "data:image/png;base64,CCCC", name: "mobile.png", mimeType: "image/png", sizeBytes: 4 }]
+  });
+  assert.equal(created.title, "1 张截图");
+
+  const startCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  assert.equal(startCommand.type, "start");
+  assert.equal(startCommand.payload.prompt, "");
+  assert.equal(startCommand.payload.attachments.length, 1);
+
+  const session = queue.getCodexSession(created.id);
+  const userEvent = session.events.find((event) => event.type === "user.message");
+  assert.equal(userEvent.text, "");
+  assert.equal(userEvent.raw.attachments.length, 1);
+});
+
+test("interactive Codex sessions recover expired running leases instead of looking stuck forever", async () => {
+  store.resetStoreForTest();
+
+  const agent = {
+    id: "expired-session-agent",
+    workspaces: [{ id: "demo", path: process.cwd() }]
+  };
+
+  const session = queue.createCodexSession({ projectId: "demo", prompt: "看一下这个处理中会话" });
+  const startCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  queue.appendCodexSessionEvents(
+    session.id,
+    [{ type: "thread.started", text: "started", appThreadId: "thr_expired", sessionStatus: "active" }],
+    { agentId: agent.id }
+  );
+  queue.completeCodexSessionCommand(
+    startCommand.id,
+    { ok: true, appThreadId: "thr_expired", activeTurnId: "turn_expired", sessionStatus: "running" },
+    { agentId: agent.id }
+  );
+
+  db.prepare("UPDATE codex_sessions SET lease_expires_at = ? WHERE id = ?").run("2020-01-01T00:00:00.000Z", session.id);
+
+  const recovered = queue.getCodexSession(session.id);
+  assert.equal(recovered.status, "active");
+  assert.equal(recovered.activeTurnId, null);
+  assert.equal(recovered.leasedBy, null);
+  assert.match(recovered.lastError, /stopped renewing this session/i);
+  assert.equal(recovered.events.some((event) => event.type === "session.lease.expired"), true);
 });
 
 test("interactive Codex approvals wait for mobile decisions", async () => {
