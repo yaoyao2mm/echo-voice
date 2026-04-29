@@ -9,7 +9,7 @@ Echo should not become a remote shell. It should be a guarded task queue for loc
 - The desktop agent is the only process that can touch local repositories or run Codex.
 - The desktop agent only makes outbound HTTPS requests to the relay.
 - Codex jobs run only inside `ECHO_CODEX_WORKSPACES`.
-- The default phone runtime is moving to local `codex app-server` over stdio, with `workspace-write` sandboxing and the relay/desktop agent boundary intact. The one-shot `codex exec --json` path remains as a conservative fallback/test path.
+- The default phone runtime uses local `codex app-server` over stdio, with the relay/desktop agent boundary intact. The one-shot `codex exec --json` path remains as a conservative fallback/test path.
 
 This keeps the core promise clear: say or type an idea on the phone, queue it for Codex, run it on the local PC, and watch progress without exposing the local machine to inbound internet traffic.
 
@@ -40,7 +40,7 @@ Echo should feel like the missing mobile companion to the local Codex client:
 - No arbitrary remote shell endpoint.
 - No arbitrary filesystem paths from the phone.
 - No public exposure of Codex `app-server`; Echo only talks to it as a local desktop child process over stdio.
-- No auto-approval of Codex app-server approval requests. The first interactive slice records and declines them until a dedicated phone approval UI exists.
+- No auto-approval of Codex app-server approval requests. Command/file approvals are relayed to the phone and require an explicit Approve/Deny decision.
 - No GitHub self-hosted runner as the primary execution channel.
 
 ## Phase 1: Reliable MVP
@@ -123,7 +123,7 @@ Goal: turn Codex permissions into a small set of understandable product modes.
 - Add optional per-workspace preset overrides.
 - Show active sandbox/profile/model in the phone UI before task submission.
 - Add a "permission needed" failure state when Codex cannot proceed.
-- Avoid phone-side remote approvals for the first stable version.
+- Route Codex command/file approval requests through the relay so the phone can make an explicit decision.
 
 ### Done When
 
@@ -224,11 +224,11 @@ Goal: make the mobile experience feel closer to a real Codex client rather than 
 - The phone starts a session with the first prompt.
 - Follow-up prompts are sent back into the same Codex thread.
 - The phone receives app-server notifications such as thread lifecycle, turn lifecycle, plan updates, item events, command output deltas, diffs, and final agent messages.
-- Approval requests are surfaced in the log and declined for now.
+- Approval requests are surfaced in the log and in the dedicated phone approval panel.
 
 ### Next Tasks
 
-- Add a phone-side approval view for command/file approval requests.
+- Broaden approval handling if Codex adds new app-server approval request types.
 - Add cancel/interrupt for the active turn.
 - Add explicit "new session" versus "continue session" affordances in a more polished chat timeline.
 - Persist app-server thread ids across desktop agent restarts and resume them before accepting follow-up messages.

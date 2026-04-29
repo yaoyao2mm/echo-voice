@@ -71,7 +71,8 @@ async function runCodexLoop() {
 async function runCodexSessionLoop() {
   const runtime = new CodexInteractiveRuntime({
     agentId,
-    onEvents: (id, events) => postJson("/api/agent/codex/sessions/events", { id, agentId, events }).catch(() => {})
+    onEvents: (id, events) => postJson("/api/agent/codex/sessions/events", { id, agentId, events }).catch(() => {}),
+    requestApproval: requestCodexApproval
   });
 
   while (true) {
@@ -100,6 +101,33 @@ async function runCodexSessionLoop() {
       await sleep(2500);
     }
   }
+}
+
+async function requestCodexApproval(approval) {
+  const created = await postJson("/api/agent/codex/sessions/approvals", {
+    agentId,
+    sessionId: approval.sessionId,
+    appRequestId: approval.appRequestId,
+    method: approval.method,
+    prompt: approval.prompt,
+    payload: approval.payload
+  });
+
+  const approvalId = created.approval?.id;
+  if (!approvalId) throw new Error("Relay did not create a Codex approval request.");
+
+  const started = Date.now();
+  const timeoutMs = config.codex.approvalTimeoutMs;
+  while (Date.now() - started < timeoutMs) {
+    const waited = await postJson(`/api/agent/codex/sessions/approvals/${encodeURIComponent(approvalId)}/wait?wait=25000`, {
+      agentId
+    });
+    if (waited.approval?.response) return waited.approval.response;
+  }
+
+  return approval.method === "execCommandApproval" || approval.method === "applyPatchApproval"
+    ? { decision: "timed_out" }
+    : { decision: "cancel" };
 }
 
 async function pollNextCodexJob() {

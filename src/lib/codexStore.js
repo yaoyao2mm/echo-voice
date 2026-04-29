@@ -39,6 +39,14 @@ const insertSessionCommand = db.prepare(`
   )
 `);
 
+const insertSessionApproval = db.prepare(`
+  INSERT INTO codex_session_approvals (
+    id, session_id, app_request_id, method, status, prompt, payload_json, response_json, created_at, updated_at, requested_by
+  ) VALUES (
+    @id, @sessionId, @appRequestId, @method, 'pending', @prompt, @payloadJson, '', @now, @now, @requestedBy
+  )
+`);
+
 const trimEvents = db.prepare(`
   DELETE FROM codex_events
   WHERE job_id = ?
@@ -103,6 +111,22 @@ const summarizeSessionCommandColumns = `
   leased_by AS leasedBy,
   lease_expires_at AS leaseExpiresAt,
   error
+`;
+
+const summarizeSessionApprovalColumns = `
+  id,
+  session_id AS sessionId,
+  app_request_id AS appRequestId,
+  method,
+  status,
+  prompt,
+  payload_json AS payloadJson,
+  response_json AS responseJson,
+  created_at AS createdAt,
+  updated_at AS updatedAt,
+  decided_at AS decidedAt,
+  decided_by AS decidedBy,
+  requested_by AS requestedBy
 `;
 
 export function createJob({ projectId, prompt }) {
@@ -424,7 +448,8 @@ export function getSession(id) {
   if (!session) return null;
   return {
     ...session,
-    events: listSessionEvents(id)
+    events: listSessionEvents(id),
+    approvals: listSessionApprovals(id)
   };
 }
 
@@ -664,7 +689,109 @@ export function completeSessionCommand(commandId, result = {}, options = {}) {
   return true;
 }
 
+export function createSessionApproval(input = {}, options = {}) {
+  const session = getSessionSummary(input.sessionId);
+  if (!session) return notFound("Codex session not found.");
+  if (!canMutateSession(session, options.agentId)) return false;
+
+  const now = nowIso();
+  const approval = {
+    id: crypto.randomUUID(),
+    sessionId: session.id,
+    appRequestId: String(input.appRequestId || ""),
+    method: String(input.method || ""),
+    prompt: String(input.prompt || "").slice(0, 12000),
+    payloadJson: JSON.stringify(input.payload || {}).slice(0, 30000),
+    requestedBy: normalizeAgentId(options.agentId),
+    now
+  };
+
+  const create = db.transaction(() => {
+    const existing = db.prepare(`
+      SELECT ${summarizeSessionApprovalColumns}
+      FROM codex_session_approvals
+      WHERE session_id = ?
+        AND app_request_id = ?
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).get(approval.sessionId, approval.appRequestId);
+
+    if (existing) return summarizeSessionApproval(existing);
+
+    insertSessionApproval.run(approval);
+
+    insertSessionEvent.run(
+      normalizeSessionEvent(approval.sessionId, {
+        type: "approval.requested",
+        text: approval.prompt || `${approval.method} approval requested.`,
+        raw: {
+          approvalId: approval.id,
+          appRequestId: approval.appRequestId,
+          method: approval.method,
+          payload: input.payload || {}
+        }
+      }, now)
+    );
+
+    return getSessionApprovalSummary(approval.id);
+  });
+
+  return create();
+}
+
+export function decideSessionApproval(id, input = {}, options = {}) {
+  const approval = getSessionApprovalSummary(id);
+  if (!approval) return notFound("Codex approval not found.");
+  if (input.sessionId && approval.sessionId !== input.sessionId) return notFound("Codex approval not found.");
+  if (approval.status !== "pending") return approval;
+
+  const now = nowIso();
+  const status = normalizeApprovalStatus(input.decision);
+  const response = buildApprovalResponse(approval.method, status);
+  const decidedBy = String(options.user?.username || options.user?.displayName || "mobile").slice(0, 120);
+
+  const decide = db.transaction(() => {
+    db.prepare(`
+      UPDATE codex_session_approvals
+      SET status = @status,
+          response_json = @responseJson,
+          decided_at = @now,
+          decided_by = @decidedBy,
+          updated_at = @now
+      WHERE id = @id
+        AND status = 'pending'
+    `).run({
+      id,
+      status,
+      responseJson: JSON.stringify(response),
+      now,
+      decidedBy
+    });
+
+    insertSessionEvent.run(
+      normalizeSessionEvent(approval.sessionId, {
+        type: status === "approved" ? "approval.approved" : "approval.denied",
+        text: `${approval.method} ${status}.`,
+        raw: { approvalId: approval.id, response }
+      }, now)
+    );
+
+    return getSessionApprovalSummary(id);
+  });
+
+  return decide();
+}
+
+export function waitForSessionApprovalDecision(id, options = {}) {
+  expireOldApprovals();
+  const approval = getSessionApprovalSummary(id);
+  if (!approval) return null;
+  if (options.agentId && approval.requestedBy !== normalizeAgentId(options.agentId)) return null;
+  return approval.status === "pending" ? null : approval;
+}
+
 export function resetStoreForTest() {
+  db.prepare("DELETE FROM codex_session_approvals").run();
   db.prepare("DELETE FROM codex_session_events").run();
   db.prepare("DELETE FROM codex_session_commands").run();
   db.prepare("DELETE FROM codex_sessions").run();
@@ -767,6 +894,29 @@ function migrate() {
 
     CREATE INDEX IF NOT EXISTS idx_codex_session_events_session_id
       ON codex_session_events(session_id, id);
+
+    CREATE TABLE IF NOT EXISTS codex_session_approvals (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES codex_sessions(id) ON DELETE CASCADE,
+      app_request_id TEXT NOT NULL,
+      method TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'denied', 'timed_out')),
+      prompt TEXT NOT NULL DEFAULT '',
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      response_json TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      decided_at TEXT,
+      decided_by TEXT NOT NULL DEFAULT '',
+      requested_by TEXT NOT NULL DEFAULT '',
+      UNIQUE(session_id, app_request_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_codex_session_approvals_session
+      ON codex_session_approvals(session_id, status, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_codex_session_approvals_status
+      ON codex_session_approvals(status, created_at);
   `);
 }
 
@@ -869,6 +1019,7 @@ function summarizeJob(row) {
 
 function sessionStatusSnapshot() {
   reclaimExpiredSessionCommandLeases();
+  expireOldApprovals();
 
   const queuedCommands = db.prepare("SELECT COUNT(*) AS count FROM codex_session_commands WHERE status = 'queued'").get().count;
   const activeSessions = db.prepare(`
@@ -876,10 +1027,12 @@ function sessionStatusSnapshot() {
     FROM codex_sessions
     WHERE status IN ('starting', 'active', 'running')
   `).get().count;
+  const pendingApprovals = db.prepare("SELECT COUNT(*) AS count FROM codex_session_approvals WHERE status = 'pending'").get().count;
 
   return {
     queuedCommands,
     activeSessions,
+    pendingApprovals,
     recent: listSessions(8)
   };
 }
@@ -923,11 +1076,18 @@ function summarizeSession(row) {
     WHERE session_id = ?
       AND status IN ('queued', 'leased')
   `).get(row.id).count;
+  const pendingApprovalCount = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM codex_session_approvals
+    WHERE session_id = ?
+      AND status = 'pending'
+  `).get(row.id).count;
 
   return {
     ...row,
     eventCount,
     pendingCommandCount,
+    pendingApprovalCount,
     lastEvent: lastEvent ? parseEvent(lastEvent) : null
   };
 }
@@ -936,6 +1096,23 @@ function summarizeSessionCommand(row) {
   return {
     ...row,
     payload: parseJson(row.payloadJson, {})
+  };
+}
+
+function getSessionApprovalSummary(id) {
+  const row = db.prepare(`
+    SELECT ${summarizeSessionApprovalColumns}
+    FROM codex_session_approvals
+    WHERE id = ?
+  `).get(id);
+  return row ? summarizeSessionApproval(row) : null;
+}
+
+function summarizeSessionApproval(row) {
+  return {
+    ...row,
+    payload: parseJson(row.payloadJson, {}),
+    response: parseJson(row.responseJson, null)
   };
 }
 
@@ -955,6 +1132,16 @@ function listSessionEvents(sessionId) {
     WHERE session_id = ?
     ORDER BY id ASC
   `).all(sessionId).map(parseEvent);
+}
+
+function listSessionApprovals(sessionId) {
+  return db.prepare(`
+    SELECT ${summarizeSessionApprovalColumns}
+    FROM codex_session_approvals
+    WHERE session_id = ?
+      AND status = 'pending'
+    ORDER BY created_at ASC
+  `).all(sessionId).map(summarizeSessionApproval);
 }
 
 function getLatestSessionEventType(sessionId) {
@@ -1227,6 +1414,65 @@ function trimOldSessions() {
     for (const id of sessionIds) remove.run(id);
   });
   removeMany(ids);
+}
+
+function expireOldApprovals() {
+  const cutoff = new Date(Date.now() - config.codex.approvalTimeoutMs).toISOString();
+  const expired = db.prepare(`
+    SELECT ${summarizeSessionApprovalColumns}
+    FROM codex_session_approvals
+    WHERE status = 'pending'
+      AND created_at < ?
+  `).all(cutoff).map(summarizeSessionApproval);
+
+  if (expired.length === 0) return;
+
+  const expire = db.transaction(() => {
+    const now = nowIso();
+    for (const approval of expired) {
+      const response = buildApprovalResponse(approval.method, "timed_out");
+      db.prepare(`
+        UPDATE codex_session_approvals
+        SET status = 'timed_out',
+            response_json = @responseJson,
+            decided_at = @now,
+            decided_by = 'timeout',
+            updated_at = @now
+        WHERE id = @id
+          AND status = 'pending'
+      `).run({
+        id: approval.id,
+        responseJson: JSON.stringify(response),
+        now
+      });
+
+      insertSessionEvent.run(
+        normalizeSessionEvent(approval.sessionId, {
+          type: "approval.timed_out",
+          text: `${approval.method} approval timed out.`,
+          raw: { approvalId: approval.id, response }
+        }, now)
+      );
+    }
+  });
+
+  expire();
+}
+
+function normalizeApprovalStatus(value) {
+  const decision = String(value || "").toLowerCase();
+  if (["approve", "approved", "accept", "yes", "allow"].includes(decision)) return "approved";
+  if (["timeout", "timed_out"].includes(decision)) return "timed_out";
+  return "denied";
+}
+
+function buildApprovalResponse(method, status) {
+  const approved = status === "approved";
+  if (method === "item/commandExecution/requestApproval") return { decision: approved ? "accept" : status === "timed_out" ? "cancel" : "decline" };
+  if (method === "item/fileChange/requestApproval") return { decision: approved ? "accept" : status === "timed_out" ? "cancel" : "decline" };
+  if (method === "execCommandApproval") return { decision: approved ? "approved" : status === "timed_out" ? "timed_out" : "denied" };
+  if (method === "applyPatchApproval") return { decision: approved ? "approved" : status === "timed_out" ? "timed_out" : "denied" };
+  return { decision: approved ? "accept" : "decline" };
 }
 
 function badRequest(message) {

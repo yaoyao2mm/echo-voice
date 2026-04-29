@@ -5,6 +5,7 @@ export class CodexInteractiveRuntime {
   constructor(options = {}) {
     this.agentId = options.agentId || "default-agent";
     this.onEvents = options.onEvents || (async () => {});
+    this.requestApproval = options.requestApproval || defaultApprovalHandler;
     this.client = null;
     this.sessions = new Map();
     this.threadToSession = new Map();
@@ -232,24 +233,33 @@ export class CodexInteractiveRuntime {
   }
 
   #handleServerRequest(message) {
+    this.#handleServerRequestAsync(message).catch((error) => {
+      this.client.reject(message.id, -32603, error.message || "Echo Codex approval handling failed.");
+    });
+  }
+
+  async #handleServerRequestAsync(message) {
     const threadId = getThreadId(message);
     const sessionId = threadId ? this.threadToSession.get(threadId) : "";
-    if (sessionId) {
-      this.#emit(sessionId, [
-        {
-          type: "approval.requested",
-          text: approvalRequestText(message),
-          sessionStatus: "running",
-          raw: message
-        }
-      ]).catch(() => {});
+    const fallback = declineApprovalResponse(message.method);
+    if (!sessionId || !fallback) {
+      if (fallback) this.client.respond(message.id, fallback);
+      else this.client.reject(message.id, -32603, "Echo Codex does not support this interactive request yet.");
+      return;
     }
 
-    const response = autoDeclineApprovalResponse(message.method);
+    const approval = {
+      sessionId,
+      appRequestId: String(message.id),
+      method: message.method,
+      prompt: approvalRequestText(message),
+      payload: message.params || {}
+    };
+    const response = await this.requestApproval(approval);
     if (response) {
       this.client.respond(message.id, response);
     } else {
-      this.client.reject(message.id, -32603, "Echo Codex does not support this interactive request yet.");
+      this.client.respond(message.id, fallback);
     }
   }
 
@@ -345,18 +355,23 @@ function itemLabel(item = {}, fallbackStatus = "") {
 function approvalRequestText(message) {
   if (message.method === "item/commandExecution/requestApproval") {
     const command = Array.isArray(message.params?.command) ? message.params.command.join(" ") : message.params?.command || "command";
-    return `Codex requested command approval, auto-declined for now: ${command}`;
+    return `Codex requested command approval: ${command}`;
   }
   if (message.method === "item/fileChange/requestApproval") {
-    return "Codex requested file-change approval, auto-declined for now.";
+    const target = message.params?.grantRoot ? ` for ${message.params.grantRoot}` : "";
+    return `Codex requested file-change approval${target}.`;
   }
-  return `Codex requested ${message.method}, auto-declined for now.`;
+  return `Codex requested ${message.method}.`;
 }
 
-function autoDeclineApprovalResponse(method) {
+function declineApprovalResponse(method) {
   if (method === "item/commandExecution/requestApproval") return { decision: "decline" };
   if (method === "item/fileChange/requestApproval") return { decision: "decline" };
   if (method === "execCommandApproval") return { decision: "denied" };
   if (method === "applyPatchApproval") return { decision: "denied" };
   return null;
+}
+
+async function defaultApprovalHandler(approval) {
+  return declineApprovalResponse(approval.method);
 }

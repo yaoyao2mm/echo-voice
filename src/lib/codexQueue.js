@@ -7,7 +7,9 @@ import {
   completeJob as completeStoredJob,
   completeSessionCommand as completeStoredSessionCommand,
   createJob as createStoredJob,
+  createSessionApproval as createStoredSessionApproval,
   createSession as createStoredSession,
+  decideSessionApproval as decideStoredSessionApproval,
   enqueueSessionMessage as enqueueStoredSessionMessage,
   getJob as getStoredJob,
   getSession as getStoredSession,
@@ -15,7 +17,8 @@ import {
   listSessions as listStoredSessions,
   statusSnapshot,
   touchAgent,
-  upsertAgent
+  upsertAgent,
+  waitForSessionApprovalDecision as getStoredApprovalDecision
 } from "./codexStore.js";
 
 const events = new EventEmitter();
@@ -146,6 +149,47 @@ export function appendCodexSessionEvents(id, incomingEvents = [], options = {}) 
   if (options.agent) updateCodexAgent(options.agent);
   else if (options.agentId) touchAgent(options.agentId);
   return appendStoredSessionEvents(id, incomingEvents, { agentId: options.agentId || options.agent?.id });
+}
+
+export function createCodexSessionApproval(input = {}, options = {}) {
+  if (options.agent) updateCodexAgent(options.agent);
+  else if (options.agentId) touchAgent(options.agentId);
+  const approval = createStoredSessionApproval(input, { agentId: options.agentId || options.agent?.id });
+  if (approval) events.emit(`codex-approval-${approval.id}`);
+  return approval;
+}
+
+export function decideCodexSessionApproval(id, input = {}, options = {}) {
+  const approval = decideStoredSessionApproval(id, input, options);
+  if (approval) events.emit(`codex-approval-${approval.id}`);
+  return approval;
+}
+
+export async function waitForCodexSessionApproval(id, input = {}) {
+  if (input.agent) updateCodexAgent(input.agent);
+  else if (input.agentId) touchAgent(input.agentId);
+
+  const immediateApproval = getStoredApprovalDecision(id, { agentId: input.agentId || input.agent?.id });
+  if (immediateApproval) return immediateApproval;
+
+  const waitMs = clampWaitMs(input.waitMs);
+  return new Promise((resolve) => {
+    const eventName = `codex-approval-${id}`;
+    const timeout = setTimeout(() => {
+      events.off(eventName, handleDecision);
+      resolve(null);
+    }, waitMs);
+
+    function handleDecision() {
+      const approval = getStoredApprovalDecision(id, { agentId: input.agentId || input.agent?.id });
+      if (!approval) return;
+      clearTimeout(timeout);
+      events.off(eventName, handleDecision);
+      resolve(approval);
+    }
+
+    events.on(eventName, handleDecision);
+  });
 }
 
 export function completeCodexJob(id, result = {}, options = {}) {

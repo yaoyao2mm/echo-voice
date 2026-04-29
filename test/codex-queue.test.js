@@ -215,3 +215,45 @@ test("interactive Codex sessions lease commands and keep thread state", async ()
   assert.equal(messageCommand.appThreadId, "thr_1");
   assert.equal(messageCommand.payload.text, "继续修复 UI");
 });
+
+test("interactive Codex approvals wait for mobile decisions", async () => {
+  store.resetStoreForTest();
+
+  const agent = {
+    id: "approval-agent",
+    workspaces: [{ id: "demo", path: process.cwd() }]
+  };
+  const session = queue.createCodexSession({ projectId: "demo", prompt: "需要跑测试" });
+  const command = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  queue.appendCodexSessionEvents(session.id, [{ type: "thread.started", text: "started", appThreadId: "thr_a" }], {
+    agentId: agent.id
+  });
+  queue.completeCodexSessionCommand(command.id, { ok: true, appThreadId: "thr_a", sessionStatus: "running" }, { agentId: agent.id });
+
+  const approval = queue.createCodexSessionApproval(
+    {
+      sessionId: session.id,
+      appRequestId: "request-1",
+      method: "item/commandExecution/requestApproval",
+      prompt: "Codex requested command approval: pnpm test",
+      payload: { command: "pnpm test", cwd: process.cwd() }
+    },
+    { agentId: agent.id }
+  );
+  assert.equal(approval.status, "pending");
+
+  const waitPromise = queue.waitForCodexSessionApproval(approval.id, { waitMs: 1000, agentId: agent.id });
+  const decided = queue.decideCodexSessionApproval(approval.id, { decision: "approved" }, { user: { username: "alice" } });
+  assert.equal(decided.status, "approved");
+  assert.deepEqual(decided.response, { decision: "accept" });
+
+  const waited = await waitPromise;
+  assert.equal(waited.id, approval.id);
+  assert.equal(waited.status, "approved");
+  assert.deepEqual(waited.response, { decision: "accept" });
+
+  const detail = queue.getCodexSession(session.id);
+  assert.equal(detail.pendingApprovalCount, 0);
+  assert.equal(detail.approvals.length, 0);
+  assert.equal(detail.events.some((event) => event.type === "approval.approved"), true);
+});

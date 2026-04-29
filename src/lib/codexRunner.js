@@ -17,6 +17,7 @@ export function publicCodexRuntime() {
     command: config.codex.command,
     sandbox: config.codex.sandbox || "workspace-write",
     approvalPolicy: config.codex.approvalPolicy,
+    approvalTimeoutMs: config.codex.approvalTimeoutMs,
     model: config.codex.model,
     profile: config.codex.profile,
     timeoutMs: config.codex.timeoutMs

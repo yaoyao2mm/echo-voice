@@ -22,13 +22,16 @@ import {
   completeCodexJob,
   completeCodexSessionCommand,
   createCodexJob,
+  createCodexSessionApproval,
   createCodexSession,
+  decideCodexSessionApproval,
   enqueueCodexSessionMessage,
   getCodexJob,
   getCodexSession,
   listCodexJobs,
   listCodexSessions,
   waitForCodexJob,
+  waitForCodexSessionApproval,
   waitForCodexSessionCommand
 } from "./lib/codexQueue.js";
 
@@ -281,6 +284,29 @@ app.post("/api/codex/sessions/:id/messages", (req, res) => {
   }
 });
 
+app.post("/api/codex/sessions/:id/approvals/:approvalId", (req, res) => {
+  try {
+    if (config.mode !== "relay") {
+      return res.status(400).json({ error: "Codex interactive approvals are only available in relay mode." });
+    }
+
+    const approval = decideCodexSessionApproval(
+      req.params.approvalId,
+      {
+        sessionId: req.params.id,
+        decision: req.body.decision
+      },
+      {
+        user: req.user || null
+      }
+    );
+    if (!approval) return res.status(404).json({ error: "Codex approval not found." });
+    res.json({ approval });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
 app.post("/api/agent/codex/next", async (req, res) => {
   try {
     if (config.mode !== "relay") {
@@ -363,6 +389,46 @@ app.post("/api/agent/codex/sessions/commands/complete", (req, res) => {
     agentId: req.body.agentId
   });
   res.json({ ok });
+});
+
+app.post("/api/agent/codex/sessions/approvals", (req, res) => {
+  try {
+    if (config.mode !== "relay") {
+      return res.status(400).json({ error: "Codex session approvals are only available in relay mode." });
+    }
+
+    const approval = createCodexSessionApproval(
+      {
+        sessionId: req.body.sessionId,
+        appRequestId: req.body.appRequestId,
+        method: req.body.method,
+        prompt: req.body.prompt,
+        payload: req.body.payload
+      },
+      {
+        agentId: req.body.agentId
+      }
+    );
+    res.json({ approval });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.post("/api/agent/codex/sessions/approvals/:id/wait", async (req, res) => {
+  try {
+    if (config.mode !== "relay") {
+      return res.status(400).json({ error: "Codex session approval waiting is only available in relay mode." });
+    }
+
+    const approval = await waitForCodexSessionApproval(req.params.id, {
+      waitMs: Number(req.query.wait || req.body.wait || 25000),
+      agentId: req.body.agentId
+    });
+    res.json({ approval });
+  } catch (error) {
+    handleError(res, error);
+  }
 });
 
 const useHttps = Boolean(config.httpsCert && config.httpsKey);

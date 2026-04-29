@@ -42,6 +42,7 @@ const elements = {
   codexJobs: document.querySelector("#codexJobs"),
   codexJobDetail: document.querySelector("#codexJobDetail"),
   codexRunSummary: document.querySelector("#codexRunSummary"),
+  codexApprovals: document.querySelector("#codexApprovals"),
   codexLog: document.querySelector("#codexLog")
 };
 
@@ -440,7 +441,7 @@ function renderCodexStatus(codex) {
   const workspaces = codex.workspaces || [];
   elements.codexStatusText.textContent = codex.agentOnline ? "本机 Codex 在线" : "等待桌面 agent";
   elements.codexQueueMeta.textContent = codex.agentOnline
-    ? `会话 ${codex.interactive?.activeSessions || 0} · 待处理 ${codex.interactive?.queuedCommands || 0} · 项目 ${workspaces.length}`
+    ? `会话 ${codex.interactive?.activeSessions || 0} · 待审批 ${codex.interactive?.pendingApprovals || 0} · 项目 ${workspaces.length}`
     : "打开桌面端后自动同步";
 
   const selected = localStorage.getItem("echoCodexProject") || elements.codexProject.value;
@@ -597,6 +598,7 @@ async function loadCodexJobs() {
       <span class="status-pill ${escapeHtml(job.status)}">${escapeHtml(statusLabel(job.status))}</span>
       <strong>${escapeHtml(job.projectId)} · ${escapeHtml(formatRelativeTime(job.completedAt || job.startedAt || job.createdAt))}</strong>
       <span>${escapeHtml(jobPreview(job))}</span>
+      ${job.pendingApprovalCount ? `<span class="approval-count">${escapeHtml(job.pendingApprovalCount)} 个待审批</span>` : ""}
     `;
     button.addEventListener("click", () => {
       composingNewSession = false;
@@ -651,6 +653,7 @@ async function showCodexJob(id, options = {}) {
     <div class="run-block-title">输出</div>
     <div class="${escapeHtml(output.className)}">${escapeHtml(output.text)}</div>
   `;
+  renderApprovals(job);
   const lines = [
     `# ${job.status} · ${job.projectId}`,
     errorText ? `ERROR: ${errorText}` : "",
@@ -660,6 +663,60 @@ async function showCodexJob(id, options = {}) {
   ].filter(Boolean);
   elements.codexLog.textContent = lines.join("\n\n");
   updateComposerAvailability();
+}
+
+function renderApprovals(session) {
+  const approvals = session.approvals || [];
+  elements.codexApprovals.hidden = approvals.length === 0;
+  elements.codexApprovals.innerHTML = "";
+  for (const approval of approvals) {
+    const node = document.createElement("div");
+    node.className = "approval-panel";
+    node.innerHTML = `
+      <div class="approval-copy">
+        <strong>${escapeHtml(approvalTitle(approval))}</strong>
+        <p>${escapeHtml(approval.prompt || approval.method || "Codex 请求审批")}</p>
+        <pre>${escapeHtml(approvalDetail(approval))}</pre>
+      </div>
+      <div class="approval-actions">
+        <button class="secondary" type="button" data-decision="denied">拒绝</button>
+        <button class="primary" type="button" data-decision="approved">批准</button>
+      </div>
+    `;
+    for (const button of node.querySelectorAll("button")) {
+      button.addEventListener("click", () => decideApproval(session.id, approval.id, button.dataset.decision));
+    }
+    elements.codexApprovals.append(node);
+  }
+}
+
+async function decideApproval(sessionId, approvalId, decision) {
+  try {
+    await apiPost(`/api/codex/sessions/${encodeURIComponent(sessionId)}/approvals/${encodeURIComponent(approvalId)}`, {
+      decision
+    });
+    toast(decision === "approved" ? "已批准" : "已拒绝");
+    await showCodexJob(sessionId, { keepSelection: true });
+  } catch (error) {
+    if (!handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
+      toast(error.message);
+    }
+  }
+}
+
+function approvalTitle(approval) {
+  if (approval.method === "item/commandExecution/requestApproval" || approval.method === "execCommandApproval") return "命令审批";
+  if (approval.method === "item/fileChange/requestApproval" || approval.method === "applyPatchApproval") return "文件修改审批";
+  return "Codex 审批";
+}
+
+function approvalDetail(approval) {
+  const payload = approval.payload || {};
+  if (payload.command) return Array.isArray(payload.command) ? payload.command.join(" ") : String(payload.command);
+  if (payload.cwd || payload.reason) return [payload.cwd, payload.reason].filter(Boolean).join("\n");
+  if (payload.grantRoot) return String(payload.grantRoot);
+  if (payload.changes) return payload.changes.map((change) => change.path || change.kind || "").filter(Boolean).join("\n");
+  return JSON.stringify(payload, null, 2).slice(0, 1600);
 }
 
 function jobOutput(job, errorText = "") {
