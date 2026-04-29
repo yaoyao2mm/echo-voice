@@ -10,6 +10,7 @@
   --shell-pad-right: max(var(--page-gutter), var(--safe-right));
   --shell-pad-bottom: calc(22px + max(var(--page-gutter), var(--safe-bottom)));
   --shell-pad-left: max(var(--page-gutter), var(--safe-left));
+  --mobile-chat-rail: 0px;
   --bg: #f5f6f8;
   --surface: #ffffff;
   --surface-subtle: #f7f8fa;
@@ -3456,6 +3457,7 @@ body.topbar-collapsed .topbar {
   }
 
   .codex-main {
+    --mobile-chat-rail: clamp(4px, 1.8vw, 8px);
     grid-template-rows: minmax(0, 1fr);
     height: calc(var(--app-height) - var(--topbar-height, 72px));
     min-height: 0;
@@ -3476,7 +3478,7 @@ body.topbar-collapsed .topbar {
     overscroll-behavior-y: contain;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
-    padding-bottom: calc(var(--composer-height, 0px) + 10px);
+    padding: 0 var(--mobile-chat-rail) calc(var(--composer-height, 0px) + 10px);
   }
 
   .run-log {
@@ -3495,8 +3497,8 @@ body.topbar-collapsed .topbar {
 
   .composer {
     position: fixed;
-    left: var(--shell-pad-left);
-    right: var(--shell-pad-right);
+    left: calc(var(--shell-pad-left) + var(--mobile-chat-rail));
+    right: calc(var(--shell-pad-right) + var(--mobile-chat-rail));
     bottom: 0;
     margin-top: 0;
     margin-bottom: 0;
@@ -3533,13 +3535,13 @@ body.topbar-collapsed .topbar {
   .thread-message-assistant .thread-bubble,
   .thread-message-assistant .thread-attachments,
   .thread-message-system .thread-bubble {
-    width: calc(100% - 2px);
-    max-width: calc(100% - 2px);
+    width: 100%;
+    max-width: 100%;
   }
 
   .thread-message-user .thread-bubble,
   .thread-message-user .thread-attachments {
-    max-width: min(92%, calc(100% - 16px));
+    max-width: min(88%, 30rem);
   }
 
   .thread-welcome {
