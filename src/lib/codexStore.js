@@ -1027,17 +1027,19 @@ function deriveSessionUpdate(events, session) {
     lastError: null,
     finalMessage: null
   };
+  let agentMessageCompleted = hasCompletedAgentMessage(session.id);
 
   for (const event of events || []) {
+    const raw = event.raw || {};
+    const method = raw.method || event.type;
     if (event.sessionStatus) update.status = String(event.sessionStatus);
     if (event.appThreadId) update.appThreadId = String(event.appThreadId);
     if (event.activeTurnId) update.activeTurnId = String(event.activeTurnId);
     if (event.clearActiveTurnId) update.clearActiveTurnId = true;
     if (event.error) update.lastError = String(event.error).slice(0, 12000);
-    if (event.finalMessage) update.finalMessage = String(event.finalMessage).slice(0, 12000);
-
-    const raw = event.raw || {};
-    const method = raw.method || event.type;
+    if (event.finalMessage && !(method === "item/agentMessage/delta" && agentMessageCompleted)) {
+      update.finalMessage = String(event.finalMessage).slice(0, 12000);
+    }
     if (method === "turn/started") {
       update.status = "running";
       update.activeTurnId = raw.params?.turn?.id || event.activeTurnId || update.activeTurnId;
@@ -1049,15 +1051,29 @@ function deriveSessionUpdate(events, session) {
       const message = raw.params?.turn?.error?.message;
       if (message) update.lastError = String(message).slice(0, 12000);
     }
-    if (method === "item/agentMessage/delta" && event.text) {
+    if (method === "item/agentMessage/delta" && event.text && !agentMessageCompleted) {
       update.finalMessage = `${session.finalMessage || ""}${event.text}`.slice(0, 12000);
     }
     if (method === "item/completed" && raw.params?.item?.type === "agentMessage") {
       update.finalMessage = String(raw.params.item.text || "").slice(0, 12000);
+      agentMessageCompleted = true;
     }
   }
 
   return update;
+}
+
+function hasCompletedAgentMessage(sessionId) {
+  const rows = db.prepare(`
+    SELECT raw_json AS rawJson
+    FROM codex_session_events
+    WHERE session_id = ?
+      AND type = 'item/completed'
+    ORDER BY id DESC
+    LIMIT 20
+  `).all(sessionId);
+
+  return rows.some((row) => parseJson(row.rawJson, {})?.params?.item?.type === "agentMessage");
 }
 
 function parseAgent(row) {

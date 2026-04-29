@@ -160,6 +160,41 @@ test("interactive Codex sessions lease commands and keep thread state", async ()
       created.id,
       [
         {
+          type: "item/completed",
+          text: "ECHO_INTERACTIVE_OK",
+          finalMessage: "ECHO_INTERACTIVE_OK",
+          raw: {
+            method: "item/completed",
+            params: { threadId: "thr_1", turnId: "turn_1", item: { type: "agentMessage", text: "ECHO_INTERACTIVE_OK" } }
+          }
+        }
+      ],
+      { agentId: "session-agent" }
+    ),
+    true
+  );
+  assert.equal(
+    queue.appendCodexSessionEvents(
+      created.id,
+      [
+        {
+          type: "item/agentMessage/delta",
+          text: "ECHO",
+          finalMessage: "ECHO",
+          raw: { method: "item/agentMessage/delta", params: { threadId: "thr_1", turnId: "turn_1", delta: "ECHO" } }
+        }
+      ],
+      { agentId: "session-agent" }
+    ),
+    true
+  );
+  assert.equal(queue.getCodexSession(created.id).finalMessage, "ECHO_INTERACTIVE_OK");
+
+  assert.equal(
+    queue.appendCodexSessionEvents(
+      created.id,
+      [
+        {
           type: "turn/completed",
           text: "Turn completed.",
           raw: { method: "turn/completed", params: { threadId: "thr_1", turn: { status: "completed" } } }
