@@ -27,7 +27,7 @@ const PERMISSION_MODE_OPTIONS = [
   { value: "", label: "默认" },
   { value: "strict", label: "严格" },
   { value: "approve", label: "批准" },
-  { value: "full", label: "全部" }
+  { value: "full", label: "全权限" }
 ];
 if (tokenFromUrl) {
   window.history.replaceState({}, "", window.location.pathname);
@@ -59,6 +59,7 @@ const elements = {
   codexQueueMeta: document.querySelector("#codexQueueMeta"),
   activeSessionTitle: document.querySelector("#activeSessionTitle"),
   activeSessionMeta: document.querySelector("#activeSessionMeta"),
+  composerStatusText: document.querySelector("#composerStatusText"),
   composerActionsMeta: document.querySelector("#composerActionsMeta"),
   refreshCodex: document.querySelector("#refreshCodex"),
   toggleSessionsButton: document.querySelector("#toggleSessionsButton"),
@@ -450,6 +451,49 @@ function syncComposerMetrics() {
   if (composerHeight > 0) {
     document.documentElement.style.setProperty("--composer-height", `${composerHeight}px`);
   }
+}
+
+function refreshComposerStatusBar() {
+  if (!elements.composerStatusText) return;
+
+  const session = composingNewSession ? null : selectedCodexSession;
+  if (composerBusy) {
+    elements.composerStatusText.textContent = "正在发送…";
+    return;
+  }
+  if (composerAttachments.length > 0) {
+    if (session?.status === "running") {
+      elements.composerStatusText.textContent = `Codex 正在回复 · ${attachmentSummaryText(composerAttachments, "已附加")}`;
+      return;
+    }
+    elements.composerStatusText.textContent = `${attachmentSummaryText(composerAttachments, "已附加")} · 发送前可增删`;
+    return;
+  }
+  if (!elements.codexProject.value) {
+    elements.composerStatusText.textContent = "先选择工程";
+    return;
+  }
+  if (session?.pendingApprovalCount > 0) {
+    elements.composerStatusText.textContent = "等待你的审批";
+    return;
+  }
+  if (session?.status === "starting") {
+    elements.composerStatusText.textContent = "Codex 正在启动";
+    return;
+  }
+  if (session?.status === "running") {
+    elements.composerStatusText.textContent = "Codex 正在回复";
+    return;
+  }
+  if (session?.pendingCommandCount > 0) {
+    elements.composerStatusText.textContent = "消息已排队";
+    return;
+  }
+  if (session && !sessionCanAcceptFollowUp(session)) {
+    elements.composerStatusText.textContent = "当前会话不可继续";
+    return;
+  }
+  elements.composerStatusText.textContent = session ? "继续当前话题" : "发送后开始新话题";
 }
 
 function initRuntimeControls() {
@@ -1136,6 +1180,7 @@ function setComposerBusy(isBusy, label = "") {
   elements.sendCodexButton.textContent = isBusy ? label || "处理中" : composerActionLabel();
   updateComposerAvailability();
   syncComposerMetrics();
+  refreshComposerStatusBar();
   if (!isBusy) refreshStatus({ silentAuthFailure: true });
 }
 
@@ -1157,6 +1202,7 @@ function updateComposerAvailability() {
   refreshComposerMeta();
   refreshTopbarProjectChip();
   syncComposerMetrics();
+  refreshComposerStatusBar();
 }
 
 function renderProjectPicker(agentOnline) {
@@ -1835,6 +1881,7 @@ function refreshActiveSessionHeader() {
   }
   elements.activeSessionMeta.textContent = parts.filter(Boolean).join(" · ") || "选择权限、模型和推理强度后直接发送。";
   refreshComposerMeta();
+  refreshComposerStatusBar();
 }
 
 function refreshComposerMeta() {
