@@ -882,6 +882,7 @@ async function sendToCodex() {
 
   const rawPrompt = elements.codexPrompt.value.trim();
   const attachments = currentComposerAttachmentsPayload();
+  const attachmentCount = attachments.length;
   const projectId = elements.codexProject.value;
   const runtime = currentRuntimeDraft();
   if (!rawPrompt && attachments.length === 0) {
@@ -910,10 +911,10 @@ async function sendToCodex() {
     runtimeDirty = false;
     applyRuntimeDraft(selectedCodexSession.runtime || runtime, { persist: false, dirty: false });
     elements.codexPrompt.value = "";
-    clearComposerAttachments({ silent: true });
-    toast("已发送");
     await loadCodexJobs();
     await showCodexJob(data.session.id);
+    clearComposerAttachments({ silent: true });
+    toast(attachmentCount > 0 ? `已发送 ${attachmentCount} 个附件` : "已发送");
     await refreshStatus({ silentAuthFailure: true });
   } catch (error) {
     if (!handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
@@ -1426,8 +1427,12 @@ function statusLabel(status) {
 }
 
 async function showCodexJob(id, options = {}) {
+  const previousSessionId = selectedCodexJobId;
+  const switchingSession = Boolean(previousSessionId && previousSessionId !== id);
   selectedCodexJobId = id;
-  clearComposerAttachments({ silent: true });
+  if (options.resetComposerAttachments || switchingSession) {
+    clearComposerAttachments({ silent: true });
+  }
   if (!options.keepSelection) {
     for (const button of elements.codexJobs.querySelectorAll(".conversation-item")) {
       button.classList.toggle("active", button.dataset.jobId === id);
