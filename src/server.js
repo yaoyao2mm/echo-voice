@@ -129,11 +129,12 @@ app.post("/api/refine", async (req, res) => {
     const rawText = req.body.rawText || "";
     const mode = req.body.mode || "chat";
     const contextHint = req.body.contextHint || "";
+    const history = req.body.includeHistory === false ? [] : recentHistory(8);
     const refined = await refineTranscript({
       rawText,
       mode,
       contextHint,
-      history: recentHistory(8)
+      history
     });
     const item = await addHistory({ raw: rawText, refined, mode, contextHint, user: req.user || null });
     res.json({ item });
@@ -170,7 +171,7 @@ app.post("/api/agent/refine", async (req, res) => {
       rawText,
       mode: req.body.mode || "chat",
       contextHint: req.body.contextHint || "桌面端配置页测试实际 relay 后处理",
-      history: recentHistory(8)
+      history: req.body.includeHistory === false ? [] : recentHistory(8)
     });
     res.json({
       ok: true,

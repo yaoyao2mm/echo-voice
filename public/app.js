@@ -482,14 +482,21 @@ async function sendToCodex() {
 }
 
 async function refinePromptForCodex(rawText) {
-  const data = await apiPost("/api/refine", {
-    rawText,
-    mode: "chat",
-    contextHint: "手机端 Codex 任务输入"
-  });
-  const refined = String(data.item?.refined || data.item?.raw || rawText).trim();
-  if (refined) elements.codexPrompt.value = refined;
-  return refined || rawText;
+  try {
+    const data = await apiPost("/api/refine", {
+      rawText,
+      mode: "chat",
+      contextHint: "手机端 Codex 任务输入",
+      includeHistory: false
+    });
+    const refined = String(data.item?.refined || data.item?.raw || rawText).trim();
+    if (refined) elements.codexPrompt.value = refined;
+    return refined || rawText;
+  } catch (error) {
+    if (isAuthError(error)) throw error;
+    toast("后处理失败，已发送原文");
+    return rawText;
+  }
 }
 
 function setComposerBusy(isBusy, label = "") {
@@ -642,6 +649,10 @@ function updatePostprocessUi() {
   elements.postprocessToggle.checked = postprocessEnabled;
   elements.postprocessLabel.textContent = postprocessEnabled ? "后处理" : "原文";
   elements.postprocessToggle.closest(".postprocess-toggle")?.classList.toggle("off", !postprocessEnabled);
+}
+
+function isAuthError(error) {
+  return error.status === 401 || error.code === "SESSION_REQUIRED" || error.code === "PAIRING_REQUIRED";
 }
 
 function authHeaders() {
