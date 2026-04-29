@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Echo Codex</title>
-    <link rel="manifest" href="/manifest.webmanifest?v=8" />
-    <link rel="stylesheet" href="/styles.css?v=8" />
+    <link rel="manifest" href="/manifest.webmanifest?v=9" />
+    <link rel="stylesheet" href="/styles.css?v=9" />
   </head>
   <body>
     <main class="shell">
@@ -91,7 +91,12 @@
         </section>
 
         <nav class="actions" aria-label="草稿操作">
-          <button id="refineButton" class="secondary" type="button">重新整理</button>
+          <label class="postprocess-toggle" for="postprocessToggle">
+            <input id="postprocessToggle" type="checkbox" role="switch" />
+            <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+            <span id="postprocessLabel">后处理</span>
+          </label>
+          <button id="refineButton" class="secondary" type="button">整理</button>
           <button id="copyButton" class="secondary" type="button">复制</button>
           <button id="queueDraftButton" class="primary" type="button">加入队列</button>
         </nav>
@@ -133,6 +138,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=8" type="module"></script>
+    <script src="/app.js?v=9" type="module"></script>
   </body>
 </html>

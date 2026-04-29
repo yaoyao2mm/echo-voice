@@ -36,6 +36,8 @@ const elements = {
   contextHint: document.querySelector("#contextHint"),
   rawText: document.querySelector("#rawText"),
   finalText: document.querySelector("#finalText"),
+  postprocessToggle: document.querySelector("#postprocessToggle"),
+  postprocessLabel: document.querySelector("#postprocessLabel"),
   refineButton: document.querySelector("#refineButton"),
   copyButton: document.querySelector("#copyButton"),
   queueDraftButton: document.querySelector("#queueDraftButton"),
@@ -62,6 +64,8 @@ let pairingScanActive = false;
 let pairingScanBusy = false;
 let activeView = localStorage.getItem("echoActiveView") || "codex";
 let selectedCodexJobId = "";
+let postprocessEnabled = localStorage.getItem("echoPostprocessEnabled") !== "false";
+let controlsBusy = false;
 
 elements.loginForm.addEventListener("submit", login);
 elements.logoutButton.addEventListener("click", logout);
@@ -70,6 +74,12 @@ elements.refreshStatus.addEventListener("click", refreshStatus);
 elements.scanPairingButton.addEventListener("click", startPairingScanner);
 elements.stopScanButton.addEventListener("click", stopPairingScanner);
 elements.savePairingButton.addEventListener("click", pairFromInput);
+elements.postprocessToggle.addEventListener("change", () => {
+  postprocessEnabled = elements.postprocessToggle.checked;
+  localStorage.setItem("echoPostprocessEnabled", postprocessEnabled ? "true" : "false");
+  updatePostprocessUi();
+  toast(postprocessEnabled ? "后处理已开启" : "后处理已关闭");
+});
 elements.refineButton.addEventListener("click", refineCurrentText);
 elements.copyButton.addEventListener("click", copyFinalText);
 elements.queueDraftButton.addEventListener("click", queueDraftForCodex);
@@ -95,6 +105,7 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
 }
 
+updatePostprocessUi();
 await bootUserSession();
 updateAuthView();
 if (isLoggedIn() && token) {
@@ -443,6 +454,10 @@ async function completePairing(nextToken) {
 
 async function refineCurrentText() {
   if (!ensurePaired()) return;
+  if (!postprocessEnabled) {
+    toast("后处理已关闭");
+    return;
+  }
 
   const rawText = elements.rawText.value.trim() || elements.finalText.value.trim();
   if (!rawText) {
@@ -452,12 +467,7 @@ async function refineCurrentText() {
 
   setBusy(true, "整理中");
   try {
-    const data = await apiPost("/api/refine", {
-      rawText,
-      mode,
-      contextHint: elements.contextHint.value
-    });
-    applyItem(data.item);
+    await refineDraft(rawText);
     await loadHistory();
     toast("已更新");
   } catch (error) {
@@ -470,7 +480,7 @@ async function refineCurrentText() {
 }
 
 async function copyFinalText() {
-  const text = elements.finalText.value.trim();
+  const text = currentDraftText();
   if (!text) {
     toast("没有可复制的文本");
     return;
@@ -486,16 +496,27 @@ async function copyFinalText() {
 async function queueDraftForCodex() {
   if (!ensurePaired()) return;
 
-  const text = elements.finalText.value.trim() || elements.rawText.value.trim();
-  if (!text) {
+  const rawText = elements.rawText.value.trim();
+  const finalText = elements.finalText.value.trim();
+  if (!rawText && !finalText) {
     toast("没有可加入队列的任务");
     return;
   }
 
-  elements.codexPrompt.value = text;
-  setActiveView("codex", { skipRefresh: true });
-  await refreshCodex();
-  await sendToCodex();
+  setBusy(true, postprocessEnabled && !finalText ? "整理中" : "加入队列中");
+  try {
+    const text = await draftTextForQueue({ rawText, finalText });
+    elements.codexPrompt.value = text;
+    setActiveView("codex", { skipRefresh: true });
+    await refreshCodex();
+    await sendToCodex();
+  } catch (error) {
+    if (!handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
+      toast(error.message);
+    }
+  } finally {
+    setBusy(false);
+  }
 }
 
 async function refreshCodex() {
@@ -543,7 +564,7 @@ function renderCodexStatus(codex) {
 }
 
 function useFinalForCodex() {
-  const text = elements.finalText.value.trim() || elements.rawText.value.trim();
+  const text = currentDraftText();
   if (!text) {
     toast("草稿页还没有可使用的文本");
     return;
@@ -747,11 +768,50 @@ function applyItem(item) {
 }
 
 function setBusy(isBusy, label = "") {
-  for (const button of [elements.refineButton, elements.copyButton, elements.queueDraftButton]) {
-    button.disabled = isBusy;
-  }
+  controlsBusy = isBusy;
+  elements.copyButton.disabled = isBusy;
+  elements.queueDraftButton.disabled = isBusy;
+  updatePostprocessUi();
   if (label) elements.statusText.textContent = label;
   if (!isBusy) refreshStatus();
+}
+
+async function refineDraft(rawText) {
+  const data = await apiPost("/api/refine", {
+    rawText,
+    mode,
+    contextHint: elements.contextHint.value
+  });
+  applyItem(data.item);
+  return data.item;
+}
+
+async function draftTextForQueue({ rawText, finalText }) {
+  if (!postprocessEnabled) return rawText || finalText;
+  if (finalText) return finalText;
+
+  const item = await refineDraft(rawText);
+  await loadHistory();
+  return item.refined || item.raw || rawText;
+}
+
+function currentDraftText() {
+  if (postprocessEnabled) return elements.finalText.value.trim() || elements.rawText.value.trim();
+  return elements.rawText.value.trim() || elements.finalText.value.trim();
+}
+
+function updatePostprocessUi() {
+  elements.postprocessToggle.checked = postprocessEnabled;
+  elements.postprocessLabel.textContent = postprocessEnabled ? "后处理" : "原文";
+  elements.postprocessToggle.closest(".postprocess-toggle")?.classList.toggle("off", !postprocessEnabled);
+  elements.refineButton.disabled = controlsBusy || !postprocessEnabled;
+  elements.contextHint.disabled = controlsBusy || !postprocessEnabled;
+  elements.finalText.disabled = controlsBusy || !postprocessEnabled;
+  for (const button of elements.modes) button.disabled = controlsBusy || !postprocessEnabled;
+  elements.finalText.closest(".pane")?.classList.toggle("muted", !postprocessEnabled);
+  elements.finalText.placeholder = postprocessEnabled
+    ? "整理成任务后，可以在加入队列前继续编辑"
+    : "后处理关闭时，加入队列会发送原始输入";
 }
 
 function authHeaders() {

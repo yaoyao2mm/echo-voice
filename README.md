@@ -5,8 +5,9 @@ Echo Codex is a phone-first control surface for local Codex:
 1. Deploy the public relay server.
 2. Open the paired URL from an Android browser.
 3. Capture a rough idea or Codex task on the phone, including through the phone's native voice input keyboard.
-4. Choose an allowlisted local project.
-5. The desktop agent pulls the task, runs `codex exec --json` locally, and streams progress back to the phone.
+4. Optionally enable phone-side post-processing before queueing the task.
+5. Choose an allowlisted local project.
+6. The desktop agent pulls the task, runs `codex exec --json` locally, and streams progress back to the phone.
 
 The first version is intentionally lightweight: a Node relay, a local desktop agent, and a mobile web/PWA UI. Echo does not own dictation; the phone captures text, the relay can clean or structure it, and the desktop agent runs Codex locally. The longer-term direction is isolated per-task worktrees, so Codex can explore an idea without touching your active checkout until you decide to keep it.
 
@@ -184,6 +185,7 @@ If no post-processing provider is configured, Echo falls back to a conservative 
 The first Codex remote mode is intentionally conservative:
 
 - The phone can submit prompts, but cannot choose arbitrary filesystem paths or shell commands.
+- The phone draft bar has a post-processing switch: when it is on, Echo sends the refined text; when it is off, Echo queues the original input.
 - The phone shows the task queue, current status, latest output, full logs, and final result.
 - The desktop agent only runs `codex exec` inside `ECHO_CODEX_WORKSPACES`.
 - The default sandbox is `workspace-write`.

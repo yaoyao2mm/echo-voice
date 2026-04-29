@@ -371,6 +371,19 @@ textarea:focus {
   box-shadow: none;
 }
 
+.pane.primary.muted {
+  background: var(--surface-subtle);
+}
+
+.pane.primary.muted .pane-title {
+  color: var(--muted-2);
+}
+
+.pane.primary.muted textarea {
+  background: var(--surface-subtle);
+  color: var(--muted);
+}
+
 .actions {
   position: fixed;
   right: 0;
@@ -378,7 +391,7 @@ textarea:focus {
   left: 0;
   z-index: 10;
   display: grid;
-  grid-template-columns: 0.9fr 0.7fr 1fr;
+  grid-template-columns: minmax(116px, 1fr) 0.72fr 0.62fr 0.9fr;
   gap: 8px;
   width: min(820px, 100%);
   margin: 0 auto;
@@ -386,6 +399,71 @@ textarea:focus {
   border-top: 1px solid rgba(226, 229, 233, 0.86);
   background: rgba(250, 250, 250, 0.92);
   backdrop-filter: blur(18px);
+}
+
+.postprocess-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  min-width: 0;
+  min-height: 46px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.postprocess-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.switch-track {
+  position: relative;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: #d7dce3;
+  transition:
+    background 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.switch-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(25, 27, 31, 0.22);
+  transition: transform 160ms ease;
+}
+
+.postprocess-toggle input:checked + .switch-track {
+  background: var(--accent);
+}
+
+.postprocess-toggle input:checked + .switch-track .switch-thumb {
+  transform: translateX(14px);
+}
+
+.postprocess-toggle input:focus-visible + .switch-track {
+  box-shadow: 0 0 0 3px rgba(79, 99, 215, 0.16);
+}
+
+.postprocess-toggle.off {
+  color: var(--muted);
 }
 
 .actions button,
@@ -679,5 +757,37 @@ textarea:focus {
   .pairing-input-row,
   .pairing-actions {
     grid-template-columns: 1fr;
+  }
+
+  .shell {
+    padding-bottom: 126px;
+  }
+
+  .actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-areas:
+      "postprocess postprocess postprocess"
+      "refine copy queue";
+  }
+
+  .postprocess-toggle {
+    grid-area: postprocess;
+    min-height: 38px;
+  }
+
+  #refineButton {
+    grid-area: refine;
+  }
+
+  #copyButton {
+    grid-area: copy;
+  }
+
+  #queueDraftButton {
+    grid-area: queue;
+  }
+
+  .toast {
+    bottom: 116px;
   }
 }
