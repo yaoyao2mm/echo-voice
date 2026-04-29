@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Echo Codex</title>
-    <link rel="manifest" href="/manifest.webmanifest?v=9" />
-    <link rel="stylesheet" href="/styles.css?v=9" />
+    <link rel="manifest" href="/manifest.webmanifest?v=10" />
+    <link rel="stylesheet" href="/styles.css?v=10" />
   </head>
   <body>
     <main class="shell">
@@ -59,69 +59,32 @@
         </div>
       </section>
 
-      <nav id="workspaceTabs" class="workspace-tabs" aria-label="工作区" data-authenticated hidden>
-        <button class="workspace-tab active" data-view="codex" type="button">任务队列</button>
-        <button class="workspace-tab" data-view="compose" type="button">草稿</button>
-        <button class="workspace-tab" data-view="history" type="button">历史</button>
-      </nav>
-
-      <section id="composeView" class="workspace-view compose-view" data-view-panel="compose" data-authenticated hidden>
-        <section class="compose">
-          <div class="mode-row" role="tablist" aria-label="处理模式">
-            <button class="mode active" data-mode="chat" type="button">Codex 任务</button>
-            <button class="mode" data-mode="plan" type="button">执行计划</button>
-            <button class="mode" data-mode="bullet" type="button">结构化要点</button>
-            <button class="mode" data-mode="verbatim" type="button">清理原文</button>
-          </div>
-
-          <label class="field-label" for="contextHint">上下文</label>
-            <textarea id="contextHint" class="context" rows="2" placeholder="例如：这是一个灵感草稿；整理成可执行任务；保留技术名词。"></textarea>
-
-        </section>
-
-        <section class="editor">
-          <div class="pane primary">
-            <div class="pane-title">原始输入</div>
-            <textarea id="rawText" rows="8" placeholder="随手记一个灵感、bug、功能想法或要交给 Codex 的任务。"></textarea>
-          </div>
-          <div class="pane primary">
-            <div class="pane-title">整理后</div>
-            <textarea id="finalText" rows="8" placeholder="整理成任务后，可以在加入队列前继续编辑"></textarea>
-          </div>
-        </section>
-
-        <nav class="actions" aria-label="草稿操作">
-          <label class="postprocess-toggle" for="postprocessToggle">
-            <input id="postprocessToggle" type="checkbox" role="switch" />
-            <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-            <span id="postprocessLabel">后处理</span>
-          </label>
-          <button id="refineButton" class="secondary" type="button">整理</button>
-          <button id="copyButton" class="secondary" type="button">复制</button>
-          <button id="queueDraftButton" class="primary" type="button">加入队列</button>
-        </nav>
-      </section>
-
-      <section id="codexView" class="workspace-view codex-section" data-view-panel="codex" data-authenticated hidden>
-        <div class="section-head">
+      <section id="codexView" class="codex-section" data-authenticated hidden>
+        <div class="status-strip">
           <div>
-            <div class="pane-title">任务队列</div>
-            <p id="codexStatusText">等待桌面 agent</p>
+            <strong id="codexStatusText">等待桌面 agent</strong>
             <p id="codexQueueMeta" class="codex-runtime"></p>
-            <p id="codexRuntimeText" class="codex-runtime"></p>
           </div>
           <button id="refreshCodex" class="icon-button" type="button" title="刷新 Codex" aria-label="刷新 Codex">
             ↻
           </button>
         </div>
-        <label class="field-label" for="codexProject">项目</label>
-        <select id="codexProject" class="select"></select>
-        <label class="field-label" for="codexPrompt">任务</label>
-        <textarea id="codexPrompt" rows="8" placeholder="写下一个想法或任务，加入队列后由本机 Codex 执行。"></textarea>
-        <div class="codex-actions">
-          <button id="useFinalForCodexButton" class="secondary" type="button">使用草稿文本</button>
-          <button id="sendCodexButton" class="codex-submit" type="button">加入任务队列</button>
-        </div>
+
+        <section class="composer">
+          <label class="field-label" for="codexProject">项目</label>
+          <select id="codexProject" class="select"></select>
+          <label class="field-label" for="codexPrompt">任务</label>
+          <textarea id="codexPrompt" rows="9" placeholder="说一个灵感、bug 或要交给 Codex 的任务。"></textarea>
+          <div class="composer-footer">
+            <label class="postprocess-toggle" for="postprocessToggle">
+              <input id="postprocessToggle" type="checkbox" role="switch" />
+              <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+              <span id="postprocessLabel">后处理</span>
+            </label>
+            <button id="sendCodexButton" class="codex-submit" type="button">发送</button>
+          </div>
+        </section>
+
         <div id="codexJobs" class="codex-jobs"></div>
         <section id="codexJobDetail" class="codex-job-detail" hidden>
           <div id="codexRunSummary" class="codex-run-summary"></div>
@@ -131,13 +94,8 @@
           </details>
         </section>
       </section>
-
-      <section id="historyView" class="workspace-view history-section" data-view-panel="history" data-authenticated hidden>
-        <div class="pane-title">最近</div>
-        <div id="history" class="history"></div>
-      </section>
     </main>
 
-    <script src="/app.js?v=9" type="module"></script>
+    <script src="/app.js?v=10" type="module"></script>
   </body>
 </html>

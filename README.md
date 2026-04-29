@@ -187,7 +187,7 @@ If no post-processing provider is configured, Echo falls back to a conservative 
 The first Codex remote mode is intentionally conservative:
 
 - The phone can submit prompts, but cannot choose arbitrary filesystem paths or shell commands.
-- The phone draft bar has a post-processing switch: when it is on, Echo sends the refined text; when it is off, Echo queues the original input.
+- The phone composer has a post-processing switch: when it is on, Echo refines the prompt before queueing; when it is off, Echo sends the original input.
 - The phone shows the task queue, current status, latest output, full logs, and final result.
 - The desktop agent only runs `codex exec` inside `ECHO_CODEX_WORKSPACES`.
 - The default sandbox is `workspace-write`.

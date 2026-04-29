@@ -29,43 +29,27 @@ const elements = {
   stopScanButton: document.querySelector("#stopScanButton"),
   savePairingButton: document.querySelector("#savePairingButton"),
   authenticated: Array.from(document.querySelectorAll("[data-authenticated]")),
-  workspaceTabs: document.querySelector("#workspaceTabs"),
-  viewTabs: Array.from(document.querySelectorAll(".workspace-tab")),
-  viewPanels: Array.from(document.querySelectorAll("[data-view-panel]")),
-  modes: Array.from(document.querySelectorAll(".mode")),
-  contextHint: document.querySelector("#contextHint"),
-  rawText: document.querySelector("#rawText"),
-  finalText: document.querySelector("#finalText"),
-  postprocessToggle: document.querySelector("#postprocessToggle"),
-  postprocessLabel: document.querySelector("#postprocessLabel"),
-  refineButton: document.querySelector("#refineButton"),
-  copyButton: document.querySelector("#copyButton"),
-  queueDraftButton: document.querySelector("#queueDraftButton"),
   codexStatusText: document.querySelector("#codexStatusText"),
   codexQueueMeta: document.querySelector("#codexQueueMeta"),
-  codexRuntimeText: document.querySelector("#codexRuntimeText"),
   refreshCodex: document.querySelector("#refreshCodex"),
   codexProject: document.querySelector("#codexProject"),
   codexPrompt: document.querySelector("#codexPrompt"),
-  useFinalForCodexButton: document.querySelector("#useFinalForCodexButton"),
+  postprocessToggle: document.querySelector("#postprocessToggle"),
+  postprocessLabel: document.querySelector("#postprocessLabel"),
   sendCodexButton: document.querySelector("#sendCodexButton"),
   codexJobs: document.querySelector("#codexJobs"),
   codexJobDetail: document.querySelector("#codexJobDetail"),
   codexRunSummary: document.querySelector("#codexRunSummary"),
-  codexLog: document.querySelector("#codexLog"),
-  history: document.querySelector("#history")
+  codexLog: document.querySelector("#codexLog")
 };
 
-let mode = "chat";
-let serverStatus = null;
 let codexTimer = null;
 let pairingStream = null;
 let pairingScanActive = false;
 let pairingScanBusy = false;
-let activeView = localStorage.getItem("echoActiveView") || "codex";
 let selectedCodexJobId = "";
 let postprocessEnabled = localStorage.getItem("echoPostprocessEnabled") !== "false";
-let controlsBusy = false;
+let composerBusy = false;
 
 elements.loginForm.addEventListener("submit", login);
 elements.logoutButton.addEventListener("click", logout);
@@ -74,32 +58,18 @@ elements.refreshStatus.addEventListener("click", refreshStatus);
 elements.scanPairingButton.addEventListener("click", startPairingScanner);
 elements.stopScanButton.addEventListener("click", stopPairingScanner);
 elements.savePairingButton.addEventListener("click", pairFromInput);
+elements.refreshCodex.addEventListener("click", refreshCodex);
+elements.sendCodexButton.addEventListener("click", sendToCodex);
+elements.codexProject.addEventListener("change", () => {
+  localStorage.setItem("echoCodexProject", elements.codexProject.value);
+  updateComposerAvailability();
+});
 elements.postprocessToggle.addEventListener("change", () => {
   postprocessEnabled = elements.postprocessToggle.checked;
   localStorage.setItem("echoPostprocessEnabled", postprocessEnabled ? "true" : "false");
   updatePostprocessUi();
   toast(postprocessEnabled ? "后处理已开启" : "后处理已关闭");
 });
-elements.refineButton.addEventListener("click", refineCurrentText);
-elements.copyButton.addEventListener("click", copyFinalText);
-elements.queueDraftButton.addEventListener("click", queueDraftForCodex);
-elements.refreshCodex.addEventListener("click", refreshCodex);
-elements.useFinalForCodexButton.addEventListener("click", useFinalForCodex);
-elements.sendCodexButton.addEventListener("click", sendToCodex);
-elements.codexProject.addEventListener("change", () => {
-  localStorage.setItem("echoCodexProject", elements.codexProject.value);
-});
-
-for (const button of elements.viewTabs) {
-  button.addEventListener("click", () => setActiveView(button.dataset.view));
-}
-
-for (const button of elements.modes) {
-  button.addEventListener("click", () => {
-    mode = button.dataset.mode;
-    elements.modes.forEach((item) => item.classList.toggle("active", item === button));
-  });
-}
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/sw.js").catch(() => {});
@@ -134,8 +104,6 @@ async function bootAuthenticated() {
   updateAuthView();
   await refreshStatus({ silentAuthFailure: true });
   if (!token) return;
-  await loadHistory();
-  if (!token) return;
   await refreshCodex();
   if (!codexTimer) codexTimer = window.setInterval(refreshCodex, 3500);
 }
@@ -143,14 +111,16 @@ async function bootAuthenticated() {
 function updateAuthView(message = "") {
   const loggedIn = isLoggedIn();
   const paired = Boolean(token);
+  const showApp = loggedIn && paired;
+
   elements.loginPanel.hidden = loggedIn;
   elements.pairingPanel.hidden = !loggedIn || paired;
   elements.openPairingButton.hidden = !loggedIn || paired;
-  elements.refreshStatus.hidden = !loggedIn || !paired;
+  elements.refreshStatus.hidden = !showApp;
   elements.userBadge.hidden = !loggedIn;
   elements.logoutButton.hidden = !authEnabled || !loggedIn;
   elements.userBadge.textContent = loggedIn ? displayUser(currentUser) : "";
-  for (const node of elements.authenticated) node.hidden = !loggedIn || !paired;
+  for (const node of elements.authenticated) node.hidden = !showApp;
 
   if (!loggedIn) {
     elements.statusText.textContent = "等待登录";
@@ -164,27 +134,7 @@ function updateAuthView(message = "") {
     return;
   }
 
-  setActiveView(activeView, { skipStorage: true, skipRefresh: true });
-}
-
-function setActiveView(view, options = {}) {
-  activeView = ["codex", "compose", "history"].includes(view) ? view : "codex";
-  if (!options.skipStorage) localStorage.setItem("echoActiveView", activeView);
-
-  for (const button of elements.viewTabs) {
-    const selected = button.dataset.view === activeView;
-    button.classList.toggle("active", selected);
-    button.setAttribute("aria-selected", selected ? "true" : "false");
-  }
-
-  const showWorkspace = isLoggedIn() && Boolean(token);
-  for (const panel of elements.viewPanels) {
-    panel.hidden = !showWorkspace || panel.dataset.viewPanel !== activeView;
-  }
-
-  if (!showWorkspace || options.skipRefresh) return;
-  if (activeView === "codex") refreshCodex();
-  if (activeView === "history") loadHistory();
+  if (message) elements.statusText.textContent = message;
 }
 
 async function loadAuthConfig() {
@@ -202,7 +152,7 @@ async function refreshCurrentUser({ silent = false } = {}) {
     const response = await fetch("/api/auth/me", { headers: sessionHeaders() });
     const data = await parseApiResponse(response);
     setCurrentUser(data.user);
-  } catch (error) {
+  } catch {
     enterLogin(silent ? "" : "登录已过期，请重新登录。");
   }
 }
@@ -335,10 +285,8 @@ async function refreshStatus(options = {}) {
 
   try {
     const status = await apiGet("/api/status");
-    serverStatus = status;
-    const refine = status.refine.provider === "none" ? "不整理" : `整理 ${status.refine.provider}`;
-    const codex = status.codex?.agentOnline ? "Codex 在线" : status.mode === "relay" ? "等待桌面 agent" : status.platform;
-    elements.statusText.textContent = `${refine} · ${codex}`;
+    const codexOnline = status.codex?.agentOnline;
+    elements.statusText.textContent = codexOnline ? "Codex 在线" : status.mode === "relay" ? "等待桌面 agent" : status.platform;
     if (status.user) setCurrentUser(status.user, { updateView: false });
     if (status.codex) renderCodexStatus(status.codex);
   } catch (error) {
@@ -452,73 +400,6 @@ async function completePairing(nextToken) {
   if (token) toast("配对成功");
 }
 
-async function refineCurrentText() {
-  if (!ensurePaired()) return;
-  if (!postprocessEnabled) {
-    toast("后处理已关闭");
-    return;
-  }
-
-  const rawText = elements.rawText.value.trim() || elements.finalText.value.trim();
-  if (!rawText) {
-    toast("没有可整理的文本");
-    return;
-  }
-
-  setBusy(true, "整理中");
-  try {
-    await refineDraft(rawText);
-    await loadHistory();
-    toast("已更新");
-  } catch (error) {
-    if (!handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
-      toast(error.message);
-    }
-  } finally {
-    setBusy(false);
-  }
-}
-
-async function copyFinalText() {
-  const text = currentDraftText();
-  if (!text) {
-    toast("没有可复制的文本");
-    return;
-  }
-  try {
-    await navigator.clipboard.writeText(text);
-    toast("已复制");
-  } catch (error) {
-    toast(error.message || "复制失败，请手动选择文本复制");
-  }
-}
-
-async function queueDraftForCodex() {
-  if (!ensurePaired()) return;
-
-  const rawText = elements.rawText.value.trim();
-  const finalText = elements.finalText.value.trim();
-  if (!rawText && !finalText) {
-    toast("没有可加入队列的任务");
-    return;
-  }
-
-  setBusy(true, postprocessEnabled && !finalText ? "整理中" : "加入队列中");
-  try {
-    const text = await draftTextForQueue({ rawText, finalText });
-    elements.codexPrompt.value = text;
-    setActiveView("codex", { skipRefresh: true });
-    await refreshCodex();
-    await sendToCodex();
-  } catch (error) {
-    if (!handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
-      toast(error.message);
-    }
-  } finally {
-    setBusy(false);
-  }
-}
-
 async function refreshCodex() {
   if (!isLoggedIn() || !token) return;
 
@@ -529,63 +410,49 @@ async function refreshCodex() {
   } catch (error) {
     if (handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) return;
     elements.codexStatusText.textContent = "Codex 未连接";
+    elements.codexQueueMeta.textContent = "";
     elements.codexProject.innerHTML = "";
-    elements.sendCodexButton.disabled = true;
+    updateComposerAvailability();
     if (error.message && !error.message.includes("relay mode")) toast(error.message);
   }
 }
 
 function renderCodexStatus(codex) {
   const workspaces = codex.workspaces || [];
-  elements.codexStatusText.textContent = codex.agentOnline
-    ? `桌面 agent 在线 · ${workspaces.length} 个项目`
-    : "等待桌面 agent";
-  elements.codexQueueMeta.textContent = `排队 ${codex.queued || 0} · 运行 ${codex.running || 0} · 最近 ${
-    codex.recent?.length || 0
-  }`;
-  const runtime = codex.runtime || {};
-  elements.codexRuntimeText.textContent = codex.agentOnline
-    ? `${runtime.command || "codex"} · ${runtime.model || "Codex 默认模型"} · ${runtime.sandbox || "workspace-write"}`
-    : "请先启动桌面端";
+  elements.codexStatusText.textContent = codex.agentOnline ? "本机 Codex 在线" : "等待桌面 agent";
+  elements.codexQueueMeta.textContent = codex.agentOnline
+    ? `排队 ${codex.queued || 0} · 运行 ${codex.running || 0} · 项目 ${workspaces.length}`
+    : "打开桌面端后自动同步";
 
   const selected = localStorage.getItem("echoCodexProject") || elements.codexProject.value;
   elements.codexProject.innerHTML = "";
   if (!workspaces.length) {
     const option = document.createElement("option");
     option.value = "";
-    option.textContent = codex.agentOnline ? "还没有授权工程目录" : "等待桌面 agent 发布工程目录";
+    option.textContent = codex.agentOnline ? "还没有授权工程目录" : "等待桌面 agent";
     elements.codexProject.append(option);
   }
   for (const workspace of workspaces) {
     const option = document.createElement("option");
     option.value = workspace.id;
-    option.textContent = `${workspace.label} · ${workspace.path}`;
+    option.textContent = workspace.label || workspace.id || workspace.path;
+    option.title = workspace.path || "";
     option.selected = workspace.id === selected;
     elements.codexProject.append(option);
   }
   if (elements.codexProject.value) {
     localStorage.setItem("echoCodexProject", elements.codexProject.value);
   }
-  elements.sendCodexButton.disabled = !elements.codexProject.value;
-}
-
-function useFinalForCodex() {
-  const text = currentDraftText();
-  if (!text) {
-    toast("草稿页还没有可使用的文本");
-    return;
-  }
-  elements.codexPrompt.value = text;
-  toast("已填入 Codex 任务");
+  updateComposerAvailability();
 }
 
 async function sendToCodex() {
   if (!ensurePaired()) return;
 
-  const prompt = elements.codexPrompt.value.trim();
+  const rawPrompt = elements.codexPrompt.value.trim();
   const projectId = elements.codexProject.value;
-  if (!prompt) {
-    toast("请先填写 Codex 任务");
+  if (!rawPrompt) {
+    toast("请先填写任务");
     return;
   }
   if (!projectId) {
@@ -594,21 +461,49 @@ async function sendToCodex() {
   }
 
   localStorage.setItem("echoCodexProject", projectId);
-  elements.sendCodexButton.disabled = true;
+  setComposerBusy(true, postprocessEnabled ? "整理中" : "发送中");
   try {
+    const prompt = postprocessEnabled ? await refinePromptForCodex(rawPrompt) : rawPrompt;
+    setComposerBusy(true, "发送中");
     const data = await apiPost("/api/codex/jobs", { projectId, prompt });
     selectedCodexJobId = data.job.id;
-    toast("已加入任务队列");
-    setActiveView("codex", { skipRefresh: true });
+    elements.codexPrompt.value = "";
+    toast("已发送");
     await loadCodexJobs();
     await showCodexJob(data.job.id);
+    await refreshStatus({ silentAuthFailure: true });
   } catch (error) {
     if (!handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
       toast(error.message);
     }
   } finally {
-    elements.sendCodexButton.disabled = !elements.codexProject.value;
+    setComposerBusy(false);
   }
+}
+
+async function refinePromptForCodex(rawText) {
+  const data = await apiPost("/api/refine", {
+    rawText,
+    mode: "chat",
+    contextHint: "手机端 Codex 任务输入"
+  });
+  const refined = String(data.item?.refined || data.item?.raw || rawText).trim();
+  if (refined) elements.codexPrompt.value = refined;
+  return refined || rawText;
+}
+
+function setComposerBusy(isBusy, label = "") {
+  composerBusy = isBusy;
+  if (label) elements.statusText.textContent = label;
+  updateComposerAvailability();
+  if (!isBusy) refreshStatus({ silentAuthFailure: true });
+}
+
+function updateComposerAvailability() {
+  const hasProject = Boolean(elements.codexProject.value);
+  elements.sendCodexButton.disabled = composerBusy || !hasProject;
+  elements.codexProject.disabled = composerBusy;
+  elements.codexPrompt.disabled = composerBusy;
 }
 
 async function loadCodexJobs() {
@@ -743,81 +638,10 @@ function humanizeCodexError(error) {
   return text;
 }
 
-async function loadHistory() {
-  if (!isLoggedIn() || !token) return;
-
-  try {
-    const data = await apiGet("/api/history");
-    elements.history.innerHTML = "";
-    for (const item of data.items.slice(0, 8)) {
-      const wrapper = document.createElement("div");
-      wrapper.className = "history-item";
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = item.refined || item.raw || "";
-      button.addEventListener("click", () => {
-        applyItem(item);
-        setActiveView("compose");
-      });
-      wrapper.append(button);
-      elements.history.append(wrapper);
-    }
-  } catch (error) {
-    handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。");
-    elements.history.innerHTML = "";
-  }
-}
-
-function applyItem(item) {
-  elements.rawText.value = item.raw || "";
-  elements.finalText.value = item.refined || "";
-}
-
-function setBusy(isBusy, label = "") {
-  controlsBusy = isBusy;
-  elements.copyButton.disabled = isBusy;
-  elements.queueDraftButton.disabled = isBusy;
-  updatePostprocessUi();
-  if (label) elements.statusText.textContent = label;
-  if (!isBusy) refreshStatus();
-}
-
-async function refineDraft(rawText) {
-  const data = await apiPost("/api/refine", {
-    rawText,
-    mode,
-    contextHint: elements.contextHint.value
-  });
-  applyItem(data.item);
-  return data.item;
-}
-
-async function draftTextForQueue({ rawText, finalText }) {
-  if (!postprocessEnabled) return rawText || finalText;
-  if (finalText) return finalText;
-
-  const item = await refineDraft(rawText);
-  await loadHistory();
-  return item.refined || item.raw || rawText;
-}
-
-function currentDraftText() {
-  if (postprocessEnabled) return elements.finalText.value.trim() || elements.rawText.value.trim();
-  return elements.rawText.value.trim() || elements.finalText.value.trim();
-}
-
 function updatePostprocessUi() {
   elements.postprocessToggle.checked = postprocessEnabled;
   elements.postprocessLabel.textContent = postprocessEnabled ? "后处理" : "原文";
   elements.postprocessToggle.closest(".postprocess-toggle")?.classList.toggle("off", !postprocessEnabled);
-  elements.refineButton.disabled = controlsBusy || !postprocessEnabled;
-  elements.contextHint.disabled = controlsBusy || !postprocessEnabled;
-  elements.finalText.disabled = controlsBusy || !postprocessEnabled;
-  for (const button of elements.modes) button.disabled = controlsBusy || !postprocessEnabled;
-  elements.finalText.closest(".pane")?.classList.toggle("muted", !postprocessEnabled);
-  elements.finalText.placeholder = postprocessEnabled
-    ? "整理成任务后，可以在加入队列前继续编辑"
-    : "后处理关闭时，加入队列会发送原始输入";
 }
 
 function authHeaders() {
