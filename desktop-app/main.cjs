@@ -25,12 +25,12 @@ let stderrBuffer = "";
 let tray = null;
 let isQuitting = false;
 
-app.setName("Echo Voice");
+app.setName("Echo Codex");
 logApp(`starting root=${rootDir}`);
 
 process.on("uncaughtException", (error) => {
   logApp(`uncaughtException ${error.stack || error.message}`);
-  dialog.showErrorBox("Echo Voice crashed", error.message);
+  dialog.showErrorBox("Echo Codex crashed", error.message);
 });
 
 process.on("unhandledRejection", (error) => {
@@ -123,7 +123,7 @@ function startSettingsServer() {
     logApp(`settings service exited code=${code ?? "unknown"}`);
     if (!settingsUrl) {
       dialog.showErrorBox(
-        "Echo Voice could not start",
+        "Echo Codex could not start",
         `The local settings service exited with code ${code ?? "unknown"}.\n\n${stderrBuffer.slice(-2000)}`
       );
       app.quit();
@@ -149,7 +149,7 @@ function openSettingsWindow(url) {
     height: 760,
     minWidth: 940,
     minHeight: 620,
-    title: "Echo Voice",
+    title: "Echo Codex",
     backgroundColor: "#f6f7f8",
     webPreferences: {
       contextIsolation: true,
@@ -174,14 +174,14 @@ function openSettingsWindow(url) {
 
 function createTray() {
   tray = new Tray(createTrayIcon());
-  tray.setToolTip("Echo Voice");
+  tray.setToolTip("Echo Codex");
   refreshTray();
   tray.on("click", () => showSettings());
 }
 
 function refreshTray() {
   if (!tray) return;
-  tray.setToolTip(`Echo Voice · ${agentStatusLabel()}`);
+  tray.setToolTip(`Echo Codex · ${agentStatusLabel()}`);
   tray.setContextMenu(buildTrayMenu());
 }
 
@@ -234,10 +234,6 @@ function buildTrayMenu() {
     {
       label: "LaunchAgent: Restart",
       click: () => runAgentCommand("restart")
-    },
-    {
-      label: "Paste Helper Permission",
-      click: () => runAgentCommand("paste-helper")
     },
     {
       label: "Network Doctor",
@@ -293,14 +289,14 @@ function startAppAgent({ userInitiated = false } = {}) {
     stdio: ["ignore", "pipe", "pipe"]
   });
 
-  out.write(`\n[${new Date().toISOString()}] Echo Voice app agent starting\n`);
+  out.write(`\n[${new Date().toISOString()}] Echo Codex app agent starting\n`);
   logApp(`app agent started pid=${appAgentProcess.pid}`);
   appAgentProcess.stdout.pipe(out);
   appAgentProcess.stderr.pipe(err);
   refreshTray();
 
   appAgentProcess.on("exit", (code, signal) => {
-    out.write(`\n[${new Date().toISOString()}] Echo Voice app agent exited code=${code ?? ""} signal=${signal ?? ""}\n`);
+    out.write(`\n[${new Date().toISOString()}] Echo Codex app agent exited code=${code ?? ""} signal=${signal ?? ""}\n`);
     appAgentProcess = null;
     refreshTray();
     if (!isQuitting && appAgentWanted) {
@@ -425,7 +421,7 @@ function createTrayIcon() {
 function createMenu() {
   const template = [
     {
-      label: "Echo Voice",
+      label: "Echo Codex",
       submenu: [
         {
           label: "Show Settings",

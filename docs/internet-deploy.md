@@ -1,9 +1,9 @@
 # Internet Deployment
 
-Echo Voice internet mode has two processes:
+Echo Codex internet mode has two processes:
 
-- Relay server on your VPS/domain: hosts the phone PWA, runs STT/refinement, and queues insert jobs.
-- Desktop agent on your computer: polls the relay over HTTPS and pastes queued text into the active cursor.
+- Relay server on your VPS/domain: hosts the phone PWA, runs prompt refinement, and queues Codex jobs.
+- Desktop agent on your computer: polls the relay over HTTPS and runs queued Codex jobs inside allowlisted local workspaces.
 
 The server does not need inbound access to your computer.
 
@@ -17,10 +17,6 @@ ECHO_HOST=127.0.0.1
 ECHO_PORT=3888
 ECHO_PUBLIC_URL=https://voice.example.com
 ECHO_TOKEN=replace-with-a-long-random-secret
-
-STT_PROVIDER=openai
-OPENAI_API_KEY=sk-...
-OPENAI_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
 
 POSTPROCESS_PROVIDER=openai
 LLM_API_KEY=sk-...
@@ -64,7 +60,7 @@ Example service at `/etc/systemd/system/echo-voice.service`:
 
 ```ini
 [Unit]
-Description=Echo Voice Relay
+Description=Echo Codex Relay
 After=network.target
 
 [Service]
@@ -89,13 +85,11 @@ sudo systemctl status echo-voice
 
 ## 4. Desktop Agent
 
-On the computer that should receive text:
+On the computer that should run local Codex:
 
 ```bash
 ECHO_RELAY_URL=https://voice.example.com ECHO_TOKEN=replace-with-a-long-random-secret npm run desktop
 ```
-
-macOS requires Accessibility permission for the terminal or packaged app so it can send `Cmd+V`.
 
 To allow mobile control of local Codex, add an explicit workspace allowlist:
 
@@ -107,6 +101,12 @@ npm run desktop
 ```
 
 The phone can only choose these workspace ids; it cannot send arbitrary paths or shell commands.
+
+Codex remote jobs are persisted on the relay in `~/.echo-voice/echo.sqlite`. The desktop agent
+registers a stable local agent id and leases each job before running it. Event and completion
+updates renew that lease. While a long Codex task is running, the desktop agent also sends quiet
+lease heartbeats. If the relay stops seeing updates for `ECHO_CODEX_LEASE_MS`, the job is returned
+to the queue for recovery.
 
 If you usually work with a VPN enabled, prefer relay mode and let the desktop agent follow the system proxy:
 
@@ -132,12 +132,13 @@ Open:
 https://voice.example.com/?token=replace-with-a-long-random-secret
 ```
 
-HTTPS is required for Android microphone access. The token is your pairing secret, so keep it long and private.
+HTTPS is required for browser camera-based QR pairing. The token is your pairing secret, so keep it long and private.
 
 ## Security Notes
 
 - Use HTTPS only in internet mode.
-- Use a long random `ECHO_TOKEN`; anyone with it can submit text to your desktop queue.
-- The relay server receives audio, transcripts, and refined text. Put the relay on infrastructure you trust.
+- Use a long random `ECHO_TOKEN`; anyone with it can submit Codex jobs to your desktop queue.
+- The relay server receives prompts, refined text, Codex logs, and final results. Put the relay on infrastructure you trust.
 - Codex remote jobs run locally on the desktop agent inside `ECHO_CODEX_WORKSPACES`; keep that allowlist narrow.
+- Back up or intentionally prune `~/.echo-voice/echo.sqlite` if you rely on relay-side job history.
 - For multi-user support later, replace the single token with per-device accounts and encrypted queue storage.

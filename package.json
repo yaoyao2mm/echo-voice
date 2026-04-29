@@ -1,7 +1,7 @@
 {
   "name": "echo-voice",
   "version": "0.1.0",
-  "description": "Phone-first voice input bridge with transcription, refinement, and desktop cursor insertion.",
+  "description": "Mobile control surface for running local Codex tasks through a relay.",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -30,9 +30,9 @@
     "node": ">=20"
   },
   "dependencies": {
+    "better-sqlite3": "^12.9.0",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "multer": "^2.0.2",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
     "undici": "^6.25.0"

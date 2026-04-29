@@ -34,14 +34,13 @@ const elements = {
   viewPanels: Array.from(document.querySelectorAll("[data-view-panel]")),
   modes: Array.from(document.querySelectorAll(".mode")),
   contextHint: document.querySelector("#contextHint"),
-  recordButton: document.querySelector("#recordButton"),
-  recordLabel: document.querySelector("#recordLabel"),
   rawText: document.querySelector("#rawText"),
   finalText: document.querySelector("#finalText"),
   refineButton: document.querySelector("#refineButton"),
   copyButton: document.querySelector("#copyButton"),
-  sendButton: document.querySelector("#sendButton"),
+  queueDraftButton: document.querySelector("#queueDraftButton"),
   codexStatusText: document.querySelector("#codexStatusText"),
+  codexQueueMeta: document.querySelector("#codexQueueMeta"),
   codexRuntimeText: document.querySelector("#codexRuntimeText"),
   refreshCodex: document.querySelector("#refreshCodex"),
   codexProject: document.querySelector("#codexProject"),
@@ -56,19 +55,12 @@ const elements = {
 };
 
 let mode = "chat";
-let mediaRecorder = null;
-let chunks = [];
-let recordingStartedAt = 0;
 let serverStatus = null;
-let recognition = null;
-let browserSpeechActive = false;
-let browserSpeechFinalText = "";
-let recognitionStopRequested = false;
 let codexTimer = null;
 let pairingStream = null;
 let pairingScanActive = false;
 let pairingScanBusy = false;
-let activeView = localStorage.getItem("echoActiveView") || "compose";
+let activeView = localStorage.getItem("echoActiveView") || "codex";
 let selectedCodexJobId = "";
 
 elements.loginForm.addEventListener("submit", login);
@@ -78,10 +70,9 @@ elements.refreshStatus.addEventListener("click", refreshStatus);
 elements.scanPairingButton.addEventListener("click", startPairingScanner);
 elements.stopScanButton.addEventListener("click", stopPairingScanner);
 elements.savePairingButton.addEventListener("click", pairFromInput);
-elements.recordButton.addEventListener("click", toggleRecording);
 elements.refineButton.addEventListener("click", refineCurrentText);
 elements.copyButton.addEventListener("click", copyFinalText);
-elements.sendButton.addEventListener("click", sendToCursor);
+elements.queueDraftButton.addEventListener("click", queueDraftForCodex);
 elements.refreshCodex.addEventListener("click", refreshCodex);
 elements.useFinalForCodexButton.addEventListener("click", useFinalForCodex);
 elements.sendCodexButton.addEventListener("click", sendToCodex);
@@ -166,7 +157,7 @@ function updateAuthView(message = "") {
 }
 
 function setActiveView(view, options = {}) {
-  activeView = ["compose", "codex", "history"].includes(view) ? view : "compose";
+  activeView = ["codex", "compose", "history"].includes(view) ? view : "codex";
   if (!options.skipStorage) localStorage.setItem("echoActiveView", activeView);
 
   for (const button of elements.viewTabs) {
@@ -334,15 +325,9 @@ async function refreshStatus(options = {}) {
   try {
     const status = await apiGet("/api/status");
     serverStatus = status;
-    const stt = status.stt.provider === "none" ? "未配置转写" : `转写 ${status.stt.provider}`;
-    const effectiveStt = status.stt.provider === "none" && supportsBrowserSpeechRecognition() ? "浏览器转写" : stt;
     const refine = status.refine.provider === "none" ? "不整理" : `整理 ${status.refine.provider}`;
-    const relay = status.mode === "relay"
-      ? status.relay?.desktopOnline
-        ? "桌面在线"
-        : "桌面离线"
-      : status.platform;
-    elements.statusText.textContent = `${effectiveStt} · ${refine} · ${relay}`;
+    const codex = status.codex?.agentOnline ? "Codex 在线" : status.mode === "relay" ? "等待桌面 agent" : status.platform;
+    elements.statusText.textContent = `${refine} · ${codex}`;
     if (status.user) setCurrentUser(status.user);
     if (status.codex) renderCodexStatus(status.codex);
   } catch (error) {
@@ -456,148 +441,6 @@ async function completePairing(nextToken) {
   if (token) toast("配对成功");
 }
 
-async function toggleRecording() {
-  if (!ensurePaired()) return;
-
-  if (mediaRecorder?.state === "recording") {
-    mediaRecorder.stop();
-    return;
-  }
-
-  if (!window.isSecureContext) {
-    toast("手机录音需要 HTTPS，或通过 adb reverse 打开 localhost URL");
-    return;
-  }
-
-  if (shouldUseBrowserSpeech()) {
-    toggleBrowserSpeech();
-    return;
-  }
-
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    const mimeType = bestMimeType();
-    mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-    chunks = [];
-
-    mediaRecorder.addEventListener("dataavailable", (event) => {
-      if (event.data.size > 0) chunks.push(event.data);
-    });
-
-    mediaRecorder.addEventListener("stop", async () => {
-      stream.getTracks().forEach((track) => track.stop());
-      setRecording(false);
-      const blob = new Blob(chunks, { type: mediaRecorder.mimeType || "audio/webm" });
-      await submitAudio(blob);
-    });
-
-    recordingStartedAt = Date.now();
-    mediaRecorder.start();
-    setRecording(true);
-  } catch (error) {
-    toast(error.message);
-  }
-}
-
-function shouldUseBrowserSpeech() {
-  return serverStatus?.stt?.provider === "none" && supportsBrowserSpeechRecognition();
-}
-
-function supportsBrowserSpeechRecognition() {
-  return Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
-}
-
-function toggleBrowserSpeech() {
-  if (browserSpeechActive) {
-    recognitionStopRequested = true;
-    recognition?.stop();
-    return;
-  }
-
-  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  recognition = new Recognition();
-  recognition.lang = "zh-CN";
-  recognition.continuous = true;
-  recognition.interimResults = true;
-  browserSpeechFinalText = elements.rawText.value.trim();
-  recognitionStopRequested = false;
-
-  recognition.onstart = () => {
-    browserSpeechActive = true;
-    recordingStartedAt = Date.now();
-    setRecording(true);
-  };
-
-  recognition.onresult = (event) => {
-    let interim = "";
-    for (let index = event.resultIndex; index < event.results.length; index += 1) {
-      const transcript = event.results[index][0]?.transcript || "";
-      if (event.results[index].isFinal) {
-        browserSpeechFinalText = `${browserSpeechFinalText}${transcript}`.trim();
-      } else {
-        interim += transcript;
-      }
-    }
-    elements.rawText.value = [browserSpeechFinalText, interim].filter(Boolean).join("\n");
-  };
-
-  recognition.onerror = (event) => {
-    toast(event.error || "浏览器转写失败");
-  };
-
-  recognition.onend = async () => {
-    browserSpeechActive = false;
-    setRecording(false);
-    const raw = browserSpeechFinalText.trim() || elements.rawText.value.trim();
-    if (recognitionStopRequested && raw) {
-      elements.rawText.value = raw;
-      await refineCurrentText();
-    }
-  };
-
-  recognition.start();
-}
-
-function setRecording(isRecording) {
-  elements.recordButton.classList.toggle("recording", isRecording);
-  elements.recordLabel.textContent = isRecording ? "再次按下结束" : "按下说话";
-}
-
-async function submitAudio(blob) {
-  if (!ensurePaired()) return;
-
-  const seconds = Math.round((Date.now() - recordingStartedAt) / 1000);
-  if (seconds < 1 || blob.size < 1024) {
-    toast("录音太短");
-    return;
-  }
-
-  setBusy(true, "转写中");
-
-  try {
-    const form = new FormData();
-    form.append("audio", blob, filenameFor(blob.type));
-    form.append("mode", mode);
-    form.append("contextHint", elements.contextHint.value);
-
-    const response = await fetch("/api/transcribe", {
-      method: "POST",
-      headers: authHeaders(),
-      body: form
-    });
-    const data = await parseApiResponse(response);
-    applyItem(data.item);
-    await loadHistory();
-    toast("已整理");
-  } catch (error) {
-    if (!handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
-      toast(error.message);
-    }
-  } finally {
-    setBusy(false);
-  }
-}
-
 async function refineCurrentText() {
   if (!ensurePaired()) return;
 
@@ -636,26 +479,18 @@ async function copyFinalText() {
   toast("已复制");
 }
 
-async function sendToCursor() {
+async function queueDraftForCodex() {
   if (!ensurePaired()) return;
 
-  const text = elements.finalText.value.trim();
+  const text = elements.finalText.value.trim() || elements.rawText.value.trim();
   if (!text) {
-    toast("没有可发送的文本");
+    toast("没有可加入队列的任务");
     return;
   }
 
-  setBusy(true, "发送中");
-  try {
-    const result = await apiPost("/api/insert", { text });
-    toast(result.message || "已发送");
-  } catch (error) {
-    if (!handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
-      toast(error.message);
-    }
-  } finally {
-    setBusy(false);
-  }
+  elements.codexPrompt.value = text;
+  setActiveView("codex");
+  await sendToCodex();
 }
 
 async function refreshCodex() {
@@ -678,6 +513,9 @@ function renderCodexStatus(codex) {
   elements.codexStatusText.textContent = codex.agentOnline
     ? `桌面 agent 在线 · ${workspaces.length} 个项目`
     : "等待桌面 agent";
+  elements.codexQueueMeta.textContent = `排队 ${codex.queued || 0} · 运行 ${codex.running || 0} · 最近 ${
+    codex.recent?.length || 0
+  }`;
   const runtime = codex.runtime || {};
   elements.codexRuntimeText.textContent = codex.agentOnline
     ? `${runtime.command || "codex"} · ${runtime.model || "Codex 默认模型"} · ${runtime.sandbox || "workspace-write"}`
@@ -695,13 +533,13 @@ function renderCodexStatus(codex) {
   if (elements.codexProject.value) {
     localStorage.setItem("echoCodexProject", elements.codexProject.value);
   }
-  elements.sendCodexButton.disabled = !codex.agentOnline || !elements.codexProject.value;
+  elements.sendCodexButton.disabled = !elements.codexProject.value;
 }
 
 function useFinalForCodex() {
   const text = elements.finalText.value.trim() || elements.rawText.value.trim();
   if (!text) {
-    toast("输入页还没有可使用的文本");
+    toast("草稿页还没有可使用的文本");
     return;
   }
   elements.codexPrompt.value = text;
@@ -726,7 +564,9 @@ async function sendToCodex() {
   elements.sendCodexButton.disabled = true;
   try {
     const data = await apiPost("/api/codex/jobs", { projectId, prompt });
-    toast("已交给本机 Codex");
+    selectedCodexJobId = data.job.id;
+    toast("已加入任务队列");
+    setActiveView("codex");
     await loadCodexJobs();
     await showCodexJob(data.job.id);
   } catch (error) {
@@ -743,7 +583,7 @@ async function loadCodexJobs() {
   const jobs = data.items.slice(0, 8);
   elements.codexJobs.innerHTML = "";
   if (jobs.length === 0) {
-    elements.codexJobs.innerHTML = `<div class="empty-state">还没有 Codex 任务</div>`;
+    elements.codexJobs.innerHTML = `<div class="empty-state">任务队列为空</div>`;
     elements.codexJobDetail.hidden = true;
     return;
   }
@@ -777,7 +617,9 @@ function statusLabel(status) {
     queued: "排队中",
     running: "运行中",
     completed: "已完成",
-    failed: "失败"
+    failed: "失败",
+    cancelled: "已取消",
+    stale: "已过期"
   }[status] || status || "未知";
 }
 
@@ -791,6 +633,7 @@ async function showCodexJob(id, options = {}) {
   const data = await apiGet(`/api/codex/jobs/${encodeURIComponent(id)}`);
   const job = data.job;
   const errorText = humanizeCodexError(job.error);
+  const output = jobOutput(job, errorText);
   elements.codexJobDetail.hidden = false;
   elements.codexRunSummary.innerHTML = `
     <div class="run-summary-head">
@@ -798,9 +641,10 @@ async function showCodexJob(id, options = {}) {
       <strong>${escapeHtml(job.projectId)}</strong>
       <span>${escapeHtml(formatRelativeTime(job.completedAt || job.startedAt || job.createdAt))}</span>
     </div>
+    <div class="run-block-title">任务</div>
     <div class="run-prompt">${escapeHtml(job.prompt || "")}</div>
-    ${errorText ? `<div class="run-error">${escapeHtml(errorText)}</div>` : ""}
-    ${job.finalMessage ? `<div class="run-final">${escapeHtml(job.finalMessage)}</div>` : ""}
+    <div class="run-block-title">输出</div>
+    <div class="${escapeHtml(output.className)}">${escapeHtml(output.text)}</div>
   `;
   const lines = [
     `# ${job.status} · ${job.projectId}`,
@@ -810,6 +654,29 @@ async function showCodexJob(id, options = {}) {
     ...(job.events || []).slice(-80).map((event) => `${event.at || ""} ${event.type || ""}\n${event.text || ""}`)
   ].filter(Boolean);
   elements.codexLog.textContent = lines.join("\n\n");
+}
+
+function jobOutput(job, errorText = "") {
+  if (errorText) return { className: "run-error", text: errorText };
+  if (job.finalMessage) return { className: "run-final", text: job.finalMessage };
+
+  const event = latestVisibleEvent(job.events || []);
+  if (event?.text) return { className: "run-output", text: event.text };
+
+  if (job.status === "queued") {
+    return { className: "run-output muted", text: "已进入队列，等待桌面 agent 领取。" };
+  }
+  if (job.status === "running") {
+    return { className: "run-output muted", text: "桌面 Codex 正在运行，输出会自动刷新到这里。" };
+  }
+  return { className: "run-output muted", text: "暂无输出。" };
+}
+
+function latestVisibleEvent(events) {
+  return [...events].reverse().find((event) => {
+    if (!event?.text) return false;
+    return !["lease.acquired", "lease.expired", "job.completed", "job.failed"].includes(event.type);
+  });
 }
 
 function jobPreview(job) {
@@ -874,7 +741,7 @@ function applyItem(item) {
 }
 
 function setBusy(isBusy, label = "") {
-  for (const button of [elements.recordButton, elements.refineButton, elements.copyButton, elements.sendButton]) {
+  for (const button of [elements.refineButton, elements.copyButton, elements.queueDraftButton]) {
     button.disabled = isBusy;
   }
   if (label) elements.statusText.textContent = label;
@@ -933,17 +800,6 @@ async function parseApiResponse(response) {
     throw error;
   }
   return data;
-}
-
-function bestMimeType() {
-  const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
-  return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) || "";
-}
-
-function filenameFor(mimeType) {
-  if (mimeType.includes("ogg")) return "recording.ogg";
-  if (mimeType.includes("mp4")) return "recording.m4a";
-  return "recording.webm";
 }
 
 function toast(message) {

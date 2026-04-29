@@ -2,7 +2,9 @@
 
 ## Summary
 
-Echo evolves from a voice-to-cursor bridge into a mobile control surface for local engineering work. The phone is the intent capture and review surface; the desktop agent is the only process allowed to touch local repositories.
+Echo is a mobile control surface for local engineering work. The phone is the idea capture and review surface; the desktop agent is the only process allowed to touch local repositories.
+
+See [Mobile Codex Remote Roadmap](mobile-codex-roadmap.md) for the detailed implementation path.
 
 ## Phase 1: One-Shot Local Codex Tasks
 
@@ -14,12 +16,20 @@ Echo evolves from a voice-to-cursor bridge into a mobile control surface for loc
 
 ## Phase 2: Better Mobile Workflow
 
+- Treat the phone composer as an idea inbox: rough thoughts become structured Codex tasks.
 - Add task templates: bug fix, implement feature, review PR, write tests, explain code.
 - Add project context snippets and per-project preferences before sending to Codex.
 - Add explicit controls for stop/retry/follow-up.
 - Add change summaries by reading `git status` and `git diff --stat` after a task.
 
-## Phase 3: Interactive Session
+## Phase 3: Isolated Worktrees
+
+- Let the desktop agent create a per-job Git worktree under a controlled local directory.
+- Run Codex in that isolated worktree instead of the user's active checkout.
+- Track branch, worktree path, base commit, changed files, and diff stat on the job.
+- Let the phone continue, apply/merge, or discard the worktree result.
+
+## Phase 4: Interactive Session
 
 - Use Codex `app-server` or `exec-server` to support real interactive sessions.
 - Stream structured events instead of polling static logs.
@@ -30,4 +40,4 @@ Echo evolves from a voice-to-cursor bridge into a mobile control surface for loc
 
 - The desktop agent runs on the machine with the real working tree and Codex login.
 - The public relay is trusted to store prompts and logs.
-- The phone already has good voice input, so Echo does not need to own ASR.
+- The phone already has good native dictation, so Echo only receives text.

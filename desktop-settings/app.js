@@ -117,21 +117,6 @@ function renderHealth(health) {
       ]
     },
     {
-      title: "Accessibility",
-      ok: health.accessibility?.ok,
-      status: health.accessibility?.status || "unknown",
-      detail: health.accessibility?.detail || "",
-      actions: [
-        { label: "Open Settings", path: "/api/system/open", body: { target: "accessibility" }, pending: "Opening Accessibility settings..." }
-      ]
-    },
-    {
-      title: "Clipboard",
-      ok: health.clipboard?.ok,
-      status: health.clipboard?.status || "unknown",
-      detail: health.clipboard?.path || health.clipboard?.detail || ""
-    },
-    {
       title: "Codex CLI",
       ok: health.codex?.ok,
       status: health.codex?.status || "unknown",

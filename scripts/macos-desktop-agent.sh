@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_NAME="Echo Voice Desktop Agent"
+APP_NAME="Echo Codex Desktop Agent"
 LABEL="xyz.554119401.echo.desktop-agent"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_DIR="$ROOT_DIR/dist/Echo Voice.app"
+APP_DIR="$ROOT_DIR/dist/Echo Codex.app"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$HOME/Library/Logs/EchoVoice"
 OUT_LOG="$LOG_DIR/desktop-agent.out.log"
@@ -25,10 +25,8 @@ Commands:
   restart     Restart the desktop agent
   status      Show launchd status and recent logs
   logs        Follow desktop agent logs
-  app         Build/open Echo Voice.app, which can manage the app agent itself
+  app         Build/open Echo Codex.app, which can manage the app agent itself
   settings    Open the local desktop settings page
-  paste-helper
-              Install/check the stable macOS paste helper and open permissions if needed
   doctor      Check relay reachability through the same network/proxy settings
   uninstall   Stop and remove the launchd service
   print-env   Print loaded desktop-agent environment
@@ -43,7 +41,6 @@ Required values:
 Useful values:
   ECHO_CODEX_WORKSPACES=echo=/Users/john/workspace/projects/echo
   ECHO_PROXY_URL=system
-  INSERT_MODE=paste
 EOF
 }
 
@@ -71,7 +68,6 @@ const wanted = [
   "ECHO_CODEX_MODEL",
   "ECHO_CODEX_PROFILE",
   "ECHO_CODEX_TIMEOUT_MS",
-  "INSERT_MODE",
   "ECHO_PROXY_URL",
   "ECHO_PROXY_FALLBACK_DIRECT",
   "ECHO_NO_PROXY",
@@ -104,7 +100,6 @@ NODE
   : "${ECHO_CODEX_MODEL:=}"
   : "${ECHO_CODEX_PROFILE:=}"
   : "${ECHO_CODEX_TIMEOUT_MS:=1800000}"
-  : "${INSERT_MODE:=paste}"
   : "${ECHO_PROXY_URL:=}"
   : "${ECHO_PROXY_FALLBACK_DIRECT:=true}"
   : "${ECHO_NO_PROXY:=localhost,127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.local}"
@@ -214,7 +209,6 @@ $(env_entry "ECHO_CODEX_SANDBOX" "$ECHO_CODEX_SANDBOX")
 $(env_entry "ECHO_CODEX_MODEL" "$ECHO_CODEX_MODEL")
 $(env_entry "ECHO_CODEX_PROFILE" "$ECHO_CODEX_PROFILE")
 $(env_entry "ECHO_CODEX_TIMEOUT_MS" "$ECHO_CODEX_TIMEOUT_MS")
-$(env_entry "INSERT_MODE" "$INSERT_MODE")
 $(env_entry "ECHO_PROXY_URL" "$ECHO_PROXY_URL")
 $(env_entry "ECHO_PROXY_FALLBACK_DIRECT" "$ECHO_PROXY_FALLBACK_DIRECT")
 $(env_entry "ECHO_NO_PROXY" "$ECHO_NO_PROXY")
@@ -325,54 +319,6 @@ doctor_network() {
   node "$ROOT_DIR/scripts/network-doctor.js"
 }
 
-check_paste_helper() {
-  ensure_macos
-  set +e
-  (
-    cd "$ROOT_DIR"
-    node --input-type=module - <<'NODE'
-import process from "node:process";
-import {
-  checkMacPasteHelperPermission,
-  ensureMacPasteHelper,
-  macPasteHelperPaths,
-  requestMacPasteHelperPermission
-} from "./src/lib/paste.js";
-
-await ensureMacPasteHelper();
-const paths = macPasteHelperPaths();
-console.log(`Helper app: ${paths.app}`);
-try {
-  await checkMacPasteHelperPermission();
-  console.log("Accessibility: trusted");
-} catch (error) {
-  console.log("Accessibility: needs permission");
-  console.log(error.message);
-  try {
-    await requestMacPasteHelperPermission();
-    await checkMacPasteHelperPermission();
-    console.log("Accessibility: trusted");
-  } catch {
-    process.exitCode = 2;
-  }
-}
-NODE
-  )
-  local code=$?
-  set -e
-  if [[ "$code" -eq 2 ]]; then
-    local helper_app="$HOME/Applications/Echo Paste Helper.app"
-    open -R "$helper_app" >/dev/null 2>&1 || true
-    open 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility' >/dev/null 2>&1 || true
-    cat <<EOF
-
-Add or enable Echo Paste Helper.app in Accessibility, then run:
-  npm run desktop:mac -- restart
-EOF
-  fi
-  return "$code"
-}
-
 open_settings() {
   load_env
   if [[ -d "$APP_DIR" ]]; then
@@ -396,7 +342,7 @@ open_app() {
     "$ROOT_DIR/scripts/macos-create-app.sh"
   fi
   env -u ELECTRON_RUN_AS_NODE open "$APP_DIR"
-  echo "Echo Voice.app opened."
+  echo "Echo Codex.app opened."
 }
 
 find_app_agent_process() {
@@ -435,7 +381,6 @@ ECHO_CODEX_SANDBOX=$ECHO_CODEX_SANDBOX
 ECHO_CODEX_MODEL=$ECHO_CODEX_MODEL
 ECHO_CODEX_PROFILE=$ECHO_CODEX_PROFILE
 ECHO_CODEX_TIMEOUT_MS=$ECHO_CODEX_TIMEOUT_MS
-INSERT_MODE=$INSERT_MODE
 ECHO_PROXY_URL=${ECHO_PROXY_URL:+$(mask_proxy "$ECHO_PROXY_URL")}
 ECHO_PROXY_FALLBACK_DIRECT=$ECHO_PROXY_FALLBACK_DIRECT
 ECHO_NO_PROXY=$ECHO_NO_PROXY
@@ -477,7 +422,6 @@ main() {
     logs) follow_logs ;;
     app) open_app ;;
     settings) open_settings ;;
-    paste-helper) check_paste_helper ;;
     doctor) doctor_network ;;
     uninstall) uninstall_service ;;
     print-env) print_env ;;

@@ -1,7 +1,7 @@
 import { config } from "./config.js";
+import { loadDesktopAgentId } from "./lib/agentIdentity.js";
 import { publicCodexRuntime, publicWorkspaces, runCodexJob } from "./lib/codexRunner.js";
 import { describeHttpNetwork, formatFetchError, httpFetch } from "./lib/http.js";
-import { insertText } from "./lib/paste.js";
 
 if (!config.relayUrl) {
   console.error("Missing ECHO_RELAY_URL. Example: ECHO_RELAY_URL=https://voice.example.com ECHO_TOKEN=... npm run desktop");
@@ -13,9 +13,11 @@ if (!config.token) {
   process.exit(1);
 }
 
-console.log("Echo Voice desktop agent is running.");
+const agentId = await loadDesktopAgentId();
+
+console.log("Echo Codex desktop agent is running.");
 console.log(`Relay: ${config.relayUrl}`);
-console.log(`Insert mode: ${config.insertMode}`);
+console.log(`Agent ID: ${agentId}`);
 console.log(`Network: ${formatNetworkStatus(describeHttpNetwork(config.relayUrl))}`);
 console.log(`Codex remote: ${config.codex.enabled ? "enabled" : "disabled"}`);
 if (config.codex.enabled) {
@@ -27,31 +29,9 @@ if (config.codex.enabled) {
     console.log(`  ${workspace.id}: ${workspace.path}`);
   }
 }
-console.log("Keep the target app focused before sending text from the phone.\n");
+console.log("Waiting for mobile Codex tasks.\n");
 
-runInsertLoop();
 if (config.codex.enabled) runCodexLoop();
-
-async function runInsertLoop() {
-  while (true) {
-    let job = null;
-    try {
-      job = await pollNextInsertJob();
-      if (!job) continue;
-
-      console.log(`[${new Date().toLocaleTimeString()}] inserting ${job.text.length} chars`);
-      const result = await insertText(job.text);
-      await postJson("/api/agent/ack", { id: job.id, result });
-      console.log(`  ${result.message}`);
-    } catch (error) {
-      console.error(`[insert ${new Date().toLocaleTimeString()}] ${formatFetchError(error)}`);
-      if (job?.id) {
-        await postJson("/api/agent/fail", { id: job.id, error: error.message }).catch(() => {});
-      }
-      await sleep(2500);
-    }
-  }
-}
 
 async function runCodexLoop() {
   while (true) {
@@ -61,16 +41,18 @@ async function runCodexLoop() {
       if (!job) continue;
 
       console.log(`[${new Date().toLocaleTimeString()}] codex ${job.id} in ${job.projectId}`);
+      const heartbeat = startCodexLeaseHeartbeat(job.id);
       const result = await runCodexJob(job, {
-        onEvents: (events) => postJson("/api/agent/codex/events", { id: job.id, events }).catch(() => {})
-      });
-      await postJson("/api/agent/codex/complete", { id: job.id, result });
+        onEvents: (events) => postJson("/api/agent/codex/events", { id: job.id, agentId, events }).catch(() => {})
+      }).finally(() => clearInterval(heartbeat));
+      await postJson("/api/agent/codex/complete", { id: job.id, agentId, result });
       console.log(`  codex ${result.ok ? "completed" : "failed"} (${result.exitCode ?? "no exit code"})`);
     } catch (error) {
       console.error(`[codex ${new Date().toLocaleTimeString()}] ${formatFetchError(error)}`);
       if (job?.id) {
         await postJson("/api/agent/codex/complete", {
           id: job.id,
+          agentId,
           result: {
             ok: false,
             error: error.message
@@ -82,15 +64,6 @@ async function runCodexLoop() {
   }
 }
 
-async function pollNextInsertJob() {
-  const response = await httpFetch(`${config.relayUrl}/api/agent/next?wait=25000`, {
-    headers: authHeaders(),
-    timeoutMs: 35000
-  });
-  const data = await parseApiResponse(response);
-  return data.job || null;
-}
-
 async function pollNextCodexJob() {
   const response = await httpFetch(`${config.relayUrl}/api/agent/codex/next?wait=25000`, {
     method: "POST",
@@ -99,6 +72,7 @@ async function pollNextCodexJob() {
       ...authHeaders()
     },
     body: JSON.stringify({
+      agentId,
       workspaces: publicWorkspaces(),
       runtime: publicCodexRuntime()
     }),
@@ -106,6 +80,13 @@ async function pollNextCodexJob() {
   });
   const data = await parseApiResponse(response);
   return data.job || null;
+}
+
+function startCodexLeaseHeartbeat(jobId) {
+  const intervalMs = Math.max(15000, Math.min(Math.floor(config.codex.leaseMs / 2), 30000));
+  return setInterval(() => {
+    postJson("/api/agent/codex/events", { id: jobId, agentId, events: [] }).catch(() => {});
+  }, intervalMs);
 }
 
 async function postJson(path, body) {

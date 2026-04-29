@@ -2,13 +2,13 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_DIR="$ROOT_DIR/dist/Echo Voice.app"
+APP_DIR="$ROOT_DIR/dist/Echo Codex.app"
 ELECTRON_APP="$ROOT_DIR/desktop-app/node_modules/electron/dist/Electron.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 APP_RESOURCES_DIR="$RESOURCES_DIR/app"
-EXECUTABLE="$MACOS_DIR/Echo Voice"
+EXECUTABLE="$MACOS_DIR/Echo Codex"
 
 if [[ ! -d "$ELECTRON_APP" ]]; then
   npm run desktop:app:install
@@ -31,10 +31,10 @@ cp "$ROOT_DIR/desktop-app/main.cjs" "$APP_RESOURCES_DIR/main.cjs"
 cp "$ROOT_DIR/desktop-app/package.json" "$APP_RESOURCES_DIR/package.json"
 printf '%s\n' "$ROOT_DIR" > "$RESOURCES_DIR/echo-root"
 
-plutil -replace CFBundleName -string "Echo Voice" "$CONTENTS_DIR/Info.plist"
-plutil -replace CFBundleDisplayName -string "Echo Voice" "$CONTENTS_DIR/Info.plist"
+plutil -replace CFBundleName -string "Echo Codex" "$CONTENTS_DIR/Info.plist"
+plutil -replace CFBundleDisplayName -string "Echo Codex" "$CONTENTS_DIR/Info.plist"
 plutil -replace CFBundleIdentifier -string "xyz.554119401.echo.desktop" "$CONTENTS_DIR/Info.plist"
-plutil -replace CFBundleExecutable -string "Echo Voice" "$CONTENTS_DIR/Info.plist"
+plutil -replace CFBundleExecutable -string "Echo Codex" "$CONTENTS_DIR/Info.plist"
 plutil -replace CFBundleShortVersionString -string "0.1.0" "$CONTENTS_DIR/Info.plist"
 plutil -replace CFBundleVersion -string "0.1.0" "$CONTENTS_DIR/Info.plist"
 plutil -replace NSHighResolutionCapable -bool true "$CONTENTS_DIR/Info.plist"

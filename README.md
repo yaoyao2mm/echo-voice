@@ -1,16 +1,16 @@
-# Echo Voice
+# Echo Codex
 
-Echo Voice is a phone-first voice input bridge:
+Echo Codex is a phone-first control surface for local Codex:
 
-1. Start the local desktop agent or deploy the public relay server.
+1. Deploy the public relay server.
 2. Open the paired URL from an Android browser.
-3. Record speech on the phone.
-4. Review the raw transcript and AI-refined text on the phone.
-5. Send the final text to the current cursor on the computer.
+3. Capture a rough idea or Codex task on the phone, including through the phone's native voice input keyboard.
+4. Choose an allowlisted local project.
+5. The desktop agent pulls the task, runs `codex exec --json` locally, and streams progress back to the phone.
 
-It can also act as a mobile remote for local Codex: the phone submits a structured task to the relay, the desktop agent pulls it, runs `codex exec` inside an allowlisted local project, and streams the result back to the phone.
+The first version is intentionally lightweight: a Node relay, a local desktop agent, and a mobile web/PWA UI. Echo does not own dictation; the phone captures text, the relay can clean or structure it, and the desktop agent runs Codex locally. The longer-term direction is isolated per-task worktrees, so Codex can explore an idea without touching your active checkout until you decide to keep it.
 
-The first version is intentionally lightweight: a cross-platform Node desktop agent plus a mobile web/PWA UI. It can use OpenAI-compatible cloud transcription, a self-hosted Whisper service, Ollama/local LLM post-processing, or a rule-based fallback.
+The product goal is to feel like the missing mobile companion to the local Codex client: start a task from the phone, watch status and output, follow up with context, and keep all filesystem execution anchored on the desktop.
 
 ## Quick Start
 
@@ -24,7 +24,7 @@ npm start
 
 Open the printed URL on your Android phone. The URL includes a pairing token; API calls without that token are rejected.
 
-Android browsers require a secure context before they allow microphone access. The easiest development path is USB forwarding:
+Android browsers require a secure context before they allow camera-based QR pairing. The easiest development path is USB forwarding:
 
 ```bash
 npm run android:usb
@@ -49,12 +49,12 @@ cp .env.example .env
 # ECHO_AUTH_ENABLED=true
 # ECHO_AUTH_USERNAME=your-user
 # ECHO_AUTH_PASSWORD=your-password
-# OPENAI_API_KEY=...
+# LLM_API_KEY=...
 npm install
 npm run relay
 ```
 
-Run the desktop receiver on the computer where text should be pasted:
+Run the desktop agent on the computer where Codex should execute:
 
 ```bash
 ECHO_RELAY_URL=https://voice.example.com ECHO_TOKEN=a-long-random-secret npm run desktop
@@ -69,7 +69,7 @@ ECHO_CODEX_WORKSPACES=echo=/Users/john/workspace/projects/echo,metio=/Users/john
 npm run desktop
 ```
 
-On macOS, the preferred path is the native `Echo Voice.app`. It opens the settings window, adds a menu bar item, and can run the desktop agent itself without installing a LaunchAgent:
+On macOS, the preferred path is the native `Echo Codex.app`. It opens the settings window, adds a menu bar item, and can run the desktop agent itself without installing a LaunchAgent:
 
 ```bash
 cat > .env <<'EOF'
@@ -100,21 +100,11 @@ To create a local DMG from that launcher:
 npm run desktop:mac:dmg
 ```
 
-`desktop:mac -- settings` uses `Echo Voice.app` when it exists, uses the development Electron shell when installed, and falls back to the local browser page otherwise. The UI can update relay, VPN/proxy, local model, STT, and Codex workspace settings without editing `.env` directly.
+`desktop:mac -- settings` uses `Echo Codex.app` when it exists, uses the development Electron shell when installed, and falls back to the local browser page otherwise. The UI can update relay, VPN/proxy, local model, and Codex workspace settings without editing `.env` directly.
 
 The native window also installs a menu bar item. Closing the settings window hides it instead of quitting, and the menu bar item can reopen settings, start/stop/restart the app-managed agent, switch off the legacy LaunchAgent, run the network doctor, and open logs.
 
-The Overview tab checks the relay config, app-managed or launchd agent, Accessibility permission, clipboard command, Codex CLI, and allowlisted workspaces. On macOS, grant Accessibility permission if auto-paste reports `needs permission`.
-
-You can check the paste helper directly:
-
-```bash
-npm run desktop:mac -- paste-helper
-```
-
-The helper app lives at `~/Applications/Echo Paste Helper.app` with the stable bundle id `xyz.554119401.echo.paste-helper`. Echo reuses the existing signed helper at runtime; it does not rebuild it just because the source file changed, since rebuilding an ad-hoc signed helper can make macOS treat it as a different Accessibility client.
-
-Normal paste attempts do not request macOS permission or fall back to AppleScript prompts. If permission is missing, Echo leaves the text on the clipboard and reports the helper error; run the explicit helper check above to request permission once.
+The Overview tab checks the relay config, app-managed or launchd agent, Codex CLI, and allowlisted workspaces.
 
 The Overview tab also shows a pairing QR code. Scan it from the phone to open the mobile UI with the pairing token already attached, so the phone page no longer needs a manually pasted token.
 
@@ -143,23 +133,7 @@ npm run desktop:mac -- doctor
 
 Open `https://voice.example.com/?token=a-long-random-secret` on the phone. See [docs/internet-deploy.md](docs/internet-deploy.md) for Nginx, systemd, and HTTPS notes.
 
-## Model Setup
-
-For OpenAI speech-to-text, set:
-
-```bash
-OPENAI_API_KEY=sk-...
-STT_PROVIDER=openai
-OPENAI_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
-```
-
-For a local Whisper ASR Webservice, set:
-
-```bash
-STT_PROVIDER=local
-LOCAL_STT_URL=http://YOUR_SERVER:9000/asr
-LOCAL_STT_FILE_FIELD=audio_file
-```
+## Prompt Refinement Setup
 
 For text refinement with an OpenAI-compatible chat endpoint:
 
@@ -186,33 +160,23 @@ OLLAMA_BASE_URL=http://127.0.0.1:11434
 OLLAMA_MODEL=qwen3:4b
 ```
 
-If no post-processing provider is configured, Echo Voice falls back to a conservative rule-based cleanup.
-
-If server-side STT is not configured, Android Chrome can fall back to the browser Web Speech API when available. In that mode the browser produces the raw transcript, then the server still performs the structured refinement step.
-
-## Desktop Insertion
-
-The agent copies the final text to the system clipboard and then simulates paste:
-
-- macOS: `pbcopy` plus a small Swift paste helper, with AppleScript as a fallback. Requires Accessibility permission for `~/Applications/Echo Paste Helper.app`.
-- Windows: PowerShell clipboard plus `Ctrl+V` SendKeys.
-- Linux: `wl-copy` or `xclip`/`xsel`, then `xdotool` or `wtype` when available.
-
-Set `INSERT_MODE=copy` to only copy text to the clipboard.
-
-In relay mode, the public server never pastes into your computer directly. It only queues text; the desktop agent makes outbound HTTPS requests, pulls jobs, and performs the paste locally.
+If no post-processing provider is configured, Echo falls back to a conservative rule-based cleanup.
 
 ## Mobile Codex Remote
 
 The first Codex remote mode is intentionally conservative:
 
 - The phone can submit prompts, but cannot choose arbitrary filesystem paths or shell commands.
+- The phone shows the task queue, current status, latest output, full logs, and final result.
 - The desktop agent only runs `codex exec` inside `ECHO_CODEX_WORKSPACES`.
 - The default sandbox is `workspace-write`.
-- The relay receives job logs and final messages so the phone can monitor progress.
+- The relay persists Codex jobs, agent heartbeats, leases, logs, and final messages in SQLite under `~/.echo-voice/echo.sqlite`.
+- Future worktree mode will let each queued task run in a separate local Git worktree before you apply or discard the result.
+
+See [docs/mobile-codex-roadmap.md](docs/mobile-codex-roadmap.md) for the implementation roadmap.
 
 Interactive TUI mirroring is a later layer on top of Codex `app-server`; this MVP uses `codex exec --json` because it is stable enough for one-shot engineering tasks from mobile.
 
 ## Product Shape
 
-This MVP is designed around the main idea: speaking is fast, but sending raw spoken text into an AI chat is often mentally leaky. Echo Voice makes the phone the composition surface, so the user can pause, inspect, edit, and send a more deliberate version to the desktop cursor.
+Echo makes the phone the idea inbox for local engineering work. The phone is good at capture, review, and lightweight monitoring; the desktop agent is the only process allowed to touch local repositories and run Codex.

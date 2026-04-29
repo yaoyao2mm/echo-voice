@@ -2,14 +2,11 @@ import express from "express";
 import fs from "node:fs";
 import http from "node:http";
 import https from "node:https";
-import multer from "multer";
 import qrcode from "qrcode-terminal";
 import { config } from "./config.js";
 import { getLanUrls } from "./lib/network.js";
 import { loadHistory, recentHistory, allHistory, addHistory } from "./lib/history.js";
-import { getSttStatus, transcribeAudio } from "./lib/stt.js";
 import { getRefineStatus, refineTranscript } from "./lib/refine.js";
-import { insertText } from "./lib/paste.js";
 import {
   bearerToken,
   createSessionToken,
@@ -18,7 +15,6 @@ import {
   validatePassword,
   verifySessionToken
 } from "./lib/auth.js";
-import { ackInsertJob, enqueueInsertJob, failInsertJob, relayStatus, waitForInsertJob } from "./lib/relayQueue.js";
 import {
   appendCodexEvents,
   codexStatus,
@@ -30,12 +26,6 @@ import {
 } from "./lib/codexQueue.js";
 
 const app = express();
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 50 * 1024 * 1024
-  }
-});
 
 await loadHistory();
 
@@ -123,10 +113,7 @@ app.get("/api/status", (req, res) => {
   res.json({
     ok: true,
     mode: config.mode,
-    stt: getSttStatus(),
     refine: getRefineStatus(),
-    insertMode: config.insertMode,
-    relay: config.mode === "relay" ? relayStatus() : null,
     codex: config.mode === "relay" ? codexStatus() : null,
     user: req.user || null,
     platform: process.platform
@@ -135,41 +122,6 @@ app.get("/api/status", (req, res) => {
 
 app.get("/api/history", (req, res) => {
   res.json({ items: allHistory(50) });
-});
-
-app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: "Missing audio file." });
-    }
-
-    const mode = req.body.mode || "chat";
-    const contextHint = req.body.contextHint || "";
-    const raw = await transcribeAudio({
-      buffer: req.file.buffer,
-      mimeType: req.file.mimetype,
-      originalName: req.file.originalname
-    });
-
-    const refined = await refineTranscript({
-      rawText: raw,
-      mode,
-      contextHint,
-      history: recentHistory(8)
-    });
-
-    const item = await addHistory({
-      raw,
-      refined,
-      mode,
-      contextHint,
-      user: req.user || null
-    });
-
-    res.json({ item });
-  } catch (error) {
-    handleError(res, error);
-  }
 });
 
 app.post("/api/refine", async (req, res) => {
@@ -190,26 +142,6 @@ app.post("/api/refine", async (req, res) => {
   }
 });
 
-app.post("/api/insert", async (req, res) => {
-  try {
-    const text = req.body.text || "";
-    if (config.mode === "relay") {
-      const job = enqueueInsertJob(text);
-      return res.json({
-        mode: "relay",
-        queued: true,
-        jobId: job.id,
-        message: relayStatus().desktopOnline ? "已发送到桌面 agent。" : "已排队，桌面 agent 连接后会发送。"
-      });
-    }
-
-    const result = await insertText(text);
-    res.json(result);
-  } catch (error) {
-    handleError(res, error);
-  }
-});
-
 app.get("/api/agent/ping", (req, res) => {
   if (config.mode !== "relay") {
     return res.status(400).json({ error: "Agent ping is only available in relay mode." });
@@ -219,40 +151,8 @@ app.get("/api/agent/ping", (req, res) => {
     ok: true,
     mode: config.mode,
     refine: getRefineStatus(),
-    relay: relayStatus()
+    codex: codexStatus()
   });
-});
-
-app.get("/api/agent/next", async (req, res) => {
-  try {
-    if (config.mode !== "relay") {
-      return res.status(400).json({ error: "Agent polling is only available in relay mode." });
-    }
-
-    const wait = Number(req.query.wait || 25000);
-    const job = await waitForInsertJob(wait);
-    res.json({ job });
-  } catch (error) {
-    handleError(res, error);
-  }
-});
-
-app.post("/api/agent/ack", (req, res) => {
-  if (config.mode !== "relay") {
-    return res.status(400).json({ error: "Agent acknowledgement is only available in relay mode." });
-  }
-
-  const ok = ackInsertJob(req.body.id, req.body.result || {});
-  res.json({ ok });
-});
-
-app.post("/api/agent/fail", (req, res) => {
-  if (config.mode !== "relay") {
-    return res.status(400).json({ error: "Agent failure reporting is only available in relay mode." });
-  }
-
-  const ok = failInsertJob(req.body.id, req.body.error || "Unknown insertion error");
-  res.json({ ok });
 });
 
 app.get("/api/codex/status", (req, res) => {
@@ -306,6 +206,7 @@ app.post("/api/agent/codex/next", async (req, res) => {
     const job = await waitForCodexJob({
       waitMs: Number(req.query.wait || req.body.wait || 25000),
       agent: {
+        id: req.body.agentId || req.body.agent?.id,
         workspaces: req.body.workspaces || [],
         runtime: req.body.runtime || {}
       }
@@ -321,7 +222,9 @@ app.post("/api/agent/codex/events", (req, res) => {
     return res.status(400).json({ error: "Codex agent events are only available in relay mode." });
   }
 
-  const ok = appendCodexEvents(req.body.id, req.body.events || []);
+  const ok = appendCodexEvents(req.body.id, req.body.events || [], {
+    agentId: req.body.agentId
+  });
   res.json({ ok });
 });
 
@@ -330,7 +233,9 @@ app.post("/api/agent/codex/complete", (req, res) => {
     return res.status(400).json({ error: "Codex agent completion is only available in relay mode." });
   }
 
-  const ok = completeCodexJob(req.body.id, req.body.result || {});
+  const ok = completeCodexJob(req.body.id, req.body.result || {}, {
+    agentId: req.body.agentId
+  });
   res.json({ ok });
 });
 
@@ -353,11 +258,11 @@ server.listen(config.port, config.host, () => {
     ...getLanUrls(config.port, config.token, protocol)
   ];
   const androidUsbUrl = `http://localhost:${config.port}/?token=${encodeURIComponent(config.token)}`;
-  console.log(`\nEcho Voice ${config.mode === "relay" ? "relay server" : "desktop agent"} is running.\n`);
+  console.log(`\nEcho Codex ${config.mode === "relay" ? "relay server" : "desktop agent"} is running.\n`);
   console.log("Open one of these URLs on your phone:\n");
   for (const url of urls) console.log(`  ${url}`);
   if (!useHttps && config.mode !== "relay") {
-    console.log("\nAndroid microphone access needs HTTPS or localhost.");
+    console.log("\nAndroid QR camera pairing needs HTTPS or localhost.");
     console.log("For USB development, run `npm run android:usb`, then open:");
     console.log(`  ${androidUsbUrl}`);
   }
@@ -365,7 +270,7 @@ server.listen(config.port, config.host, () => {
     if (!config.publicUrl) {
       console.log("\nSet ECHO_PUBLIC_URL=https://YOUR_DOMAIN so the relay prints the correct phone URL.");
     }
-    console.log("\nRun this on the computer that should receive text:");
+    console.log("\nRun this on the computer that should run local Codex:");
     console.log(`  ECHO_RELAY_URL=${config.publicUrl || `${protocol}://YOUR_DOMAIN`} ECHO_TOKEN=${config.token} npm run desktop`);
   }
   const qrUrl = publicUrl || (useHttps ? urls[0] : androidUsbUrl);

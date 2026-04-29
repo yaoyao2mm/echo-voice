@@ -1,9 +1,9 @@
-self.ECHO_CACHE = "echo-voice-v7";
+self.ECHO_CACHE = "echo-codex-v8";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(self.ECHO_CACHE).then((cache) =>
-      cache.addAll(["/", "/styles.css?v=7", "/app.js?v=7", "/manifest.webmanifest?v=7"])
+      cache.addAll(["/", "/styles.css?v=8", "/app.js?v=8", "/manifest.webmanifest?v=8"])
     )
   );
   self.skipWaiting();

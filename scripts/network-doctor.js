@@ -18,7 +18,7 @@ const authConfigUrl = new URL("/api/auth/config", baseUrl);
 const agentPingUrl = new URL("/api/agent/ping", baseUrl);
 const network = describeHttpNetwork(agentPingUrl);
 
-console.log("Echo Voice network doctor");
+console.log("Echo Codex network doctor");
 console.log(`Target: ${agentPingUrl.origin}`);
 console.log(`Proxy:  ${network.activeProxyUrl || network.proxyMode}`);
 if (network.proxyFallbackDirect) {

@@ -3,13 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Echo Desktop Settings</title>
+    <title>Echo Codex Desktop Settings</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <header class="topbar">
       <div>
-        <h1>Echo Desktop Settings</h1>
+        <h1>Echo Codex</h1>
         <p id="envPath">Loading...</p>
       </div>
       <div class="topActions">
@@ -21,18 +21,21 @@
 
     <main class="layout">
       <nav class="sidebar" aria-label="Settings sections">
+        <div class="sidebarTitle">Desktop</div>
         <button type="button" class="tab active" data-tab="overview">概览</button>
         <button type="button" class="tab" data-tab="connection">连接</button>
         <button type="button" class="tab" data-tab="network">VPN</button>
         <button type="button" class="tab" data-tab="refine">本机模型</button>
-        <button type="button" class="tab" data-tab="stt">语音识别</button>
         <button type="button" class="tab" data-tab="codex">Codex</button>
       </nav>
 
       <form id="settingsForm" class="content">
         <section class="panel active" data-panel="overview">
           <div class="sectionHeader">
-            <h2>概览</h2>
+            <div>
+              <h2>概览</h2>
+              <p>检查桌面端、Codex CLI、项目白名单和手机配对。</p>
+            </div>
             <button type="button" id="refreshHealth">刷新状态</button>
           </div>
           <div class="pairingPanel">
@@ -51,11 +54,14 @@
 
         <section class="panel" data-panel="connection">
           <div class="sectionHeader">
-            <h2>连接</h2>
+            <div>
+              <h2>连接</h2>
+              <p>公网 relay 和配对 token。</p>
+            </div>
             <button type="submit">保存配置</button>
           </div>
           <div class="notice">
-            互联网 relay 模式下，手机端后处理发生在服务器；桌面端负责拉取任务、粘贴文本和执行本地 Codex。
+            互联网 relay 模式下，手机端提交 Codex 任务；桌面端只负责拉取任务并在本机工作区执行 Codex。
           </div>
           <div class="grid">
             <label>
@@ -68,19 +74,15 @@
               <span class="secretState" data-secret-state="ECHO_TOKEN"></span>
               <span class="inlineCheck"><input type="checkbox" data-clear-secret="ECHO_TOKEN" /> 清空</span>
             </label>
-            <label>
-              插入模式
-              <select data-key="INSERT_MODE">
-                <option value="paste">paste</option>
-                <option value="copy">copy</option>
-              </select>
-            </label>
           </div>
         </section>
 
         <section class="panel" data-panel="network">
           <div class="sectionHeader">
-            <h2>VPN</h2>
+            <div>
+              <h2>VPN</h2>
+              <p>桌面 agent 出站网络和代理。</p>
+            </div>
             <button type="submit">保存配置</button>
           </div>
           <div class="grid">
@@ -109,7 +111,10 @@
 
         <section class="panel" data-panel="refine">
           <div class="sectionHeader">
-            <h2>本机模型</h2>
+            <div>
+              <h2>本机模型</h2>
+              <p>本机 local 模式和诊断用的文本后处理模型。</p>
+            </div>
             <button type="submit">保存配置</button>
           </div>
           <div class="notice">
@@ -166,64 +171,12 @@
           </div>
         </section>
 
-        <section class="panel" data-panel="stt">
-          <div class="sectionHeader">
-            <h2>语音识别</h2>
-            <button type="submit">保存配置</button>
-          </div>
-          <div class="notice">
-            服务器端录音转写由 relay 服务器配置决定；浏览器语音输入和本机 local 模式不依赖这些服务器 STT 设置。
-          </div>
-          <div class="grid">
-            <label>
-              Provider
-              <select data-key="STT_PROVIDER">
-                <option value="auto">auto</option>
-                <option value="openai">openai</option>
-                <option value="local">local</option>
-                <option value="none">none</option>
-              </select>
-            </label>
-            <label>
-              Language
-              <input data-key="STT_LANGUAGE" autocomplete="off" />
-            </label>
-            <label class="wide">
-              Prompt
-              <textarea data-key="STT_PROMPT" rows="4"></textarea>
-            </label>
-            <label>
-              OpenAI API Key
-              <input data-key="OPENAI_API_KEY" data-secret="true" type="password" autocomplete="new-password" />
-              <span class="secretState" data-secret-state="OPENAI_API_KEY"></span>
-              <span class="inlineCheck"><input type="checkbox" data-clear-secret="OPENAI_API_KEY" /> 清空</span>
-            </label>
-            <label>
-              OpenAI Base URL
-              <input data-key="OPENAI_BASE_URL" autocomplete="off" />
-            </label>
-            <label>
-              Transcribe Model
-              <input data-key="OPENAI_TRANSCRIBE_MODEL" autocomplete="off" />
-            </label>
-            <label>
-              Local STT URL
-              <input data-key="LOCAL_STT_URL" autocomplete="off" />
-            </label>
-            <label>
-              File Field
-              <input data-key="LOCAL_STT_FILE_FIELD" autocomplete="off" />
-            </label>
-            <label>
-              Local STT Model
-              <input data-key="LOCAL_STT_MODEL" autocomplete="off" />
-            </label>
-          </div>
-        </section>
-
         <section class="panel" data-panel="codex">
           <div class="sectionHeader">
-            <h2>Codex</h2>
+            <div>
+              <h2>Codex</h2>
+              <p>任务队列真正执行时使用的本机 Codex 设置。</p>
+            </div>
             <button type="submit">保存配置</button>
           </div>
           <div class="notice">

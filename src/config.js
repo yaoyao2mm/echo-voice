@@ -55,18 +55,6 @@ export const config = {
     proxyFallbackDirect: parseBoolean(process.env.ECHO_PROXY_FALLBACK_DIRECT, true)
   },
 
-  stt: {
-    provider: process.env.STT_PROVIDER || "auto",
-    language: process.env.STT_LANGUAGE || "zh",
-    prompt: process.env.STT_PROMPT || "",
-    openaiApiKey: process.env.OPENAI_API_KEY || "",
-    openaiBaseUrl: trimTrailingSlash(process.env.OPENAI_BASE_URL || "https://api.openai.com/v1"),
-    openaiModel: process.env.OPENAI_TRANSCRIBE_MODEL || "gpt-4o-mini-transcribe",
-    localUrl: process.env.LOCAL_STT_URL || "",
-    localFileField: process.env.LOCAL_STT_FILE_FIELD || "audio_file",
-    localModel: process.env.LOCAL_STT_MODEL || ""
-  },
-
   refine: {
     provider: postprocessProvider,
     llmBaseUrl: resolveRefineBaseUrl(),
@@ -79,8 +67,6 @@ export const config = {
     ollamaModel: process.env.OLLAMA_MODEL || "qwen3:4b"
   },
 
-  insertMode: process.env.INSERT_MODE || "paste",
-
   codex: {
     enabled: process.env.ECHO_CODEX_ENABLED !== "false",
     command: process.env.ECHO_CODEX_COMMAND || "codex",
@@ -89,6 +75,7 @@ export const config = {
     model: process.env.ECHO_CODEX_MODEL || "",
     profile: process.env.ECHO_CODEX_PROFILE || "",
     timeoutMs: Number(process.env.ECHO_CODEX_TIMEOUT_MS || 30 * 60 * 1000),
+    leaseMs: Number(process.env.ECHO_CODEX_LEASE_MS || 10 * 60 * 1000),
     maxEvents: Number(process.env.ECHO_CODEX_MAX_EVENTS || 500)
   }
 };

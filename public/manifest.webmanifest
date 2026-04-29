@@ -1,6 +1,6 @@
 {
-  "name": "Echo Voice",
-  "short_name": "Echo Voice",
+  "name": "Echo Codex",
+  "short_name": "Echo",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f7f4ee",

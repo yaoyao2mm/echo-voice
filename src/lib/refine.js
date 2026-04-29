@@ -2,11 +2,10 @@ import { config } from "../config.js";
 import { httpFetch } from "./http.js";
 
 const modes = {
-  chat: "把口述整理成适合发给 AI 助手或协作对象的清晰指令。保留意图、约束和上下文，去掉口头停顿，让文本更像经过思考后的输入。",
-  formal: "把口述整理成正式、自然、可直接发送的中文文本。改善断句、标点和语序，但不要扩写事实。",
-  bullet: "把口述整理成结构化要点。适合计划、需求、会议纪要或任务拆解。",
-  email: "把口述整理成礼貌、清晰、可发送的邮件或消息。不要编造称呼、事实或承诺。",
-  verbatim: "尽量保留原话，只修正明显识别错误、标点、空白和重复口头词。"
+  chat: "把原始输入整理成适合提交给 Codex 的清晰工程任务。保留目标、约束、上下文和验收标准，去掉口头化停顿。",
+  plan: "把原始输入整理成可执行计划。按阶段、任务和验证方式组织，但不要替用户编造尚未表达的需求。",
+  bullet: "把原始输入整理成结构化要点。适合需求、会议纪要、任务拆解或待办清单。",
+  verbatim: "尽量保留原话，只修正明显错字、标点、空白和重复口头词。"
 };
 
 export function getRefineStatus() {
@@ -64,10 +63,10 @@ function buildMessages({ rawText, mode, contextHint, history }) {
     {
       role: "system",
       content: [
-        "你是一个中文语音输入后处理器。",
-        "你的任务是把语音转写稿整理成用户真正想输入到电脑光标处的文本。",
+        "你是一个中文文本后处理器。",
+        "你的任务是把手机端原始输入整理成适合提交给 Codex 或其他 AI 助手的清晰任务文本。",
         "只输出最终文本，不要解释，不要回答用户的问题，不要添加原文没有表达的新事实。",
-        "优先修正中文断句、标点、ASR 同音误识别、重复口头词、无意义停顿。",
+        "优先修正中文断句、标点、明显错字、重复口头词、无意义停顿。",
         "如果原文是给 AI 助手的指令，保留约束、偏好、目标和上下文。",
         "中英混合、代码名、产品名、人名、路径、变量名要谨慎保留。"
       ].join("\n")
@@ -78,7 +77,7 @@ function buildMessages({ rawText, mode, contextHint, history }) {
         `处理模式：${modeInstruction}`,
         contextHint ? `用户补充上下文：${contextHint}` : "",
         recent ? `最近输入上下文：\n${recent}` : "",
-        `原始转写：\n${rawText}`
+        `原始输入：\n${rawText}`
       ]
         .filter(Boolean)
         .join("\n\n")
@@ -143,7 +142,7 @@ function cleanModelText(text) {
 }
 
 function ruleBasedCleanup(text, mode) {
-  if (mode === "bullet") {
+  if (mode === "bullet" || mode === "plan") {
     const parts = text
       .replace(/\s+/g, " ")
       .replace(/([一-龥])\s+([一-龥])/g, "$1$2")
@@ -151,7 +150,9 @@ function ruleBasedCleanup(text, mode) {
       .map((part) => cleanupSentence(part))
       .filter(Boolean);
     if (parts.length > 1) {
-      return parts.map((part) => `- ${part.replace(/[。！？!?]$/g, "")}`).join("\n");
+      return parts
+        .map((part, index) => `${mode === "plan" ? `${index + 1}.` : "-"} ${part.replace(/[。！？!?]$/g, "")}`)
+        .join("\n");
     }
   }
 

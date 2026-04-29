@@ -8,7 +8,6 @@ import express from "express";
 import dotenv from "dotenv";
 import QRCode from "qrcode";
 import { httpFetch } from "../src/lib/http.js";
-import { checkMacPasteHelperPermission, macPasteHelperPaths } from "../src/lib/paste.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -30,7 +29,6 @@ const settingsKey = crypto.randomBytes(16).toString("hex");
 const fields = [
   { key: "ECHO_RELAY_URL", section: "connection", type: "text" },
   { key: "ECHO_TOKEN", section: "connection", type: "secret" },
-  { key: "INSERT_MODE", section: "connection", type: "choice", choices: ["paste", "copy"] },
 
   { key: "ECHO_PROXY_URL", section: "network", type: "text" },
   { key: "ECHO_PROXY_FALLBACK_DIRECT", section: "network", type: "boolean", defaultValue: "true" },
@@ -51,16 +49,6 @@ const fields = [
   { key: "LLM_MODEL", section: "refine", type: "text" },
   { key: "OLLAMA_BASE_URL", section: "refine", type: "text" },
   { key: "OLLAMA_MODEL", section: "refine", type: "text" },
-
-  { key: "STT_PROVIDER", section: "stt", type: "choice", choices: ["auto", "openai", "local", "none"] },
-  { key: "STT_LANGUAGE", section: "stt", type: "text" },
-  { key: "STT_PROMPT", section: "stt", type: "textarea" },
-  { key: "OPENAI_API_KEY", section: "stt", type: "secret" },
-  { key: "OPENAI_BASE_URL", section: "stt", type: "text" },
-  { key: "OPENAI_TRANSCRIBE_MODEL", section: "stt", type: "text" },
-  { key: "LOCAL_STT_URL", section: "stt", type: "text" },
-  { key: "LOCAL_STT_FILE_FIELD", section: "stt", type: "text" },
-  { key: "LOCAL_STT_MODEL", section: "stt", type: "text" },
 
   { key: "ECHO_CODEX_ENABLED", section: "codex", type: "boolean" },
   { key: "ECHO_CODEX_WORKSPACES", section: "codex", type: "textarea" },
@@ -139,7 +127,7 @@ app.post("/api/test/refine", async (req, res) => {
   try {
     const sample =
       String(req.body?.text || "").trim() ||
-      "嗯我想把这个语音输入法需求整理成适合 Codex 执行的任务，不要太啰嗦。";
+      "嗯我想把手机输入的需求整理成适合 Codex 执行的任务，不要太啰嗦。";
     const env = await readEnv();
     const result = env.ECHO_RELAY_URL ? await testRelayRefine(env, sample) : await testLocalRefine(sample);
     res.json({ ok: result.code === 0, ...result });
@@ -217,7 +205,7 @@ const server = app.listen(port, host, () => {
   const address = server.address();
   const actualPort = typeof address === "object" && address ? address.port : port;
   const url = `http://${host}:${actualPort}/?key=${settingsKey}`;
-  console.log("Echo Voice desktop settings is running.");
+  console.log("Echo Codex desktop settings is running.");
   console.log(url);
   if (process.argv.includes("--open")) openBrowser(url);
 });
@@ -466,10 +454,8 @@ async function runCommand(command, args, timeoutMs) {
 }
 
 async function buildHealth(env) {
-  const [agent, accessibility, clipboard, codex, workspaces] = await Promise.all([
+  const [agent, codex, workspaces] = await Promise.all([
     checkAgentStatus(),
-    checkAccessibility(),
-    checkCommand("pbcopy", "pbcopy"),
     checkCodex(env),
     checkWorkspaces(env)
   ]);
@@ -483,8 +469,6 @@ async function buildHealth(env) {
       proxy: env.ECHO_PROXY_URL || "direct"
     },
     agent,
-    accessibility,
-    clipboard,
     codex,
     workspaces
   };
@@ -534,28 +518,6 @@ async function findDesktopAgentProcess() {
   };
 }
 
-async function checkAccessibility() {
-  if (process.platform !== "darwin") {
-    return { ok: true, status: "not required", detail: "Accessibility permission is only required for macOS auto-paste." };
-  }
-
-  const helper = macPasteHelperPaths();
-  try {
-    await checkMacPasteHelperPermission();
-    return {
-      ok: true,
-      status: "enabled",
-      detail: "Echo paste helper can send paste keystrokes."
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      status: "needs permission",
-      detail: `${error.message} Grant Accessibility permission to ${helper.app}.`
-    };
-  }
-}
-
 async function checkCodex(env) {
   const command = env.ECHO_CODEX_COMMAND || "codex";
   const result = await runCommand("zsh", ["-lc", `command -v ${shellQuote(command)} && ${shellQuote(command)} --version`], 8000);
@@ -567,17 +529,6 @@ async function checkCodex(env) {
     path: lines[0] || "",
     version: lines[1] || "",
     detail: result.code === 0 ? "" : result.stderr || result.stdout || `${command} was not found in PATH.`
-  };
-}
-
-async function checkCommand(command, label) {
-  const result = await runCommand("zsh", ["-lc", `command -v ${shellQuote(command)}`], 5000);
-  return {
-    ok: result.code === 0,
-    status: result.code === 0 ? "available" : "missing",
-    command,
-    path: result.stdout.trim(),
-    detail: result.code === 0 ? `${label} is available.` : `${label} was not found.`
   };
 }
 
@@ -630,7 +581,6 @@ function expandHome(value) {
 
 function systemOpenUrl(target) {
   if (process.platform !== "darwin") return "";
-  if (target === "accessibility") return "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility";
   if (target === "login-items") return "x-apple.systempreferences:com.apple.LoginItems-Settings.extension";
   return "";
 }

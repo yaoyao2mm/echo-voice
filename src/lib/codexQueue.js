@@ -1,51 +1,24 @@
 import { EventEmitter } from "node:events";
-import crypto from "node:crypto";
+import {
+  acquireNextJob,
+  appendEvents as appendStoredEvents,
+  completeJob as completeStoredJob,
+  createJob as createStoredJob,
+  getJob as getStoredJob,
+  listJobs as listStoredJobs,
+  statusSnapshot,
+  touchAgent,
+  upsertAgent
+} from "./codexStore.js";
 
 const events = new EventEmitter();
-const queuedJobs = [];
-const jobs = [];
-let activeJob = null;
-let lastAgentSeenAt = "";
-let agentWorkspaces = [];
-let agentRuntime = {};
 
 export function updateCodexAgent(input = {}) {
-  lastAgentSeenAt = new Date().toISOString();
-  if (Array.isArray(input.workspaces)) {
-    agentWorkspaces = input.workspaces
-      .map((workspace) => ({
-        id: String(workspace.id || "").trim(),
-        label: String(workspace.label || workspace.id || "").trim(),
-        path: String(workspace.path || "").trim()
-      }))
-      .filter((workspace) => workspace.id && workspace.path);
-  }
-  if (input.runtime && typeof input.runtime === "object") {
-    agentRuntime = {
-      command: String(input.runtime.command || "").trim(),
-      sandbox: String(input.runtime.sandbox || "").trim(),
-      model: String(input.runtime.model || "").trim(),
-      profile: String(input.runtime.profile || "").trim(),
-      timeoutMs: Number(input.runtime.timeoutMs || 0) || null
-    };
-  }
+  return upsertAgent(input);
 }
 
 export function codexStatus() {
-  return {
-    enabled: true,
-    agentOnline: isAgentOnline(),
-    lastAgentSeenAt,
-    workspaces: agentWorkspaces.map((workspace) => ({
-      id: workspace.id,
-      label: workspace.label,
-      path: workspace.path
-    })),
-    runtime: agentRuntime,
-    queued: queuedJobs.length,
-    active: activeJob ? summarizeJob(activeJob) : null,
-    recent: jobs.slice(0, 10).map(summarizeJob)
-  };
+  return statusSnapshot();
 }
 
 export function createCodexJob(input) {
@@ -62,44 +35,23 @@ export function createCodexJob(input) {
     throw error;
   }
 
-  const job = {
-    id: crypto.randomUUID(),
-    projectId,
-    prompt,
-    status: "queued",
-    createdAt: new Date().toISOString(),
-    startedAt: "",
-    completedAt: "",
-    exitCode: null,
-    error: "",
-    finalMessage: "",
-    events: []
-  };
-
-  queuedJobs.push(job);
-  jobs.unshift(job);
-  jobs.splice(100);
+  const job = createStoredJob({ projectId, prompt });
   events.emit("codex-job");
-  return summarizeJob(job);
+  return job;
 }
 
 export function listCodexJobs(limit = 20) {
-  return jobs.slice(0, limit).map(summarizeJob);
+  return listStoredJobs(limit);
 }
 
 export function getCodexJob(id) {
-  return jobs.find((job) => job.id === id) || null;
+  return getStoredJob(id);
 }
 
 export async function waitForCodexJob(input = {}) {
-  updateCodexAgent(input.agent || {});
-
-  if (queuedJobs.length > 0 && !activeJob) {
-    activeJob = queuedJobs.shift();
-    activeJob.status = "running";
-    activeJob.startedAt = new Date().toISOString();
-    return buildAgentJob(activeJob);
-  }
+  const agent = updateCodexAgent(input.agent || {});
+  const immediateJob = acquireNextJob({ agentId: agent.id, workspaces: agent.workspaces });
+  if (immediateJob) return buildAgentJob(immediateJob);
 
   const waitMs = Math.max(1000, Math.min(Number(input.waitMs || 25000), 30000));
   return new Promise((resolve) => {
@@ -109,57 +61,29 @@ export async function waitForCodexJob(input = {}) {
     }, waitMs);
 
     function handleJob() {
-      if (activeJob || queuedJobs.length === 0) return;
+      const job = acquireNextJob({ agentId: agent.id, workspaces: agent.workspaces });
+      if (!job) return;
       clearTimeout(timeout);
       events.off("codex-job", handleJob);
-      activeJob = queuedJobs.shift();
-      activeJob.status = "running";
-      activeJob.startedAt = new Date().toISOString();
-      resolve(buildAgentJob(activeJob));
+      resolve(buildAgentJob(job));
     }
 
     events.on("codex-job", handleJob);
   });
 }
 
-export function appendCodexEvents(id, incomingEvents = []) {
-  updateCodexAgent();
-  const job = getCodexJob(id);
-  if (!job) return false;
-
-  for (const event of incomingEvents.slice(0, 50)) {
-    job.events.push({
-      at: new Date().toISOString(),
-      type: String(event.type || "output"),
-      text: String(event.text || "").slice(0, 8000),
-      raw: event.raw && typeof event.raw === "object" ? event.raw : undefined
-    });
-  }
-
-  if (job.events.length > 500) {
-    job.events.splice(0, job.events.length - 500);
-  }
-
-  return true;
+export function appendCodexEvents(id, incomingEvents = [], options = {}) {
+  if (options.agent) updateCodexAgent(options.agent);
+  else if (options.agentId) touchAgent(options.agentId);
+  return appendStoredEvents(id, incomingEvents, { agentId: options.agentId || options.agent?.id });
 }
 
-export function completeCodexJob(id, result = {}) {
-  updateCodexAgent();
-  const job = getCodexJob(id);
-  if (!job) return false;
-
-  job.status = result.ok === false ? "failed" : "completed";
-  job.completedAt = new Date().toISOString();
-  job.exitCode = typeof result.exitCode === "number" ? result.exitCode : null;
-  job.error = String(result.error || "");
-  job.finalMessage = String(result.finalMessage || "").slice(0, 12000);
-
-  if (activeJob?.id === id) {
-    activeJob = null;
-    if (queuedJobs.length > 0) events.emit("codex-job");
-  }
-
-  return true;
+export function completeCodexJob(id, result = {}, options = {}) {
+  if (options.agent) updateCodexAgent(options.agent);
+  else if (options.agentId) touchAgent(options.agentId);
+  const ok = completeStoredJob(id, result, { agentId: options.agentId || options.agent?.id });
+  events.emit("codex-job");
+  return ok;
 }
 
 function buildAgentJob(job) {
@@ -169,26 +93,4 @@ function buildAgentJob(job) {
     prompt: job.prompt,
     createdAt: job.createdAt
   };
-}
-
-function summarizeJob(job) {
-  return {
-    id: job.id,
-    projectId: job.projectId,
-    prompt: job.prompt,
-    status: job.status,
-    createdAt: job.createdAt,
-    startedAt: job.startedAt,
-    completedAt: job.completedAt,
-    exitCode: job.exitCode,
-    error: job.error,
-    finalMessage: job.finalMessage,
-    eventCount: job.events.length,
-    lastEvent: job.events.at(-1) || null
-  };
-}
-
-function isAgentOnline() {
-  if (!lastAgentSeenAt) return false;
-  return Date.now() - Date.parse(lastAgentSeenAt) < 45000;
 }
