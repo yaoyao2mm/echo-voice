@@ -10,8 +10,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Echo Codex</title>
-    <link rel="manifest" href="/manifest.webmanifest?v=17" />
-    <link rel="stylesheet" href="/styles.css?v=17" />
+    <link rel="manifest" href="/manifest.webmanifest?v=18" />
+    <link rel="stylesheet" href="/styles.css?v=18" />
   </head>
   <body>
     <main class="shell">
@@ -67,6 +67,10 @@
 
       <section id="codexView" class="codex-section" data-authenticated hidden>
         <button id="sessionBackdrop" class="session-backdrop" type="button" aria-label="关闭会话列表" hidden></button>
+        <button id="sessionRailButton" class="session-rail-button" type="button" aria-label="打开会话列表">
+          <span aria-hidden="true">☰</span>
+          <strong>会话</strong>
+        </button>
         <aside class="session-sidebar" aria-label="Codex 会话">
           <div class="sidebar-head">
             <div>
@@ -183,6 +187,6 @@
       </section>
     </div>
 
-    <script src="/app.js?v=17" type="module"></script>
+    <script src="/app.js?v=18" type="module"></script>
   </body>
 </html>

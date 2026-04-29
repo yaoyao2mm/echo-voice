@@ -351,6 +351,10 @@ textarea:focus {
   display: none;
 }
 
+.session-rail-button {
+  display: none;
+}
+
 .sidebar-head {
   display: flex;
   align-items: center;
@@ -1267,6 +1271,43 @@ textarea:focus {
   }
 
   .codex-section:not(.sessions-open) .session-backdrop {
+    display: none;
+  }
+
+  .session-rail-button {
+    position: fixed;
+    left: max(0px, var(--safe-left));
+    top: calc(var(--safe-top) + 132px);
+    z-index: 12;
+    display: grid;
+    justify-items: center;
+    gap: 3px;
+    width: 46px;
+    min-height: 82px;
+    border: 1px solid rgba(203, 209, 217, 0.88);
+    border-left: 0;
+    border-radius: 0 12px 12px 0;
+    background: rgba(255, 255, 255, 0.96);
+    color: var(--ink);
+    padding: 9px 4px;
+    box-shadow: 0 14px 30px rgba(18, 23, 38, 0.14);
+    backdrop-filter: blur(14px);
+  }
+
+  .session-rail-button span {
+    color: var(--muted);
+    font-size: 18px;
+    line-height: 1;
+  }
+
+  .session-rail-button strong {
+    writing-mode: vertical-rl;
+    letter-spacing: 0;
+    font-size: 12px;
+    line-height: 1;
+  }
+
+  .codex-section.sessions-open .session-rail-button {
     display: none;
   }
 

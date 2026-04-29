@@ -37,6 +37,7 @@ const elements = {
   activeSessionMeta: document.querySelector("#activeSessionMeta"),
   refreshCodex: document.querySelector("#refreshCodex"),
   toggleSessionsButton: document.querySelector("#toggleSessionsButton"),
+  sessionRailButton: document.querySelector("#sessionRailButton"),
   closeSessionsButton: document.querySelector("#closeSessionsButton"),
   sessionBackdrop: document.querySelector("#sessionBackdrop"),
   sessionSearch: document.querySelector("#sessionSearch"),
@@ -90,6 +91,7 @@ elements.refreshCodex.addEventListener("click", refreshCodex);
 elements.newCodexSessionButton.addEventListener("click", startNewCodexSession);
 elements.sendCodexButton.addEventListener("click", sendToCodex);
 elements.toggleSessionsButton.addEventListener("click", openSessionSidebar);
+elements.sessionRailButton.addEventListener("click", openSessionSidebar);
 elements.closeSessionsButton.addEventListener("click", closeSessionSidebar);
 elements.sessionBackdrop.addEventListener("click", closeSessionSidebar);
 elements.sessionSearch.addEventListener("input", () => {
