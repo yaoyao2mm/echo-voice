@@ -550,6 +550,12 @@ function renderCodexStatus(codex) {
 
   const selected = localStorage.getItem("echoCodexProject") || elements.codexProject.value;
   elements.codexProject.innerHTML = "";
+  if (!workspaces.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = codex.agentOnline ? "还没有授权工程目录" : "等待桌面 agent 发布工程目录";
+    elements.codexProject.append(option);
+  }
   for (const workspace of workspaces) {
     const option = document.createElement("option");
     option.value = workspace.id;

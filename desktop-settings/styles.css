@@ -340,6 +340,82 @@ p,
   padding: 0 10px;
 }
 
+.workspaceManager {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 12px;
+}
+
+.workspaceManagerHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.workspaceManagerHeader p {
+  margin-top: 4px;
+}
+
+.workspaceRows {
+  display: grid;
+  gap: 8px;
+}
+
+.workspaceRow {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.35fr) minmax(220px, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  padding: 9px;
+}
+
+.workspaceField {
+  display: grid;
+  gap: 5px;
+}
+
+.workspaceField span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 720;
+}
+
+.workspaceStatus {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.workspaceStatus.ok {
+  color: var(--ok);
+}
+
+.workspaceStatus.bad {
+  color: var(--danger);
+}
+
+.workspaceEmpty {
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  padding: 14px;
+  text-align: center;
+  font-size: 13px;
+}
+
+.workspaceRaw {
+  display: none;
+}
+
 label {
   display: grid;
   gap: 7px;
@@ -495,6 +571,14 @@ pre {
   .grid,
   .healthGrid,
   .pairingPanel {
+    grid-template-columns: 1fr;
+  }
+
+  .workspaceManagerHeader {
+    flex-direction: column;
+  }
+
+  .workspaceRow {
     grid-template-columns: 1fr;
   }
 

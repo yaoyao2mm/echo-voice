@@ -5,10 +5,13 @@ const output = document.querySelector("#output");
 const envPath = document.querySelector("#envPath");
 const healthGrid = document.querySelector("#healthGrid");
 const pairingQr = document.querySelector("#pairingQr");
+const workspaceRows = document.querySelector("#workspaceRows");
+const workspaceRaw = document.querySelector('[data-key="ECHO_CODEX_WORKSPACES"]');
 const tabs = document.querySelectorAll(".tab");
 const panels = document.querySelectorAll(".panel");
 
 let pairingUrl = "";
+let workspaceHealthItems = [];
 
 if (!settingsKey) {
   writeOutput("Missing local settings key.", true);
@@ -38,6 +41,7 @@ function bindEvents() {
   document.querySelector("#refreshHealth").addEventListener("click", loadHealth);
   document.querySelector("#refreshPairingQr").addEventListener("click", loadPairing);
   document.querySelector("#copyPairingUrl").addEventListener("click", copyPairingUrl);
+  document.querySelector("#addWorkspace").addEventListener("click", () => addWorkspaceRow());
 }
 
 function showPanel(name) {
@@ -50,6 +54,8 @@ async function loadState() {
     const state = await apiGet("/api/state");
     envPath.textContent = state.envFile;
     fillForm(state.fields);
+    workspaceHealthItems = state.health?.workspaces?.items || [];
+    renderWorkspaceRows(parseWorkspaceValue(valueOf(state.fields, "ECHO_CODEX_WORKSPACES")));
     renderHealth(state.health);
     await loadPairing();
     writeOutput(formatState(state));
@@ -90,6 +96,8 @@ async function copyPairingUrl() {
 async function loadHealth() {
   try {
     const state = await apiGet("/api/desktop/health");
+    workspaceHealthItems = state.health?.workspaces?.items || [];
+    renderWorkspaceStatuses();
     renderHealth(state.health);
     writeOutput("Health refreshed.");
   } catch (error) {
@@ -189,8 +197,6 @@ function fillForm(fields) {
     } else if (input.dataset.secret === "true") {
       input.value = "";
       input.placeholder = field.set ? "已设置，留空保持" : "未设置";
-    } else if (key === "ECHO_CODEX_WORKSPACES") {
-      input.value = String(field.value || "").split(",").join("\n");
     } else {
       input.value = field.value || "";
     }
@@ -208,6 +214,14 @@ async function saveConfig() {
   const values = {};
   const clearSecrets = {};
 
+  const workspaceValidation = validateWorkspaceRows();
+  if (!workspaceValidation.ok) {
+    writeOutput(workspaceValidation.message, true);
+    showPanel("codex");
+    return;
+  }
+  workspaceRaw.value = serializeWorkspaceRows();
+
   for (const input of form.querySelectorAll("[data-key]")) {
     const key = input.dataset.key;
     values[key] = input.type === "checkbox" ? input.checked : input.value;
@@ -221,6 +235,7 @@ async function saveConfig() {
     writeOutput("Saving...");
     const result = await apiPost("/api/config", { values, clearSecrets });
     fillForm(result.fields);
+    renderWorkspaceRows(parseWorkspaceValue(valueOf(result.fields, "ECHO_CODEX_WORKSPACES")));
     await loadPairing();
     writeOutput("Saved. Restart the desktop agent for running services to pick up the new config.");
   } catch (error) {
@@ -289,6 +304,146 @@ function formatCommandResult(result) {
 
 function valueOf(fields, key) {
   return fields[key]?.value || "";
+}
+
+function parseWorkspaceValue(value) {
+  return String(value || "")
+    .split(/[,\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const [label, rawPath] = item.includes("=") ? item.split("=", 2) : ["", item];
+      const path = (rawPath || label || "").trim();
+      return {
+        label: (rawPath ? label : "").trim() || defaultWorkspaceLabel(path),
+        path
+      };
+    });
+}
+
+function renderWorkspaceRows(items) {
+  workspaceRows.replaceChildren();
+  if (!items.length) {
+    workspaceRows.append(renderWorkspaceEmpty());
+    addWorkspaceRow({ label: "echo", path: "" });
+    return;
+  }
+
+  for (const item of items) addWorkspaceRow(item);
+  renderWorkspaceStatuses();
+}
+
+function renderWorkspaceEmpty() {
+  const node = document.createElement("div");
+  node.className = "workspaceEmpty";
+  node.textContent = "还没有授权工程目录。添加至少一个目录后，手机端才能选择项目。";
+  return node;
+}
+
+function addWorkspaceRow(item = {}) {
+  workspaceRows.querySelector(".workspaceEmpty")?.remove();
+
+  const row = document.createElement("div");
+  row.className = "workspaceRow";
+
+  const labelField = document.createElement("label");
+  labelField.className = "workspaceField";
+  const labelTitle = document.createElement("span");
+  labelTitle.textContent = "项目名";
+  const labelInput = document.createElement("input");
+  labelInput.dataset.workspaceLabel = "true";
+  labelInput.placeholder = "echo";
+  labelInput.value = item.label || defaultWorkspaceLabel(item.path || "");
+  labelField.append(labelTitle, labelInput);
+
+  const pathField = document.createElement("label");
+  pathField.className = "workspaceField";
+  const pathTitle = document.createElement("span");
+  pathTitle.textContent = "本机路径";
+  const pathInput = document.createElement("input");
+  pathInput.dataset.workspacePath = "true";
+  pathInput.placeholder = "/Users/john/workspace/projects/echo";
+  pathInput.value = item.path || "";
+  pathInput.addEventListener("input", () => {
+    if (!labelInput.value.trim()) labelInput.value = defaultWorkspaceLabel(pathInput.value);
+    renderWorkspaceStatuses();
+  });
+  pathField.append(pathTitle, pathInput);
+
+  const removeButton = document.createElement("button");
+  removeButton.type = "button";
+  removeButton.textContent = "删除";
+  removeButton.addEventListener("click", () => {
+    row.remove();
+    if (!workspaceRows.querySelector(".workspaceRow")) workspaceRows.append(renderWorkspaceEmpty());
+  });
+
+  const status = document.createElement("div");
+  status.className = "workspaceStatus";
+  status.dataset.workspaceStatus = "true";
+
+  row.append(labelField, pathField, removeButton, status);
+  workspaceRows.append(row);
+  renderWorkspaceStatuses();
+}
+
+function workspaceRowsData() {
+  return Array.from(workspaceRows.querySelectorAll(".workspaceRow"))
+    .map((row) => ({
+      label: row.querySelector("[data-workspace-label]")?.value.trim() || "",
+      path: row.querySelector("[data-workspace-path]")?.value.trim() || "",
+      row
+    }))
+    .filter((item) => item.label || item.path);
+}
+
+function serializeWorkspaceRows() {
+  return workspaceRowsData()
+    .map((item) => `${item.label || defaultWorkspaceLabel(item.path)}=${item.path}`)
+    .join(",");
+}
+
+function validateWorkspaceRows() {
+  const rows = workspaceRowsData();
+  if (!rows.length) return { ok: false, message: "请至少添加一个 Codex 工程目录。" };
+
+  const labels = new Set();
+  for (const item of rows) {
+    if (!item.path) return { ok: false, message: "每个工程目录都需要填写本机路径。" };
+    const label = item.label || defaultWorkspaceLabel(item.path);
+    if (!label) return { ok: false, message: "每个工程目录都需要项目名。" };
+    const id = label.toLowerCase();
+    if (labels.has(id)) return { ok: false, message: `项目名重复：${label}` };
+    labels.add(id);
+  }
+
+  return { ok: true, message: "" };
+}
+
+function renderWorkspaceStatuses() {
+  const healthByLabel = new Map(workspaceHealthItems.map((item) => [String(item.label || "").trim(), item]));
+  const healthByPath = new Map(workspaceHealthItems.map((item) => [String(item.path || "").trim(), item]));
+  for (const item of workspaceRowsData()) {
+    const status = item.row.querySelector("[data-workspace-status]");
+    const health = healthByPath.get(item.path) || healthByLabel.get(item.label);
+    status.classList.remove("ok", "bad");
+    if (!item.path) {
+      status.textContent = "填写本机绝对路径。";
+      return;
+    }
+    if (!health) {
+      status.textContent = "保存后刷新状态检查目录。";
+      return;
+    }
+    status.textContent = health.ok ? "目录存在，手机端可选择。" : health.detail || "目录不可用。";
+    status.classList.add(health.ok ? "ok" : "bad");
+  }
+}
+
+function defaultWorkspaceLabel(value) {
+  const text = String(value || "").trim().replace(/\\+$/g, "").replace(/\/+$/g, "");
+  if (!text) return "";
+  return text.split(/[\\/]/).filter(Boolean).pop() || "workspace";
 }
 
 function writeOutput(text, isError = false) {

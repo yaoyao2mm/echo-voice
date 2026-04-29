@@ -187,10 +187,17 @@
               <input data-key="ECHO_CODEX_ENABLED" type="checkbox" />
               <span>启用 Mobile Codex Remote</span>
             </label>
-            <label class="wide">
-              Workspaces
-              <textarea data-key="ECHO_CODEX_WORKSPACES" rows="5"></textarea>
-            </label>
+            <div class="wide workspaceManager">
+              <div class="workspaceManagerHeader">
+                <div>
+                  <h3>工程目录</h3>
+                  <p>这些目录会出现在手机端“项目”下拉框里。Codex 只会在这里授权的目录中执行。</p>
+                </div>
+                <button type="button" id="addWorkspace">添加目录</button>
+              </div>
+              <div id="workspaceRows" class="workspaceRows"></div>
+              <textarea data-key="ECHO_CODEX_WORKSPACES" class="workspaceRaw" rows="4" aria-hidden="true" tabindex="-1"></textarea>
+            </div>
             <label>
               Command
               <input data-key="ECHO_CODEX_COMMAND" autocomplete="off" />

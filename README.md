@@ -107,6 +107,8 @@ The native window also installs a menu bar item. Closing the settings window hid
 
 The Overview tab checks the relay config, app-managed or launchd agent, Codex CLI, and allowlisted workspaces.
 
+The Codex tab has an engineering directory manager. Add one row per local project, give it a short project name, and save; after restarting the desktop agent, those project names appear in the phone UI as the selectable Codex working directories.
+
 The Overview tab also shows a pairing QR code. Scan it from the phone to open the mobile UI with the pairing token already attached, so the phone page no longer needs a manually pasted token.
 
 If web login is enabled, the phone page asks for the configured user before it accepts the paired token. Browser users send both a login session and the pairing token; desktop agents still authenticate with `ECHO_TOKEN` only.
