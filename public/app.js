@@ -32,6 +32,8 @@ const elements = {
   authenticated: Array.from(document.querySelectorAll("[data-authenticated]")),
   codexStatusText: document.querySelector("#codexStatusText"),
   codexQueueMeta: document.querySelector("#codexQueueMeta"),
+  activeSessionTitle: document.querySelector("#activeSessionTitle"),
+  activeSessionMeta: document.querySelector("#activeSessionMeta"),
   refreshCodex: document.querySelector("#refreshCodex"),
   codexProject: document.querySelector("#codexProject"),
   codexPrompt: document.querySelector("#codexPrompt"),
@@ -43,6 +45,7 @@ const elements = {
   codexJobDetail: document.querySelector("#codexJobDetail"),
   codexRunSummary: document.querySelector("#codexRunSummary"),
   codexApprovals: document.querySelector("#codexApprovals"),
+  runLog: document.querySelector(".run-log"),
   codexLog: document.querySelector("#codexLog")
 };
 
@@ -470,7 +473,11 @@ function startNewCodexSession() {
   selectedCodexJobId = "";
   selectedCodexSession = null;
   composingNewSession = true;
-  elements.codexJobDetail.hidden = true;
+  renderEmptySessionDetail({
+    title: "新会话",
+    meta: "选择项目后发送任务。",
+    body: "把一个灵感、bug 或任务交给本机 Codex。"
+  });
   for (const button of elements.codexJobs.querySelectorAll(".codex-job")) {
     button.classList.remove("active");
   }
@@ -573,46 +580,106 @@ function updateComposerAvailability() {
 
 async function loadCodexJobs() {
   const data = await apiGet("/api/codex/sessions");
-  const jobs = data.items.slice(0, 8);
+  const jobs = data.items.slice(0, 30);
   elements.codexJobs.innerHTML = "";
   if (jobs.length === 0) {
     elements.codexJobs.innerHTML = `<div class="empty-state">还没有 Codex 会话</div>`;
-    elements.codexJobDetail.hidden = true;
     selectedCodexSession = null;
+    if (!composingNewSession) {
+      selectedCodexJobId = "";
+      renderEmptySessionDetail({
+        title: "新会话",
+        meta: "发送第一条任务后，会话会出现在左侧。",
+        body: "手机负责捕捉想法，本机 Codex 负责执行。"
+      });
+    }
     return;
   }
 
   if (!selectedCodexJobId && !composingNewSession) {
-    selectedCodexJobId = jobs[0].id;
+    selectedCodexJobId = preferredSession(jobs)?.id || jobs[0].id;
   } else if (selectedCodexJobId && !jobs.some((job) => job.id === selectedCodexJobId)) {
-    selectedCodexJobId = composingNewSession ? "" : jobs[0].id;
+    selectedCodexJobId = composingNewSession ? "" : preferredSession(jobs)?.id || jobs[0].id;
   }
 
-  for (const job of jobs) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.dataset.jobId = job.id;
-    button.className = "codex-job";
-    button.classList.toggle("active", job.id === selectedCodexJobId);
-    button.innerHTML = `
-      <span class="status-pill ${escapeHtml(job.status)}">${escapeHtml(statusLabel(job.status))}</span>
-      <strong>${escapeHtml(job.projectId)} · ${escapeHtml(formatRelativeTime(job.completedAt || job.startedAt || job.createdAt))}</strong>
-      <span>${escapeHtml(jobPreview(job))}</span>
-      ${job.pendingApprovalCount ? `<span class="approval-count">${escapeHtml(job.pendingApprovalCount)} 个待审批</span>` : ""}
+  for (const group of sessionGroups(jobs)) {
+    if (group.items.length === 0) continue;
+    const section = document.createElement("section");
+    section.className = "session-group";
+    section.innerHTML = `
+      <div class="session-group-title">
+        <span>${escapeHtml(group.title)}</span>
+        <span>${escapeHtml(group.items.length)}</span>
+      </div>
     `;
-    button.addEventListener("click", () => {
-      composingNewSession = false;
-      showCodexJob(job.id);
-    });
-    elements.codexJobs.append(button);
+    for (const job of group.items) {
+      section.append(renderSessionButton(job));
+    }
+    elements.codexJobs.append(section);
   }
 
   if (selectedCodexJobId) {
     await showCodexJob(selectedCodexJobId, { keepSelection: true });
   } else {
     selectedCodexSession = null;
-    elements.codexJobDetail.hidden = true;
+    renderEmptySessionDetail({
+      title: "新会话",
+      meta: "当前不会覆盖任何历史会话。",
+      body: "发送后会创建独立会话；选中左侧会话时则会继续该会话。"
+    });
   }
+}
+
+function renderSessionButton(job) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.dataset.jobId = job.id;
+    button.className = "codex-job";
+    button.classList.toggle("active", job.id === selectedCodexJobId);
+    button.innerHTML = `
+      <div class="session-meta-row">
+        <span class="status-pill ${escapeHtml(job.status)}">${escapeHtml(statusLabel(job.status))}</span>
+        <span class="session-time">${escapeHtml(formatRelativeTime(sessionTime(job)))}</span>
+      </div>
+      <strong>${escapeHtml(jobTitle(job))}</strong>
+      <span>${escapeHtml(job.projectId)} · ${escapeHtml(jobPreview(job))}</span>
+      ${job.pendingApprovalCount ? `<span class="approval-count">${escapeHtml(job.pendingApprovalCount)} 个待审批</span>` : ""}
+    `;
+    button.addEventListener("click", () => {
+      composingNewSession = false;
+      showCodexJob(job.id);
+    });
+    return button;
+}
+
+function preferredSession(jobs) {
+  return (
+    jobs.find((job) => job.pendingApprovalCount > 0) ||
+    jobs.find((job) => ["queued", "starting", "running"].includes(job.status)) ||
+    jobs.find((job) => job.status === "active") ||
+    jobs[0]
+  );
+}
+
+function sessionGroups(jobs) {
+  const needsAction = [];
+  const running = [];
+  const continuable = [];
+  const history = [];
+
+  for (const job of jobs) {
+    if (job.pendingApprovalCount > 0) needsAction.push(job);
+    else if (["queued", "starting", "running"].includes(job.status)) running.push(job);
+    else if (job.status === "active") continuable.push(job);
+    else history.push(job);
+  }
+
+  return [
+    { title: "需要处理", items: needsAction },
+    { title: "运行中", items: running },
+    { title: "可继续", items: continuable },
+    { title: "历史", items: history }
+  ];
 }
 
 function statusLabel(status) {
@@ -642,11 +709,14 @@ async function showCodexJob(id, options = {}) {
   const errorText = humanizeCodexError(job.error || job.lastError);
   const output = jobOutput(job, errorText);
   elements.codexJobDetail.hidden = false;
+  elements.runLog.hidden = false;
+  elements.activeSessionTitle.textContent = jobTitle(job);
+  elements.activeSessionMeta.textContent = `${job.projectId} · ${statusLabel(job.status)} · ${formatRelativeTime(sessionTime(job))}`;
   elements.codexRunSummary.innerHTML = `
     <div class="run-summary-head">
       <span class="status-pill ${escapeHtml(job.status)}">${escapeHtml(statusLabel(job.status))}</span>
       <strong>${escapeHtml(job.projectId)}</strong>
-      <span>${escapeHtml(formatRelativeTime(job.completedAt || job.startedAt || job.createdAt))}</span>
+      <span>${escapeHtml(formatRelativeTime(sessionTime(job)))}</span>
     </div>
     <div class="run-block-title">任务</div>
     <div class="run-prompt">${escapeHtml(sessionPrompt(job))}</div>
@@ -663,6 +733,22 @@ async function showCodexJob(id, options = {}) {
   ].filter(Boolean);
   elements.codexLog.textContent = lines.join("\n\n");
   updateComposerAvailability();
+}
+
+function renderEmptySessionDetail({ title, meta, body }) {
+  elements.codexJobDetail.hidden = false;
+  elements.activeSessionTitle.textContent = title;
+  elements.activeSessionMeta.textContent = meta;
+  elements.codexApprovals.hidden = true;
+  elements.codexApprovals.innerHTML = "";
+  elements.runLog.hidden = true;
+  elements.codexLog.textContent = "";
+  elements.codexRunSummary.innerHTML = `
+    <div class="empty-session">
+      <strong>${escapeHtml(title)}</strong>
+      <p>${escapeHtml(body)}</p>
+    </div>
+  `;
 }
 
 function renderApprovals(session) {
@@ -752,9 +838,17 @@ function jobPreview(job) {
   return sessionPrompt(job).slice(0, 140);
 }
 
+function jobTitle(job) {
+  return String(job.title || sessionPrompt(job) || "Codex 会话").split(/\s+/).join(" ").slice(0, 72);
+}
+
 function sessionPrompt(session) {
   const userEvent = (session.events || []).find((event) => event.type === "user.message");
   return userEvent?.text || session.title || "";
+}
+
+function sessionTime(session) {
+  return session.updatedAt || session.completedAt || session.startedAt || session.createdAt;
 }
 
 function formatRelativeTime(value) {

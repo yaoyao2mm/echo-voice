@@ -10,8 +10,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Echo Codex</title>
-    <link rel="manifest" href="/manifest.webmanifest?v=15" />
-    <link rel="stylesheet" href="/styles.css?v=15" />
+    <link rel="manifest" href="/manifest.webmanifest?v=16" />
+    <link rel="stylesheet" href="/styles.css?v=16" />
   </head>
   <body>
     <main class="shell">
@@ -66,44 +66,61 @@
       </section>
 
       <section id="codexView" class="codex-section" data-authenticated hidden>
-        <div class="status-strip">
-          <div>
+        <aside class="session-sidebar" aria-label="Codex 会话">
+          <div class="sidebar-head">
+            <div>
+              <span class="section-kicker">会话</span>
+              <strong>Codex</strong>
+            </div>
+            <button id="newCodexSessionButton" class="secondary compact-action" type="button">新建</button>
+          </div>
+          <div class="sidebar-status">
             <strong id="codexStatusText">等待桌面 agent</strong>
             <p id="codexQueueMeta" class="codex-runtime"></p>
           </div>
-          <button id="refreshCodex" class="icon-button" type="button" title="刷新 Codex" aria-label="刷新 Codex">
-            ↻
-          </button>
-        </div>
+          <div id="codexJobs" class="codex-jobs"></div>
+        </aside>
 
-        <section class="composer">
-          <label class="field-label" for="codexProject">项目</label>
-          <select id="codexProject" class="select"></select>
-          <label class="field-label" for="codexPrompt">任务</label>
-          <textarea id="codexPrompt" rows="9" placeholder="说一个灵感、bug 或要交给 Codex 的任务。"></textarea>
-          <div class="composer-footer">
-            <label class="postprocess-toggle" for="postprocessToggle">
-              <input id="postprocessToggle" type="checkbox" role="switch" />
-              <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-              <span id="postprocessLabel">后处理</span>
-            </label>
-            <button id="newCodexSessionButton" class="secondary compact-action" type="button">新会话</button>
-            <button id="sendCodexButton" class="codex-submit" type="button">发送</button>
+        <section class="codex-main" aria-label="Codex 当前会话">
+          <div class="status-strip">
+            <div>
+              <strong id="activeSessionTitle">新会话</strong>
+              <p id="activeSessionMeta" class="codex-runtime">选择一个会话，或者直接发送新任务。</p>
+            </div>
+            <button id="refreshCodex" class="icon-button" type="button" title="刷新 Codex" aria-label="刷新 Codex">
+              ↻
+            </button>
           </div>
-        </section>
 
-        <div id="codexJobs" class="codex-jobs"></div>
-        <section id="codexJobDetail" class="codex-job-detail" hidden>
-          <div id="codexRunSummary" class="codex-run-summary"></div>
-          <div id="codexApprovals" class="codex-approvals" hidden></div>
-          <details class="run-log">
-            <summary>运行日志</summary>
-            <pre id="codexLog" class="codex-log"></pre>
-          </details>
+          <section id="codexJobDetail" class="codex-job-detail">
+            <div id="codexRunSummary" class="codex-run-summary"></div>
+            <div id="codexApprovals" class="codex-approvals" hidden></div>
+            <details class="run-log">
+              <summary>运行日志</summary>
+              <pre id="codexLog" class="codex-log"></pre>
+            </details>
+          </section>
+
+          <section class="composer">
+            <div class="composer-project-row">
+              <label class="field-label" for="codexProject">项目</label>
+              <select id="codexProject" class="select"></select>
+            </div>
+            <label class="field-label" for="codexPrompt">任务</label>
+            <textarea id="codexPrompt" rows="7" placeholder="说一个灵感、bug 或要交给 Codex 的任务。"></textarea>
+            <div class="composer-footer">
+              <label class="postprocess-toggle" for="postprocessToggle">
+                <input id="postprocessToggle" type="checkbox" role="switch" />
+                <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+                <span id="postprocessLabel">后处理</span>
+              </label>
+              <button id="sendCodexButton" class="codex-submit" type="button">发送</button>
+            </div>
+          </section>
         </section>
       </section>
     </main>
 
-    <script src="/app.js?v=15" type="module"></script>
+    <script src="/app.js?v=16" type="module"></script>
   </body>
 </html>
