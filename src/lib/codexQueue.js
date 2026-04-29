@@ -1,19 +1,14 @@
 import { EventEmitter } from "node:events";
 import {
-  acquireNextJob,
   acquireNextSessionCommand,
-  appendEvents as appendStoredEvents,
   appendSessionEvents as appendStoredSessionEvents,
-  completeJob as completeStoredJob,
+  archiveSession as archiveStoredSession,
   completeSessionCommand as completeStoredSessionCommand,
-  createJob as createStoredJob,
   createSessionApproval as createStoredSessionApproval,
   createSession as createStoredSession,
   decideSessionApproval as decideStoredSessionApproval,
   enqueueSessionMessage as enqueueStoredSessionMessage,
-  getJob as getStoredJob,
   getSession as getStoredSession,
-  listJobs as listStoredJobs,
   listSessions as listStoredSessions,
   statusSnapshot,
   touchAgent,
@@ -29,25 +24,6 @@ export function updateCodexAgent(input = {}) {
 
 export function codexStatus() {
   return statusSnapshot();
-}
-
-export function createCodexJob(input) {
-  const prompt = String(input.prompt || "").trim();
-  const projectId = String(input.projectId || "").trim();
-  if (!prompt) {
-    const error = new Error("Codex task prompt is required.");
-    error.statusCode = 400;
-    throw error;
-  }
-  if (!projectId) {
-    const error = new Error("Codex project is required.");
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const job = createStoredJob({ projectId, prompt });
-  events.emit("codex-job");
-  return job;
 }
 
 export function createCodexSession(input) {
@@ -75,44 +51,18 @@ export function enqueueCodexSessionMessage(id, input = {}) {
   return session;
 }
 
-export function listCodexJobs(limit = 20) {
-  return listStoredJobs(limit);
-}
-
-export function listCodexSessions(limit = 20) {
-  return listStoredSessions(limit);
-}
-
-export function getCodexJob(id) {
-  return getStoredJob(id);
+export function listCodexSessions(limit = 20, options = {}) {
+  return listStoredSessions(limit, options);
 }
 
 export function getCodexSession(id) {
   return getStoredSession(id);
 }
 
-export async function waitForCodexJob(input = {}) {
-  const agent = updateCodexAgent(input.agent || {});
-  const immediateJob = acquireNextJob({ agentId: agent.id, workspaces: agent.workspaces });
-  if (immediateJob) return buildAgentJob(immediateJob);
-
-  const waitMs = clampWaitMs(input.waitMs);
-  return new Promise((resolve) => {
-    const timeout = setTimeout(() => {
-      events.off("codex-job", handleJob);
-      resolve(null);
-    }, waitMs);
-
-    function handleJob() {
-      const job = acquireNextJob({ agentId: agent.id, workspaces: agent.workspaces });
-      if (!job) return;
-      clearTimeout(timeout);
-      events.off("codex-job", handleJob);
-      resolve(buildAgentJob(job));
-    }
-
-    events.on("codex-job", handleJob);
-  });
+export function archiveCodexSession(id, input = {}) {
+  const session = archiveStoredSession(id, input);
+  if (session) events.emit("codex-session-command");
+  return session;
 }
 
 export async function waitForCodexSessionCommand(input = {}) {
@@ -137,12 +87,6 @@ export async function waitForCodexSessionCommand(input = {}) {
 
     events.on("codex-session-command", handleCommand);
   });
-}
-
-export function appendCodexEvents(id, incomingEvents = [], options = {}) {
-  if (options.agent) updateCodexAgent(options.agent);
-  else if (options.agentId) touchAgent(options.agentId);
-  return appendStoredEvents(id, incomingEvents, { agentId: options.agentId || options.agent?.id });
 }
 
 export function appendCodexSessionEvents(id, incomingEvents = [], options = {}) {
@@ -192,29 +136,12 @@ export async function waitForCodexSessionApproval(id, input = {}) {
   });
 }
 
-export function completeCodexJob(id, result = {}, options = {}) {
-  if (options.agent) updateCodexAgent(options.agent);
-  else if (options.agentId) touchAgent(options.agentId);
-  const ok = completeStoredJob(id, result, { agentId: options.agentId || options.agent?.id });
-  if (ok) events.emit("codex-job");
-  return ok;
-}
-
 export function completeCodexSessionCommand(id, result = {}, options = {}) {
   if (options.agent) updateCodexAgent(options.agent);
   else if (options.agentId) touchAgent(options.agentId);
   const ok = completeStoredSessionCommand(id, result, { agentId: options.agentId || options.agent?.id });
   if (ok) events.emit("codex-session-command");
   return ok;
-}
-
-function buildAgentJob(job) {
-  return {
-    id: job.id,
-    projectId: job.projectId,
-    prompt: job.prompt,
-    createdAt: job.createdAt
-  };
 }
 
 function clampWaitMs(value) {

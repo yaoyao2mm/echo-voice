@@ -9,7 +9,7 @@ Echo should not become a remote shell. It should be a guarded task queue for loc
 - The desktop agent is the only process that can touch local repositories or run Codex.
 - The desktop agent only makes outbound HTTPS requests to the relay.
 - Codex jobs run only inside `ECHO_CODEX_WORKSPACES`.
-- The default phone runtime uses local `codex app-server` over stdio, with the relay/desktop agent boundary intact. The one-shot `codex exec --json` path remains as a conservative fallback/test path.
+- The default phone runtime uses local `codex app-server` over stdio, with the relay/desktop agent boundary intact. The old one-shot execution path is no longer exposed through the mobile or agent API.
 
 This keeps the core promise clear: say or type an idea on the phone, queue it for Codex, run it on the local PC, and watch progress without exposing the local machine to inbound internet traffic.
 
@@ -51,8 +51,8 @@ Goal: submit a task from the phone, run it locally, and show a useful result.
 
 - Keep the relay plus desktop-agent architecture.
 - Keep `ECHO_CODEX_WORKSPACES` as the only project selection mechanism.
-- Run tasks with `codex exec --json`.
-- Show desktop online status, allowed projects, queued/running job, recent jobs, logs, errors, and final message.
+- Run tasks as interactive Codex app-server sessions.
+- Show desktop online status, allowed projects, running sessions, recent conversations, archive state, logs, errors, and final message.
 - Keep the default sandbox at `workspace-write`.
 
 ### Implementation Tasks
@@ -143,7 +143,7 @@ Goal: make long-running tasks feel visible and controllable.
 
 ### Implementation Tasks
 
-- Add `GET /api/codex/jobs/:id/events` as an SSE endpoint.
+- Add an interactive session event stream as an SSE endpoint.
 - Keep polling endpoints as fallback.
 - Split job detail into:
   - overview
@@ -376,7 +376,7 @@ Goal: let each queued idea run in its own local Git worktree, so Codex can chang
 - For each job, create a job branch and worktree under a desktop-controlled directory, for example:
   - branch: `echo/job-<short-id>`
   - worktree: `~/.echo-voice/worktrees/<workspace-id>/<job-id>`
-- Run `codex exec --json` inside the job worktree.
+- Start or resume the Codex app-server session inside the job worktree.
 - Store the worktree path, branch name, base branch, base commit, and final commit status on the job.
 - Keep the original workspace untouched unless the user explicitly applies or merges the result.
 

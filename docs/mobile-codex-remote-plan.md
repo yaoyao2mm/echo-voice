@@ -9,7 +9,7 @@ See [Mobile Codex Remote Roadmap](mobile-codex-roadmap.md) for the detailed impl
 ## Phase 1: One-Shot Local Codex Tasks
 
 - Phone submits a structured task to the public relay.
-- Desktop agent polls the relay, validates the selected project against `ECHO_CODEX_WORKSPACES`, then runs `codex exec --json`.
+- Desktop agent polls the relay, validates the selected project against `ECHO_CODEX_WORKSPACES`, then starts or continues a local `codex app-server` thread.
 - Relay stores task status, recent events, final message, and errors.
 - Phone shows desktop online status, allowlisted projects, recent tasks, and job logs.
 - Safety default: no arbitrary shell endpoint, no arbitrary paths, `workspace-write` sandbox.
@@ -31,7 +31,7 @@ See [Mobile Codex Remote Roadmap](mobile-codex-roadmap.md) for the detailed impl
 
 ## Phase 4: Interactive Session
 
-- Use Codex `app-server` or `exec-server` to support real interactive sessions.
+- Use Codex `app-server` to support real interactive sessions.
 - Stream structured events instead of polling static logs.
 - Handle approvals and human input from the phone.
 - Support session resume/fork from mobile.

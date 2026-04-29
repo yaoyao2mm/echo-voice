@@ -10,8 +10,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Echo Codex</title>
-    <link rel="manifest" href="/manifest.webmanifest?v=16" />
-    <link rel="stylesheet" href="/styles.css?v=16" />
+    <link rel="manifest" href="/manifest.webmanifest?v=17" />
+    <link rel="stylesheet" href="/styles.css?v=17" />
   </head>
   <body>
     <main class="shell">
@@ -66,13 +66,24 @@
       </section>
 
       <section id="codexView" class="codex-section" data-authenticated hidden>
+        <button id="sessionBackdrop" class="session-backdrop" type="button" aria-label="关闭会话列表" hidden></button>
         <aside class="session-sidebar" aria-label="Codex 会话">
           <div class="sidebar-head">
             <div>
               <span class="section-kicker">会话</span>
               <strong>Codex</strong>
             </div>
-            <button id="newCodexSessionButton" class="secondary compact-action" type="button">新建</button>
+            <div class="sidebar-head-actions">
+              <button id="newCodexSessionButton" class="secondary compact-action" type="button">新建</button>
+              <button id="closeSessionsButton" class="icon-button sidebar-close" type="button" title="关闭会话" aria-label="关闭会话">×</button>
+            </div>
+          </div>
+          <div class="sidebar-tools">
+            <input id="sessionSearch" type="search" autocomplete="off" placeholder="搜索会话" />
+            <div class="session-filter" role="tablist" aria-label="会话筛选">
+              <button id="showActiveSessionsButton" class="active" type="button">最近</button>
+              <button id="showArchivedSessionsButton" type="button">归档</button>
+            </div>
           </div>
           <div class="sidebar-status">
             <strong id="codexStatusText">等待桌面 agent</strong>
@@ -83,6 +94,7 @@
 
         <section class="codex-main" aria-label="Codex 当前会话">
           <div class="status-strip">
+            <button id="toggleSessionsButton" class="secondary session-drawer-button" type="button">会话</button>
             <div>
               <strong id="activeSessionTitle">新会话</strong>
               <p id="activeSessionMeta" class="codex-runtime">选择一个会话，或者直接发送新任务。</p>
@@ -103,8 +115,25 @@
 
           <section class="composer">
             <div class="composer-project-row">
-              <label class="field-label" for="codexProject">项目</label>
-              <select id="codexProject" class="select"></select>
+              <div class="composer-project-head">
+                <label class="field-label" for="projectPickerButton">项目</label>
+                <span class="composer-project-caption">切换本机工程目录</span>
+              </div>
+              <button
+                id="projectPickerButton"
+                class="project-picker"
+                type="button"
+                aria-haspopup="dialog"
+                aria-expanded="false"
+                aria-controls="projectSheet"
+              >
+                <span class="project-picker-copy">
+                  <span id="projectPickerLabel" class="project-picker-label">等待桌面 agent</span>
+                  <span id="projectPickerMeta" class="project-picker-meta">桌面端启动后会同步可切换项目。</span>
+                </span>
+                <span class="project-picker-chevron" aria-hidden="true">⌄</span>
+              </button>
+              <select id="codexProject" class="sr-only" tabindex="-1" aria-hidden="true"></select>
             </div>
             <label class="field-label" for="codexPrompt">任务</label>
             <textarea id="codexPrompt" rows="7" placeholder="说一个灵感、bug 或要交给 Codex 的任务。"></textarea>
@@ -121,6 +150,39 @@
       </section>
     </main>
 
-    <script src="/app.js?v=16" type="module"></script>
+    <div id="projectSheet" class="project-sheet" hidden aria-hidden="true">
+      <button
+        id="projectSheetBackdrop"
+        class="project-sheet-backdrop"
+        type="button"
+        aria-label="关闭项目选择"
+      ></button>
+      <section
+        class="project-sheet-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="projectSheetTitle"
+      >
+        <div class="project-sheet-grabber" aria-hidden="true"></div>
+        <div class="project-sheet-head">
+          <div>
+            <span class="section-kicker">工作目录</span>
+            <strong id="projectSheetTitle">切换项目</strong>
+            <p id="projectSheetStatus">桌面端授权的目录会出现在这里。</p>
+          </div>
+          <button
+            id="closeProjectSheetButton"
+            class="icon-button project-sheet-close"
+            type="button"
+            aria-label="关闭项目选择"
+          >
+            ×
+          </button>
+        </div>
+        <div id="projectSheetList" class="project-sheet-list" role="listbox" aria-label="项目列表"></div>
+      </section>
+    </div>
+
+    <script src="/app.js?v=17" type="module"></script>
   </body>
 </html>

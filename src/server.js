@@ -16,21 +16,16 @@ import {
   verifySessionToken
 } from "./lib/auth.js";
 import {
-  appendCodexEvents,
   appendCodexSessionEvents,
+  archiveCodexSession,
   codexStatus,
-  completeCodexJob,
   completeCodexSessionCommand,
-  createCodexJob,
   createCodexSessionApproval,
   createCodexSession,
   decideCodexSessionApproval,
   enqueueCodexSessionMessage,
-  getCodexJob,
   getCodexSession,
-  listCodexJobs,
   listCodexSessions,
-  waitForCodexJob,
   waitForCodexSessionApproval,
   waitForCodexSessionCommand
 } from "./lib/codexQueue.js";
@@ -201,46 +196,12 @@ app.get("/api/codex/status", (req, res) => {
   res.json(codexStatus());
 });
 
-app.get("/api/codex/jobs", (req, res) => {
-  if (config.mode !== "relay") {
-    return res.status(400).json({ error: "Codex remote control is only available in relay mode." });
-  }
-
-  res.json({ items: listCodexJobs(30) });
-});
-
-app.post("/api/codex/jobs", (req, res) => {
-  try {
-    if (config.mode !== "relay") {
-      return res.status(400).json({ error: "Codex remote control is only available in relay mode." });
-    }
-
-    const job = createCodexJob({
-      projectId: req.body.projectId,
-      prompt: req.body.prompt
-    });
-    res.json({ job });
-  } catch (error) {
-    handleError(res, error);
-  }
-});
-
-app.get("/api/codex/jobs/:id", (req, res) => {
-  if (config.mode !== "relay") {
-    return res.status(400).json({ error: "Codex remote control is only available in relay mode." });
-  }
-
-  const job = getCodexJob(req.params.id);
-  if (!job) return res.status(404).json({ error: "Codex job not found." });
-  res.json({ job });
-});
-
 app.get("/api/codex/sessions", (req, res) => {
   if (config.mode !== "relay") {
     return res.status(400).json({ error: "Codex interactive sessions are only available in relay mode." });
   }
 
-  res.json({ items: listCodexSessions(30) });
+  res.json({ items: listCodexSessions(30, { archived: req.query.archived === "true" }) });
 });
 
 app.post("/api/codex/sessions", (req, res) => {
@@ -284,6 +245,21 @@ app.post("/api/codex/sessions/:id/messages", (req, res) => {
   }
 });
 
+app.post("/api/codex/sessions/:id/archive", (req, res) => {
+  try {
+    if (config.mode !== "relay") {
+      return res.status(400).json({ error: "Codex interactive sessions are only available in relay mode." });
+    }
+
+    const session = archiveCodexSession(req.params.id, {
+      archived: req.body.archived !== false
+    });
+    res.json({ session });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
 app.post("/api/codex/sessions/:id/approvals/:approvalId", (req, res) => {
   try {
     if (config.mode !== "relay") {
@@ -305,48 +281,6 @@ app.post("/api/codex/sessions/:id/approvals/:approvalId", (req, res) => {
   } catch (error) {
     handleError(res, error);
   }
-});
-
-app.post("/api/agent/codex/next", async (req, res) => {
-  try {
-    if (config.mode !== "relay") {
-      return res.status(400).json({ error: "Codex agent polling is only available in relay mode." });
-    }
-
-    const job = await waitForCodexJob({
-      waitMs: Number(req.query.wait || req.body.wait || 25000),
-      agent: {
-        id: req.body.agentId || req.body.agent?.id,
-        workspaces: req.body.workspaces || [],
-        runtime: req.body.runtime || {}
-      }
-    });
-    res.json({ job });
-  } catch (error) {
-    handleError(res, error);
-  }
-});
-
-app.post("/api/agent/codex/events", (req, res) => {
-  if (config.mode !== "relay") {
-    return res.status(400).json({ error: "Codex agent events are only available in relay mode." });
-  }
-
-  const ok = appendCodexEvents(req.body.id, req.body.events || [], {
-    agentId: req.body.agentId
-  });
-  res.json({ ok });
-});
-
-app.post("/api/agent/codex/complete", (req, res) => {
-  if (config.mode !== "relay") {
-    return res.status(400).json({ error: "Codex agent completion is only available in relay mode." });
-  }
-
-  const ok = completeCodexJob(req.body.id, req.body.result || {}, {
-    agentId: req.body.agentId
-  });
-  res.json({ ok });
 });
 
 app.post("/api/agent/codex/sessions/next", async (req, res) => {

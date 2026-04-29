@@ -189,18 +189,19 @@ The primary Codex remote mode is now interactive:
 - The phone can submit prompts, but cannot choose arbitrary filesystem paths or shell commands.
 - The phone composer has a post-processing switch: when it is on, Echo refines the prompt before sending; when it is off, Echo sends the original input.
 - The phone creates an app-server backed Codex session, shows current status, latest output, full logs, and final result.
+- Conversations are managed in a Codex/Gemini-style session workbench: search recent sessions, continue a selected session, and archive/restore old sessions.
 - If Codex asks for a command or file-change approval, Echo pauses the local app-server request and shows Approve/Deny controls on the phone.
 - Pressing "继续" sends another user message into the selected Codex session instead of starting from scratch.
 - Pressing "新会话" clears the selection so the next prompt starts a fresh Codex thread.
 - The desktop agent only starts sessions inside `ECHO_CODEX_WORKSPACES`.
 - The default sandbox is `workspace-write`; on a trusted personal machine you can set `ECHO_CODEX_SANDBOX=danger-full-access` to mirror the current full-access Codex workflow.
 - The default interactive approval policy is `on-request`. Approval requests wait up to `ECHO_CODEX_APPROVAL_TIMEOUT_MS` before Echo returns a timeout/cancel response to Codex.
-- The relay persists Codex jobs, interactive sessions, agent heartbeats, leases, logs, and final messages in SQLite under `~/.echo-voice/echo.sqlite`.
+- The relay persists interactive sessions, approvals, agent heartbeats, leases, logs, archive state, and final messages in SQLite under `~/.echo-voice/echo.sqlite`.
 - Future worktree mode will let each queued task run in a separate local Git worktree before you apply or discard the result.
 
 See [docs/mobile-codex-roadmap.md](docs/mobile-codex-roadmap.md) for the implementation roadmap.
 
-The legacy one-shot queue still exists internally and in tests, but the phone UI is moving to Codex `app-server` sessions so follow-up context can behave much closer to the desktop Codex client.
+The desktop agent now polls only interactive Codex app-server session commands. The old one-shot queue is no longer exposed through the mobile or agent API.
 
 ## Product Shape
 

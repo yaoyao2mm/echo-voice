@@ -15,67 +15,6 @@ const store = await import("../src/lib/codexStore.js");
 const queue = await import("../src/lib/codexQueue.js");
 const db = new Database(path.join(tempHome, ".echo-voice", "echo.sqlite"));
 
-test("agent event and completion writes require the active lease", () => {
-  store.resetStoreForTest();
-
-  const created = store.createJob({ projectId: "demo", prompt: "ship it" });
-  const running = store.acquireNextJob({
-    agentId: "agent-a",
-    workspaces: [{ id: "demo", path: process.cwd() }]
-  });
-
-  assert.equal(running.id, created.id);
-  assert.equal(store.appendEvents(created.id, [{ type: "output", text: "wrong" }]), false);
-  assert.equal(store.appendEvents(created.id, [{ type: "output", text: "wrong" }], { agentId: "agent-b" }), false);
-  assert.equal(store.appendEvents(created.id, [{ type: "output", text: "right" }], { agentId: "agent-a" }), true);
-  assert.equal(store.completeJob(created.id, { ok: true, exitCode: 0 }, { agentId: "agent-b" }), false);
-  assert.equal(store.completeJob(created.id, { ok: false, error: "boom" }, { agentId: "agent-a" }), true);
-
-  const completed = store.getJob(created.id);
-  assert.equal(completed.status, "failed");
-  assert.equal(completed.error, "boom");
-  assert.equal(completed.events.some((event) => event.text === "right"), true);
-  assert.equal(store.appendEvents(created.id, [{ type: "output", text: "late" }], { agentId: "agent-a" }), false);
-});
-
-test("completion status follows ok, errors, and exit codes", () => {
-  store.resetStoreForTest();
-
-  const failedByExit = store.createJob({ projectId: "demo", prompt: "fail" });
-  store.acquireNextJob({ agentId: "agent-a", workspaces: [{ id: "demo", path: process.cwd() }] });
-  assert.equal(store.completeJob(failedByExit.id, { ok: true, exitCode: 1 }, { agentId: "agent-a" }), true);
-  assert.equal(store.getJob(failedByExit.id).status, "failed");
-
-  const failedByError = store.createJob({ projectId: "demo", prompt: "error" });
-  store.acquireNextJob({ agentId: "agent-a", workspaces: [{ id: "demo", path: process.cwd() }] });
-  assert.equal(store.completeJob(failedByError.id, { ok: true, error: "nope" }, { agentId: "agent-a" }), true);
-  assert.equal(store.getJob(failedByError.id).status, "failed");
-
-  const completed = store.createJob({ projectId: "demo", prompt: "done" });
-  store.acquireNextJob({ agentId: "agent-a", workspaces: [{ id: "demo", path: process.cwd() }] });
-  assert.equal(
-    store.completeJob(completed.id, { ok: true, exitCode: 0, finalMessage: "done" }, { agentId: "agent-a" }),
-    true
-  );
-  assert.equal(store.getJob(completed.id).status, "completed");
-  assert.equal(store.getJob(completed.id).finalMessage, "done");
-});
-
-test("agent polling clamps invalid wait values and still returns immediate jobs", async () => {
-  store.resetStoreForTest();
-
-  const created = queue.createCodexJob({ projectId: "demo", prompt: "queued" });
-  const job = await queue.waitForCodexJob({
-    waitMs: "not-a-number",
-    agent: {
-      id: "agent-a",
-      workspaces: [{ id: "demo", path: process.cwd() }]
-    }
-  });
-
-  assert.equal(job.id, created.id);
-});
-
 test("status advertises only online agent workspaces", () => {
   store.resetStoreForTest();
 
@@ -256,4 +195,29 @@ test("interactive Codex approvals wait for mobile decisions", async () => {
   assert.equal(detail.pendingApprovalCount, 0);
   assert.equal(detail.approvals.length, 0);
   assert.equal(detail.events.some((event) => event.type === "approval.approved"), true);
+});
+
+test("interactive Codex sessions can be archived and restored", async () => {
+  store.resetStoreForTest();
+
+  const agent = {
+    id: "archive-agent",
+    workspaces: [{ id: "demo", path: process.cwd() }]
+  };
+  const session = queue.createCodexSession({ projectId: "demo", prompt: "整理历史会话" });
+  const command = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  queue.appendCodexSessionEvents(session.id, [{ type: "thread.started", text: "started", appThreadId: "thr_archive" }], {
+    agentId: agent.id
+  });
+  queue.completeCodexSessionCommand(command.id, { ok: true, appThreadId: "thr_archive", sessionStatus: "active" }, { agentId: agent.id });
+
+  assert.equal(queue.listCodexSessions(10).some((item) => item.id === session.id), true);
+  const archived = queue.archiveCodexSession(session.id, { archived: true });
+  assert.equal(Boolean(archived.archivedAt), true);
+  assert.equal(queue.listCodexSessions(10).some((item) => item.id === session.id), false);
+  assert.equal(queue.listCodexSessions(10, { archived: true }).some((item) => item.id === session.id), true);
+
+  const restored = queue.archiveCodexSession(session.id, { archived: false });
+  assert.equal(restored.archivedAt, null);
+  assert.equal(queue.listCodexSessions(10).some((item) => item.id === session.id), true);
 });

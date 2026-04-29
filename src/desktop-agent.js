@@ -1,7 +1,7 @@
 import { config } from "./config.js";
 import { loadDesktopAgentId } from "./lib/agentIdentity.js";
 import { CodexInteractiveRuntime } from "./lib/codexInteractiveRunner.js";
-import { publicCodexRuntime, publicWorkspaces, runCodexJob } from "./lib/codexRunner.js";
+import { publicCodexRuntime, publicWorkspaces } from "./lib/codexRunner.js";
 import { describeHttpNetwork, formatFetchError, httpFetch } from "./lib/http.js";
 
 if (!config.relayUrl) {
@@ -33,39 +33,7 @@ if (config.codex.enabled) {
 console.log("Waiting for mobile Codex tasks.\n");
 
 if (config.codex.enabled) {
-  runCodexLoop();
   runCodexSessionLoop();
-}
-
-async function runCodexLoop() {
-  while (true) {
-    let job = null;
-    try {
-      job = await pollNextCodexJob();
-      if (!job) continue;
-
-      console.log(`[${new Date().toLocaleTimeString()}] codex ${job.id} in ${job.projectId}`);
-      const heartbeat = startCodexLeaseHeartbeat(job.id);
-      const result = await runCodexJob(job, {
-        onEvents: (events) => postJson("/api/agent/codex/events", { id: job.id, agentId, events }).catch(() => {})
-      }).finally(() => clearInterval(heartbeat));
-      await postJson("/api/agent/codex/complete", { id: job.id, agentId, result });
-      console.log(`  codex ${result.ok ? "completed" : "failed"} (${result.exitCode ?? "no exit code"})`);
-    } catch (error) {
-      console.error(`[codex ${new Date().toLocaleTimeString()}] ${formatFetchError(error)}`);
-      if (job?.id) {
-        await postJson("/api/agent/codex/complete", {
-          id: job.id,
-          agentId,
-          result: {
-            ok: false,
-            error: error.message
-          }
-        }).catch(() => {});
-      }
-      await sleep(2500);
-    }
-  }
 }
 
 async function runCodexSessionLoop() {
@@ -130,24 +98,6 @@ async function requestCodexApproval(approval) {
     : { decision: "cancel" };
 }
 
-async function pollNextCodexJob() {
-  const response = await httpFetch(`${config.relayUrl}/api/agent/codex/next?wait=25000`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders()
-    },
-    body: JSON.stringify({
-      agentId,
-      workspaces: publicWorkspaces(),
-      runtime: publicCodexRuntime()
-    }),
-    timeoutMs: 35000
-  });
-  const data = await parseApiResponse(response);
-  return data.job || null;
-}
-
 async function pollNextCodexSessionCommand() {
   const response = await httpFetch(`${config.relayUrl}/api/agent/codex/sessions/next?wait=25000`, {
     method: "POST",
@@ -164,13 +114,6 @@ async function pollNextCodexSessionCommand() {
   });
   const data = await parseApiResponse(response);
   return data.command || null;
-}
-
-function startCodexLeaseHeartbeat(jobId) {
-  const intervalMs = Math.max(15000, Math.min(Math.floor(config.codex.leaseMs / 2), 30000));
-  return setInterval(() => {
-    postJson("/api/agent/codex/events", { id: jobId, agentId, events: [] }).catch(() => {});
-  }, intervalMs);
 }
 
 function startCodexSessionHeartbeat(sessionId) {

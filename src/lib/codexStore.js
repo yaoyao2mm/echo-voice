@@ -97,7 +97,8 @@ const summarizeSessionColumns = `
   last_error AS lastError,
   final_message AS finalMessage,
   leased_by AS leasedBy,
-  lease_expires_at AS leaseExpiresAt
+  lease_expires_at AS leaseExpiresAt,
+  archived_at AS archivedAt
 `;
 
 const summarizeSessionCommandColumns = `
@@ -430,12 +431,14 @@ export function createSession({ projectId, prompt }) {
   return getSessionSummary(sessionId);
 }
 
-export function listSessions(limit = 20) {
+export function listSessions(limit = 20, options = {}) {
   reclaimExpiredSessionCommandLeases();
+  const archived = Boolean(options.archived);
 
   return db.prepare(`
     SELECT ${summarizeSessionColumns}
     FROM codex_sessions
+    WHERE archived_at ${archived ? "IS NOT NULL" : "IS NULL"}
     ORDER BY updated_at DESC, created_at DESC
     LIMIT ?
   `).all(Math.max(1, Math.min(Number(limit) || 20, 100))).map(summarizeSession);
@@ -453,9 +456,46 @@ export function getSession(id) {
   };
 }
 
+export function archiveSession(id, input = {}) {
+  const session = getSessionSummary(id);
+  if (!session) return notFound("Codex session not found.");
+
+  const archive = input.archived !== false;
+  if (
+    archive &&
+    (["queued", "starting", "running"].includes(session.status) ||
+      session.pendingCommandCount > 0 ||
+      session.pendingApprovalCount > 0)
+  ) {
+    return conflict("Running Codex sessions cannot be archived yet.");
+  }
+
+  const now = nowIso();
+  db.prepare(`
+    UPDATE codex_sessions
+    SET archived_at = @archivedAt,
+        updated_at = @now
+    WHERE id = @id
+  `).run({
+    id,
+    archivedAt: archive ? now : null,
+    now
+  });
+
+  insertSessionEvent.run(
+    normalizeSessionEvent(id, {
+      type: archive ? "session.archived" : "session.restored",
+      text: archive ? "Session archived." : "Session restored."
+    }, now)
+  );
+
+  return getSessionSummary(id);
+}
+
 export function enqueueSessionMessage(sessionId, text) {
   const session = getSessionSummary(sessionId);
   if (!session) return notFound("Codex session not found.");
+  if (session.archivedAt) return conflict("Restore this Codex session before continuing it.");
   if (["closed", "failed", "stale"].includes(session.status)) {
     return conflict("This Codex session is no longer active.");
   }
@@ -918,6 +958,17 @@ function migrate() {
     CREATE INDEX IF NOT EXISTS idx_codex_session_approvals_status
       ON codex_session_approvals(status, created_at);
   `);
+
+  ensureColumn("codex_sessions", "archived_at", "TEXT");
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_codex_sessions_archived_updated
+      ON codex_sessions(archived_at, updated_at);
+  `);
+}
+
+function ensureColumn(table, column, definition) {
+  const exists = db.prepare(`PRAGMA table_info(${table})`).all().some((info) => info.name === column);
+  if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
 
 function reclaimExpiredLeases() {
@@ -1026,13 +1077,16 @@ function sessionStatusSnapshot() {
     SELECT COUNT(*) AS count
     FROM codex_sessions
     WHERE status IN ('starting', 'active', 'running')
+      AND archived_at IS NULL
   `).get().count;
   const pendingApprovals = db.prepare("SELECT COUNT(*) AS count FROM codex_session_approvals WHERE status = 'pending'").get().count;
+  const archivedSessions = db.prepare("SELECT COUNT(*) AS count FROM codex_sessions WHERE archived_at IS NOT NULL").get().count;
 
   return {
     queuedCommands,
     activeSessions,
     pendingApprovals,
+    archivedSessions,
     recent: listSessions(8)
   };
 }

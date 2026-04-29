@@ -23,6 +23,14 @@ export class CodexInteractiveRuntime {
     throw new Error(`Unsupported Codex session command: ${command.type}`);
   }
 
+  stop() {
+    this.client?.stop();
+    this.client = null;
+    this.sessions.clear();
+    this.threadToSession.clear();
+    this.activeTurns.clear();
+  }
+
   async #startSession(command, workspace) {
     const threadResult = await this.client.request("thread/start", this.#threadConfig(workspace), 120000);
     const appThreadId = threadResult?.thread?.id;
