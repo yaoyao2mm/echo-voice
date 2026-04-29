@@ -83,7 +83,29 @@ sudo systemctl enable --now echo-voice
 sudo systemctl status echo-voice
 ```
 
-## 4. Desktop Agent
+## 4. Deploy Updates
+
+From your workstation:
+
+```bash
+pnpm run deploy:relay -- root@YOUR_SERVER /opt/echo-voice
+```
+
+The script performs a fast-forward pull, runs `pnpm install --prod --frozen-lockfile`, updates the service to `pnpm run relay` if needed, and restarts `echo-voice.service`.
+
+For GitHub Actions deployment, configure these repository secrets:
+
+```text
+ECHO_DEPLOY_HOST=YOUR_SERVER
+ECHO_DEPLOY_USER=root
+ECHO_DEPLOY_PATH=/opt/echo-voice
+ECHO_DEPLOY_SERVICE=echo-voice.service
+ECHO_DEPLOY_SSH_KEY=<private key with server access>
+```
+
+`ECHO_DEPLOY_KNOWN_HOSTS` is optional. If omitted, the workflow uses `ssh-keyscan`.
+
+## 5. Desktop Agent
 
 On the computer that should run local Codex:
 
@@ -124,7 +146,7 @@ pnpm run desktop:mac -- doctor
 
 `system` follows the macOS HTTP/HTTPS proxy. If your VPN client only exposes SOCKS, enable its HTTP/mixed proxy port and set `ECHO_PROXY_URL=http://127.0.0.1:PORT` instead.
 
-## 5. Phone URL
+## 6. Phone URL
 
 Open:
 

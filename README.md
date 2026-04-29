@@ -133,6 +133,23 @@ pnpm run desktop:mac -- doctor
 
 Open `https://voice.example.com/?token=a-long-random-secret` on the phone. See [docs/internet-deploy.md](docs/internet-deploy.md) for Nginx, systemd, and HTTPS notes.
 
+### Deploy Updates
+
+For the relay host, use the shared deploy script:
+
+```bash
+pnpm run deploy:relay -- root@YOUR_SERVER /opt/echo-voice
+```
+
+The GitHub Actions workflow `.github/workflows/deploy-relay.yml` can deploy automatically on pushes to `main` after these repository secrets are configured:
+
+- `ECHO_DEPLOY_HOST`
+- `ECHO_DEPLOY_SSH_KEY`
+- `ECHO_DEPLOY_USER` optional, defaults to `root`
+- `ECHO_DEPLOY_PATH` optional, defaults to `/opt/echo-voice`
+- `ECHO_DEPLOY_SERVICE` optional, defaults to `echo-voice.service`
+- `ECHO_DEPLOY_KNOWN_HOSTS` optional, otherwise the workflow uses `ssh-keyscan`
+
 ## Prompt Refinement Setup
 
 For text refinement with an OpenAI-compatible chat endpoint:

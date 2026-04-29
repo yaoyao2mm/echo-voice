@@ -24,12 +24,13 @@
     "desktop:mac:dmg": "bash scripts/macos-create-dmg.sh",
     "desktop:settings": "node scripts/desktop-settings.js --open",
     "desktop:mac": "bash scripts/macos-desktop-agent.sh",
+    "deploy:relay": "bash scripts/deploy-relay.sh",
     "dev": "node --watch src/server.js",
     "android:usb": "node scripts/adb-reverse.js",
     "doctor:network": "node scripts/network-doctor.js",
     "check": "pnpm run check:js && pnpm run check:shell",
     "check:js": "node --check src/server.js && node --check src/config.js && node --check src/desktop-agent.js && node --check src/lib/refine.js && node --check src/lib/codexQueue.js && node --check src/lib/codexStore.js && node --check src/lib/agentIdentity.js && node --check public/app.js && node --check public/sw.js && node --check desktop-settings/app.js && node --check desktop-app/main.cjs && node --check scripts/desktop-settings.js && node --check scripts/network-doctor.js",
-    "check:shell": "bash -n scripts/macos-desktop-agent.sh && bash -n scripts/macos-create-app.sh && bash -n scripts/macos-create-dmg.sh"
+    "check:shell": "bash -n scripts/macos-desktop-agent.sh && bash -n scripts/macos-create-app.sh && bash -n scripts/macos-create-dmg.sh && bash -n scripts/deploy-relay.sh"
   },
   "engines": {
     "node": ">=20"

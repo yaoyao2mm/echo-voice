@@ -1,0 +1,64 @@
+name: Deploy Relay
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: echo-relay-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy relay over SSH
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check deployment secrets
+        id: deploy_secrets
+        env:
+          ECHO_DEPLOY_HOST: ${{ secrets.ECHO_DEPLOY_HOST }}
+          ECHO_DEPLOY_SSH_KEY: ${{ secrets.ECHO_DEPLOY_SSH_KEY }}
+        run: |
+          if [ -n "$ECHO_DEPLOY_HOST" ] && [ -n "$ECHO_DEPLOY_SSH_KEY" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "Deployment secrets are not configured; skipping deploy."
+          fi
+
+      - name: Configure SSH
+        if: steps.deploy_secrets.outputs.configured == 'true'
+        env:
+          ECHO_DEPLOY_HOST: ${{ secrets.ECHO_DEPLOY_HOST }}
+          ECHO_DEPLOY_SSH_KEY: ${{ secrets.ECHO_DEPLOY_SSH_KEY }}
+          ECHO_DEPLOY_KNOWN_HOSTS: ${{ secrets.ECHO_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$ECHO_DEPLOY_SSH_KEY" > ~/.ssh/echo_deploy_key
+          chmod 600 ~/.ssh/echo_deploy_key
+
+          if [ -n "$ECHO_DEPLOY_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$ECHO_DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -H "$ECHO_DEPLOY_HOST" > ~/.ssh/known_hosts
+          fi
+
+      - name: Deploy
+        if: steps.deploy_secrets.outputs.configured == 'true'
+        env:
+          ECHO_DEPLOY_HOST: ${{ secrets.ECHO_DEPLOY_HOST }}
+          ECHO_DEPLOY_USER: ${{ secrets.ECHO_DEPLOY_USER }}
+          ECHO_DEPLOY_PATH: ${{ secrets.ECHO_DEPLOY_PATH }}
+          ECHO_DEPLOY_SERVICE: ${{ secrets.ECHO_DEPLOY_SERVICE }}
+          ECHO_DEPLOY_SSH_KEY_PATH: ~/.ssh/echo_deploy_key
+        run: |
+          target="${ECHO_DEPLOY_USER:-root}@${ECHO_DEPLOY_HOST}"
+          export ECHO_DEPLOY_PATH="${ECHO_DEPLOY_PATH:-/opt/echo-voice}"
+          export ECHO_DEPLOY_SERVICE="${ECHO_DEPLOY_SERVICE:-echo-voice.service}"
+          scripts/deploy-relay.sh "$target" "$ECHO_DEPLOY_PATH"
