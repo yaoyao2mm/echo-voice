@@ -1445,7 +1445,9 @@ function migrate() {
   ensureColumn("codex_sessions", "runtime_json", "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn("codex_sessions", "execution_json", "TEXT NOT NULL DEFAULT '{}'");
   ensureSessionStatuses();
+  repairSessionForeignKeyReferences();
   ensureSessionCommandTypes();
+  repairSessionForeignKeyReferences();
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_codex_sessions_status_updated
       ON codex_sessions(status, updated_at);
@@ -1455,6 +1457,27 @@ function migrate() {
 
     CREATE INDEX IF NOT EXISTS idx_codex_sessions_archived_updated
       ON codex_sessions(archived_at, updated_at);
+
+    CREATE INDEX IF NOT EXISTS idx_codex_session_commands_status_created
+      ON codex_session_commands(status, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_codex_session_commands_session
+      ON codex_session_commands(session_id, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_codex_session_events_session_id
+      ON codex_session_events(session_id, id);
+
+    CREATE INDEX IF NOT EXISTS idx_codex_session_messages_session
+      ON codex_session_messages(session_id, created_at, id);
+
+    CREATE INDEX IF NOT EXISTS idx_codex_session_attachments_message
+      ON codex_session_attachments(message_id, created_at, id);
+
+    CREATE INDEX IF NOT EXISTS idx_codex_session_approvals_session
+      ON codex_session_approvals(session_id, status, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_codex_session_approvals_status
+      ON codex_session_approvals(status, created_at);
   `);
 }
 
@@ -1469,6 +1492,7 @@ function ensureSessionStatuses() {
 
   db.exec(`
     PRAGMA foreign_keys = OFF;
+    PRAGMA legacy_alter_table = ON;
     BEGIN TRANSACTION;
     ALTER TABLE codex_sessions RENAME TO codex_sessions_old;
     CREATE TABLE codex_sessions (
@@ -1524,8 +1548,157 @@ function ensureSessionStatuses() {
     FROM codex_sessions_old;
     DROP TABLE codex_sessions_old;
     COMMIT;
+    PRAGMA legacy_alter_table = OFF;
     PRAGMA foreign_keys = ON;
   `);
+}
+
+function repairSessionForeignKeyReferences() {
+  const brokenTables = db.prepare(`
+    SELECT name
+    FROM sqlite_master
+    WHERE type = 'table'
+      AND sql LIKE '%codex_sessions_old%'
+  `).all();
+  if (brokenTables.length === 0) return;
+
+  db.exec(`
+    PRAGMA foreign_keys = OFF;
+    PRAGMA legacy_alter_table = ON;
+  `);
+
+  try {
+    const repair = db.transaction(() => {
+      const names = brokenTables.map((table) => table.name).filter((name) => sessionChildTableSchema(name));
+      for (const name of names) {
+        const backupName = repairTableName(name);
+        db.exec(`DROP TABLE IF EXISTS ${quoteIdentifier(backupName)}`);
+        db.exec(`ALTER TABLE ${quoteIdentifier(name)} RENAME TO ${quoteIdentifier(backupName)}`);
+      }
+      for (const name of names) {
+        db.exec(sessionChildTableSchema(name));
+        copyCommonColumns(repairTableName(name), name);
+        db.exec(`DROP TABLE ${quoteIdentifier(repairTableName(name))}`);
+      }
+    });
+    repair();
+  } finally {
+    db.exec(`
+      PRAGMA legacy_alter_table = OFF;
+      PRAGMA foreign_keys = ON;
+    `);
+  }
+}
+
+function sessionChildTableSchema(name) {
+  if (name === "codex_session_commands") {
+    return `
+      CREATE TABLE codex_session_commands (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES codex_sessions(id) ON DELETE CASCADE,
+        type TEXT NOT NULL CHECK (type IN ('start', 'message', 'stop', 'compact')),
+        payload_json TEXT NOT NULL DEFAULT '{}',
+        status TEXT NOT NULL CHECK (status IN ('queued', 'leased', 'done', 'failed')),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        leased_by TEXT,
+        lease_expires_at TEXT,
+        error TEXT NOT NULL DEFAULT ''
+      )
+    `;
+  }
+  if (name === "codex_session_events") {
+    return `
+      CREATE TABLE codex_session_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL REFERENCES codex_sessions(id) ON DELETE CASCADE,
+        at TEXT NOT NULL,
+        type TEXT NOT NULL,
+        text TEXT NOT NULL DEFAULT '',
+        raw_json TEXT
+      )
+    `;
+  }
+  if (name === "codex_session_messages") {
+    return `
+      CREATE TABLE codex_session_messages (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES codex_sessions(id) ON DELETE CASCADE,
+        role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+        text TEXT NOT NULL DEFAULT '',
+        command_id TEXT,
+        external_key TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(session_id, external_key)
+      )
+    `;
+  }
+  if (name === "codex_session_attachments") {
+    return `
+      CREATE TABLE codex_session_attachments (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES codex_sessions(id) ON DELETE CASCADE,
+        message_id TEXT NOT NULL REFERENCES codex_session_messages(id) ON DELETE CASCADE,
+        type TEXT NOT NULL CHECK (type IN ('image')),
+        original_name TEXT NOT NULL DEFAULT '',
+        mime_type TEXT NOT NULL DEFAULT '',
+        size_bytes INTEGER NOT NULL DEFAULT 0,
+        sha256 TEXT NOT NULL DEFAULT '',
+        storage_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(storage_key)
+      )
+    `;
+  }
+  if (name === "codex_session_approvals") {
+    return `
+      CREATE TABLE codex_session_approvals (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES codex_sessions(id) ON DELETE CASCADE,
+        app_request_id TEXT NOT NULL,
+        method TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'denied', 'timed_out')),
+        prompt TEXT NOT NULL DEFAULT '',
+        payload_json TEXT NOT NULL DEFAULT '{}',
+        response_json TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        decided_at TEXT,
+        decided_by TEXT NOT NULL DEFAULT '',
+        requested_by TEXT NOT NULL DEFAULT '',
+        UNIQUE(session_id, app_request_id)
+      )
+    `;
+  }
+  return "";
+}
+
+function copyCommonColumns(fromTable, toTable) {
+  const fromColumns = tableColumns(fromTable);
+  const toColumns = tableColumns(toTable);
+  const fromColumnNames = new Set(fromColumns.map((column) => column.name));
+  const commonColumns = toColumns.map((column) => column.name).filter((name) => fromColumnNames.has(name));
+  if (commonColumns.length === 0) return;
+
+  const columnList = commonColumns.map(quoteIdentifier).join(", ");
+  db.prepare(`
+    INSERT INTO ${quoteIdentifier(toTable)} (${columnList})
+    SELECT ${columnList}
+    FROM ${quoteIdentifier(fromTable)}
+  `).run();
+}
+
+function tableColumns(table) {
+  return db.prepare(`PRAGMA table_info(${quoteIdentifier(table)})`).all();
+}
+
+function repairTableName(name) {
+  return `__echo_repair_${name}`;
+}
+
+function quoteIdentifier(value) {
+  return `"${String(value).replaceAll('"', '""')}"`;
 }
 
 function ensureSessionCommandTypes() {
@@ -1534,6 +1707,7 @@ function ensureSessionCommandTypes() {
 
   db.exec(`
     PRAGMA foreign_keys = OFF;
+    PRAGMA legacy_alter_table = ON;
     BEGIN TRANSACTION;
     ALTER TABLE codex_session_commands RENAME TO codex_session_commands_old;
     CREATE TABLE codex_session_commands (
@@ -1555,6 +1729,7 @@ function ensureSessionCommandTypes() {
     FROM codex_session_commands_old;
     DROP TABLE codex_session_commands_old;
     COMMIT;
+    PRAGMA legacy_alter_table = OFF;
     PRAGMA foreign_keys = ON;
 
     CREATE INDEX IF NOT EXISTS idx_codex_session_commands_status_created
