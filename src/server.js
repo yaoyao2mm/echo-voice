@@ -238,15 +238,15 @@ app.get("/api/codex/attachments/:id", (req, res) => {
     return res.status(400).json({ error: "Codex attachments are only available in relay mode." });
   }
 
-  const attachment = getCodexSessionAttachmentContent(req.params.id);
-  if (!attachment) return res.status(404).json({ error: "Codex attachment not found." });
-  if (!fs.existsSync(attachment.filePath)) {
-    return res.status(410).json({ error: "Codex attachment file is no longer available." });
+  sendCodexAttachment(req, res);
+});
+
+app.get("/api/agent/codex/attachments/:id", (req, res) => {
+  if (config.mode !== "relay") {
+    return res.status(400).json({ error: "Codex attachments are only available in relay mode." });
   }
 
-  res.setHeader("Cache-Control", "no-store, max-age=0");
-  res.type(attachment.mimeType || "application/octet-stream");
-  res.sendFile(attachment.filePath);
+  sendCodexAttachment(req, res);
 });
 
 app.post("/api/codex/sessions/:id/messages", (req, res) => {
@@ -437,6 +437,18 @@ function handleError(res, error) {
   res.status(status).json({
     error: error.message || "Unexpected error"
   });
+}
+
+function sendCodexAttachment(req, res) {
+  const attachment = getCodexSessionAttachmentContent(req.params.id);
+  if (!attachment) return res.status(404).json({ error: "Codex attachment not found." });
+  if (!fs.existsSync(attachment.filePath)) {
+    return res.status(410).json({ error: "Codex attachment file is no longer available." });
+  }
+
+  res.setHeader("Cache-Control", "no-store, max-age=0");
+  res.type(attachment.mimeType || "application/octet-stream");
+  res.sendFile(attachment.filePath);
 }
 
 function currentSessionUser(req) {

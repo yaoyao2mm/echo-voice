@@ -495,18 +495,11 @@ export function installCore(app) {
   };
 
   app.modelSupportsImages = function modelSupportsImages(value) {
-    const normalized = String(value || "").trim();
-    return !normalized;
+    return true;
   };
 
   app.runtimeForAttachments = function runtimeForAttachments(runtime = {}, attachments = []) {
-    if (!Array.isArray(attachments) || attachments.length === 0) return runtime;
-    const normalized = app.normalizeRuntimeChoice(runtime);
-    if (app.modelSupportsImages(normalized.model)) return runtime;
-    return {
-      ...runtime,
-      model: ""
-    };
+    return runtime;
   };
 
   app.reasoningDisplayName = function reasoningDisplayName(value) {

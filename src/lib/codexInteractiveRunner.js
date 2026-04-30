@@ -1,9 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { config } from "../config.js";
 import { CodexAppServerClient, buildUserInputs } from "./codexAppServerClient.js";
 import { codexCompatibleModel } from "./codexRuntime.js";
+import { httpFetch } from "./http.js";
+
+const maxDownloadedAttachmentBytes = 10 * 1024 * 1024;
 
 export class CodexInteractiveRuntime {
   constructor(options = {}) {
@@ -386,7 +389,7 @@ export class CodexInteractiveRuntime {
 
     const attachmentDir = await this.#ensureAttachmentDir(workspace.path, sessionId, threadId);
     for (const [index, attachment] of images.entries()) {
-      const image = parseImageDataUrl(String(attachment.url || ""));
+      const image = await loadImageAttachment(attachment);
       if (!image) continue;
       const filePath = path.join(attachmentDir, buildAttachmentFileName(attachment, index, image.extension));
       await fs.writeFile(filePath, image.buffer, { mode: 0o600 });
@@ -443,6 +446,73 @@ function parseImageDataUrl(url) {
     extension: extensionFromMimeType(mimeType),
     buffer: Buffer.from(base64, "base64")
   };
+}
+
+async function loadImageAttachment(attachment) {
+  const dataUrl = String(attachment?.url || "").trim();
+  if (dataUrl.startsWith("data:image/")) return parseImageDataUrl(dataUrl);
+  return downloadRelayImageAttachment(attachment);
+}
+
+async function downloadRelayImageAttachment(attachment) {
+  const url = relayAttachmentUrl(attachment);
+  if (!url) return null;
+
+  const response = await httpFetch(url, {
+    headers: {
+      "X-Echo-Token": config.token
+    },
+    timeoutMs: config.network.timeoutMs
+  });
+  if (!response.ok) {
+    throw new Error(`Could not download Codex attachment ${attachmentLabel(attachment)}: HTTP ${response.status}`);
+  }
+
+  const contentLength = Number(response.headers.get("content-length") || 0);
+  if (contentLength > maxDownloadedAttachmentBytes) {
+    throw new Error(`Codex attachment ${attachmentLabel(attachment)} is too large to download.`);
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.length > maxDownloadedAttachmentBytes) {
+    throw new Error(`Codex attachment ${attachmentLabel(attachment)} is too large to download.`);
+  }
+
+  const expectedSha = String(attachment?.sha256 || "").trim().toLowerCase();
+  if (expectedSha) {
+    const actualSha = createHash("sha256").update(buffer).digest("hex");
+    if (actualSha !== expectedSha) {
+      throw new Error(`Downloaded Codex attachment ${attachmentLabel(attachment)} did not match its checksum.`);
+    }
+  }
+
+  const mimeType = imageMimeType(response.headers.get("content-type") || attachment?.mimeType || "");
+  return {
+    mimeType,
+    extension: extensionFromMimeType(mimeType),
+    buffer
+  };
+}
+
+function relayAttachmentUrl(attachment) {
+  const explicitPath = String(attachment?.downloadPath || "").trim();
+  const attachmentId = String(attachment?.attachmentId || attachment?.id || "").trim();
+  const pathOrUrl = explicitPath || (attachmentId ? `/api/agent/codex/attachments/${encodeURIComponent(attachmentId)}` : "");
+  if (!pathOrUrl) return "";
+  if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
+  if (!config.relayUrl) throw new Error("Cannot download Codex attachment because ECHO_RELAY_URL is not configured.");
+  return new URL(pathOrUrl, `${config.relayUrl}/`).toString();
+}
+
+function imageMimeType(value) {
+  const mimeType = String(value || "").split(";")[0].trim().toLowerCase();
+  if (!mimeType) return "image/png";
+  if (!mimeType.startsWith("image/")) throw new Error(`Codex attachment is not an image: ${mimeType}`);
+  return mimeType;
+}
+
+function attachmentLabel(attachment) {
+  return String(attachment?.name || attachment?.attachmentId || attachment?.id || "image").trim() || "image";
 }
 
 function extensionFromMimeType(mimeType) {

@@ -447,7 +447,7 @@ export function createSession({ projectId, prompt, attachments, runtime }) {
   const normalizedPrompt = String(prompt || "").trim();
   const normalizedProjectId = String(projectId || "").trim();
   const stagedAttachments = stageSessionAttachments({ sessionId, messageId, attachments, createdAt: now });
-  const normalizedRuntime = normalizeRuntime(runtimeForAttachments(runtime, stagedAttachments));
+  const normalizedRuntime = normalizeRuntime(runtime);
   if (!normalizedPrompt && stagedAttachments.length === 0) {
     cleanupStagedAttachments(stagedAttachments);
     return badRequest("Codex session prompt or screenshot is required.");
@@ -598,7 +598,7 @@ export function enqueueSessionMessage(sessionId, input = {}) {
   const messageId = crypto.randomUUID();
   const message = String(input.text || input.prompt || "").trim();
   const stagedAttachments = stageSessionAttachments({ sessionId, messageId, attachments: input.attachments, createdAt: now });
-  const runtime = normalizeRuntime(runtimeForAttachments(Object.keys(input.runtime || {}).length > 0 ? input.runtime : session.runtime, stagedAttachments));
+  const runtime = normalizeRuntime(Object.keys(input.runtime || {}).length > 0 ? input.runtime : session.runtime);
   if (!message && stagedAttachments.length === 0) {
     cleanupStagedAttachments(stagedAttachments);
     return badRequest("Codex message or screenshot is required.");
@@ -1666,16 +1666,6 @@ function normalizeRuntime(runtime = {}) {
     : {};
 }
 
-function runtimeForAttachments(runtime = {}, attachments = []) {
-  if (!Array.isArray(attachments) || attachments.length === 0) return runtime;
-  const normalized = normalizeRuntime(runtime);
-  if (!normalized.model) return runtime;
-  return {
-    ...runtime,
-    model: ""
-  };
-}
-
 function stageSessionAttachments({ sessionId, messageId, attachments = [], createdAt }) {
   const normalized = normalizeSessionAttachments(attachments);
   const staged = [];
@@ -1744,12 +1734,14 @@ function attachmentRefsFromRows(rows = []) {
 
 function commandAttachmentsFromMessage(message) {
   return (message.attachments || []).map((attachment) => ({
-    type: "localImage",
-    path: attachmentAbsolutePath(attachment.storageKey),
+    type: "image",
+    id: attachment.id,
     attachmentId: attachment.id,
     name: attachment.name,
     mimeType: attachment.mimeType,
-    sizeBytes: attachment.sizeBytes
+    sizeBytes: attachment.sizeBytes,
+    sha256: attachment.sha256,
+    downloadPath: `/api/agent/codex/attachments/${encodeURIComponent(attachment.id)}`
   }));
 }
 

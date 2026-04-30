@@ -77,7 +77,7 @@ test("interactive Codex sessions lease commands and keep thread state", async ()
     }
   });
   assert.equal(created.status, "queued");
-  assert.equal(created.runtime.model, "");
+  assert.equal(created.runtime.model, "gpt-5.4");
   assert.equal(created.runtime.reasoningEffort, "high");
   assert.equal(created.runtime.profile, "approve");
   assert.equal(created.runtime.sandbox, "workspace-write");
@@ -88,9 +88,10 @@ test("interactive Codex sessions lease commands and keep thread state", async ()
   assert.equal(startCommand.type, "start");
   assert.equal(startCommand.payload.prompt, "先看一下这个项目");
   assert.equal(startCommand.payload.attachments.length, 1);
-  assert.equal(startCommand.payload.attachments[0].type, "localImage");
-  assert.equal(fs.existsSync(startCommand.payload.attachments[0].path), true);
-  assert.equal(startCommand.runtime.model, "");
+  assert.equal(startCommand.payload.attachments[0].type, "image");
+  assert.equal(startCommand.payload.attachments[0].downloadPath.startsWith("/api/agent/codex/attachments/"), true);
+  assert.equal(startCommand.payload.attachments[0].path, undefined);
+  assert.equal(startCommand.runtime.model, "gpt-5.4");
   assert.equal(startCommand.runtime.reasoningEffort, "high");
   assert.equal(startCommand.runtime.profile, "approve");
   assert.equal(startCommand.runtime.sandbox, "workspace-write");
@@ -204,7 +205,7 @@ test("interactive Codex sessions lease commands and keep thread state", async ()
     }
   });
   assert.equal(afterMessage.pendingCommandCount, 1);
-  assert.equal(afterMessage.runtime.model, "");
+  assert.equal(afterMessage.runtime.model, "gpt-5.3-codex");
   assert.equal(afterMessage.runtime.reasoningEffort, "xhigh");
   assert.equal(afterMessage.runtime.profile, "strict");
   assert.equal(afterMessage.runtime.sandbox, "read-only");
@@ -215,9 +216,10 @@ test("interactive Codex sessions lease commands and keep thread state", async ()
   assert.equal(messageCommand.appThreadId, "thr_1");
   assert.equal(messageCommand.payload.text, "继续修复 UI");
   assert.equal(messageCommand.payload.attachments.length, 1);
-  assert.equal(messageCommand.payload.attachments[0].type, "localImage");
-  assert.equal(fs.existsSync(messageCommand.payload.attachments[0].path), true);
-  assert.equal(messageCommand.runtime.model, "");
+  assert.equal(messageCommand.payload.attachments[0].type, "image");
+  assert.equal(messageCommand.payload.attachments[0].downloadPath.startsWith("/api/agent/codex/attachments/"), true);
+  assert.equal(messageCommand.payload.attachments[0].path, undefined);
+  assert.equal(messageCommand.runtime.model, "gpt-5.3-codex");
   assert.equal(messageCommand.runtime.reasoningEffort, "xhigh");
   assert.equal(messageCommand.runtime.profile, "strict");
   assert.equal(messageCommand.runtime.sandbox, "read-only");
@@ -242,7 +244,8 @@ test("interactive Codex sessions can start from screenshots only", async () => {
   assert.equal(startCommand.type, "start");
   assert.equal(startCommand.payload.prompt, "");
   assert.equal(startCommand.payload.attachments.length, 1);
-  assert.equal(startCommand.payload.attachments[0].type, "localImage");
+  assert.equal(startCommand.payload.attachments[0].type, "image");
+  assert.equal(startCommand.payload.attachments[0].downloadPath.startsWith("/api/agent/codex/attachments/"), true);
 
   const session = queue.getCodexSession(created.id);
   assert.equal(session.messages.length >= 1, true);
@@ -251,7 +254,7 @@ test("interactive Codex sessions can start from screenshots only", async () => {
   assert.equal(session.messages[0].attachments[0].name, "mobile.png");
 });
 
-test("interactive Codex image sessions fall back away from unsupported models", async () => {
+test("interactive Codex image sessions keep the selected model", async () => {
   store.resetStoreForTest();
 
   const agent = {
@@ -265,11 +268,12 @@ test("interactive Codex image sessions fall back away from unsupported models", 
     attachments: [{ type: "image", url: "data:image/png;base64,AAAA", name: "vision.png", mimeType: "image/png", sizeBytes: 4 }],
     runtime: { model: "gpt-5.5", sandbox: "danger-full-access", approvalPolicy: "never", reasoningEffort: "xhigh", profile: "full" }
   });
-  assert.equal(created.runtime.model, "");
+  assert.equal(created.runtime.model, "gpt-5.5");
 
   const command = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
-  assert.equal(command.runtime.model, "");
-  assert.equal(command.payload.attachments[0].type, "localImage");
+  assert.equal(command.runtime.model, "gpt-5.5");
+  assert.equal(command.payload.attachments[0].type, "image");
+  assert.equal(command.payload.attachments[0].downloadPath.startsWith("/api/agent/codex/attachments/"), true);
 });
 
 test("interactive Codex sessions avoid models that require a newer CLI", async () => {
