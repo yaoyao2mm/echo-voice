@@ -548,16 +548,18 @@
   }
 
   body.mobile-ui .shell {
-    height: var(--app-height);
+    height: auto;
     min-height: var(--app-height);
     padding-left: 0;
     padding-right: 0;
-    overflow: hidden;
+    padding-bottom: calc(var(--composer-height, 0px) + max(18px, var(--safe-bottom)));
+    overflow: visible;
   }
 
   body.mobile-ui {
     min-height: var(--app-height);
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
   }
 
   body.mobile-ui .topbar {
@@ -610,6 +612,7 @@
     width: 7px;
     height: 7px;
     margin-left: auto;
+    margin-right: 4px;
     align-self: center;
   }
 
@@ -619,24 +622,24 @@
   }
 
   body.mobile-ui .codex-section {
-    height: calc(var(--app-height) - var(--topbar-height, 72px));
-    min-height: 0;
-    overflow: hidden;
+    height: auto;
+    min-height: calc(var(--app-height) - var(--topbar-height, 72px));
+    overflow: visible;
   }
 
   body.mobile-ui .codex-main {
     --mobile-chat-rail: clamp(10px, 3vw, 14px);
     display: grid;
     grid-template-rows: minmax(0, 1fr) auto;
-    height: calc(var(--app-height) - var(--topbar-height, 72px));
-    min-height: 0;
-    overflow: hidden;
+    height: auto;
+    min-height: calc(var(--app-height) - var(--topbar-height, 72px));
+    overflow: visible;
   }
 
   body.mobile-ui .codex-job-detail {
     height: auto;
-    min-height: 0;
-    overflow-y: auto;
+    min-height: calc(var(--app-height) - var(--topbar-height, 72px) - var(--composer-height, 0px) - 12px);
+    overflow: visible;
     padding: 0 0 8px;
   }
 

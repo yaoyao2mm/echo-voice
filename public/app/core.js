@@ -116,6 +116,13 @@ export function installCore(app) {
       { passive: true }
     );
     window.addEventListener(
+      "scroll",
+      () => {
+        app.syncTopbarVisibility();
+      },
+      { passive: true }
+    );
+    window.addEventListener(
       "resize",
       () => {
         app.resetTopbarScrollTracking({ forceVisible: true });
@@ -163,7 +170,7 @@ export function installCore(app) {
 
   app.currentTopbarScrollY = function currentTopbarScrollY() {
     if (app.usesCompactTopbarMode()) {
-      return Math.max(elements.codexScrollSurface?.scrollTop || 0, 0);
+      return Math.max(window.scrollY || 0, elements.codexScrollSurface?.scrollTop || 0, 0);
     }
     return Math.max(window.scrollY || 0, 0);
   };
