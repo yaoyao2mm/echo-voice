@@ -161,6 +161,22 @@
   color: var(--ink);
 }
 
+:root[data-theme="dark"] .project-create-form input {
+  border-color: rgba(139, 154, 174, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .project-create-form input:focus {
+  border-color: rgba(142, 163, 213, 0.46);
+  box-shadow: 0 0 0 3px rgba(92, 113, 173, 0.18);
+}
+
+:root[data-theme="dark"] .project-create-submit {
+  background: #dfe7f2;
+  color: #10151b;
+}
+
 :root[data-theme="dark"] .conversation-item.active,
 :root[data-theme="dark"] .project-option.active {
   background: rgba(126, 145, 202, 0.12);

@@ -428,6 +428,55 @@ test("interactive Codex approvals wait for mobile decisions", async () => {
   assert.equal(detail.events.some((event) => event.type === "approval.approved"), true);
 });
 
+test("mobile workspace commands create and advertise managed workspaces", async () => {
+  store.resetStoreForTest();
+
+  const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "echo-workspace-root-"));
+  process.env.ECHO_CODEX_WORKSPACE_ROOT = workspaceRoot;
+  const manager = await import("../src/lib/codexWorkspaceManager.js");
+  const runner = await import("../src/lib/codexRunner.js");
+
+  const created = queue.createCodexWorkspace({ name: "移动端新工程" });
+  assert.equal(created.status, "queued");
+  assert.equal(created.payload.name, "移动端新工程");
+
+  const command = await queue.waitForCodexWorkspaceCommand({
+    waitMs: 1000,
+    agent: {
+      id: "workspace-agent",
+      workspaces: [],
+      runtime: { command: "codex" }
+    }
+  });
+  assert.equal(command.id, created.id);
+  assert.equal(command.type, "create");
+
+  const workspace = manager.createManagedWorkspace(command.payload);
+  assert.equal(fs.existsSync(workspace.path), true);
+  assert.equal(path.dirname(workspace.path), workspaceRoot);
+
+  assert.equal(
+    queue.completeCodexWorkspaceCommand(
+      command.id,
+      { ok: true, workspace },
+      {
+        agent: {
+          id: "workspace-agent",
+          workspaces: [workspace],
+          runtime: { command: "codex" }
+        }
+      }
+    ),
+    true
+  );
+
+  const completed = queue.getCodexWorkspaceCommand(command.id);
+  assert.equal(completed.status, "done");
+  assert.equal(completed.result.workspace.id, workspace.id);
+  assert.equal(queue.codexStatus().workspaces.some((item) => item.id === workspace.id), true);
+  assert.equal(runner.publicWorkspaces().some((item) => item.id === workspace.id), true);
+});
+
 test("interactive Codex sessions can be archived and restored", async () => {
   store.resetStoreForTest();
 

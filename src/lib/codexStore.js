@@ -66,6 +66,14 @@ const insertSessionCommand = db.prepare(`
   )
 `);
 
+const insertWorkspaceCommand = db.prepare(`
+  INSERT INTO codex_workspace_commands (
+    id, type, payload_json, status, result_json, created_at, updated_at
+  ) VALUES (
+    @id, @type, @payloadJson, 'queued', '{}', @now, @now
+  )
+`);
+
 const insertSessionApproval = db.prepare(`
   INSERT INTO codex_session_approvals (
     id, session_id, app_request_id, method, status, prompt, payload_json, response_json, created_at, updated_at, requested_by
@@ -135,6 +143,19 @@ const summarizeSessionCommandColumns = `
   type,
   payload_json AS payloadJson,
   status,
+  created_at AS createdAt,
+  updated_at AS updatedAt,
+  leased_by AS leasedBy,
+  lease_expires_at AS leaseExpiresAt,
+  error
+`;
+
+const summarizeWorkspaceCommandColumns = `
+  id,
+  type,
+  payload_json AS payloadJson,
+  status,
+  result_json AS resultJson,
   created_at AS createdAt,
   updated_at AS updatedAt,
   leased_by AS leasedBy,
@@ -241,6 +262,7 @@ export function touchAgent(id) {
 
 export function statusSnapshot() {
   reclaimExpiredLeases();
+  reclaimExpiredWorkspaceCommandLeases();
 
   const nowMs = Date.now();
   const agents = listAgents().map((agent) => ({
@@ -655,6 +677,109 @@ export function enqueueSessionMessage(sessionId, input = {}) {
   return getSession(sessionId);
 }
 
+export function createWorkspaceCommand(input = {}) {
+  reclaimExpiredWorkspaceCommandLeases();
+
+  const name = normalizeWorkspaceName(input.name || input.label);
+  if (!name) return badRequest("Workspace name is required.");
+
+  const now = nowIso();
+  const command = {
+    id: crypto.randomUUID(),
+    type: "create",
+    payloadJson: JSON.stringify({
+      name,
+      label: name,
+      requestedBy: String(input.requestedBy || "mobile").slice(0, 120)
+    }),
+    now
+  };
+
+  insertWorkspaceCommand.run(command);
+  return getWorkspaceCommand(command.id);
+}
+
+export function getWorkspaceCommand(id) {
+  reclaimExpiredWorkspaceCommandLeases();
+  const row = db.prepare(`
+    SELECT ${summarizeWorkspaceCommandColumns}
+    FROM codex_workspace_commands
+    WHERE id = ?
+  `).get(id);
+  return row ? summarizeWorkspaceCommand(row) : null;
+}
+
+export function acquireNextWorkspaceCommand({ agentId } = {}) {
+  reclaimExpiredWorkspaceCommandLeases();
+
+  const leaseHolder = normalizeAgentId(agentId);
+  const now = nowIso();
+  const leaseExpiresAt = new Date(Date.now() + config.codex.leaseMs).toISOString();
+
+  const acquire = db.transaction(() => {
+    const command = db.prepare(`
+      SELECT ${summarizeWorkspaceCommandColumns}
+      FROM codex_workspace_commands
+      WHERE status = 'queued'
+      ORDER BY created_at ASC
+      LIMIT 1
+    `).get();
+
+    if (!command) return null;
+
+    db.prepare(`
+      UPDATE codex_workspace_commands
+      SET status = 'leased',
+          leased_by = @leasedBy,
+          lease_expires_at = @leaseExpiresAt,
+          updated_at = @now
+      WHERE id = @id
+        AND status = 'queued'
+    `).run({
+      id: command.id,
+      leasedBy: leaseHolder,
+      leaseExpiresAt,
+      now
+    });
+
+    return getWorkspaceCommand(command.id);
+  });
+
+  return acquire();
+}
+
+export function completeWorkspaceCommand(commandId, result = {}, options = {}) {
+  const command = getWorkspaceCommand(commandId);
+  if (!command) return false;
+  const providedAgentId = normalizeAgentId(options.agentId);
+  if (command.status !== "leased" || command.leasedBy !== providedAgentId) return false;
+
+  const now = nowIso();
+  const ok = result.ok === true;
+  const error = String(result.error || "").slice(0, 12000);
+  db.prepare(`
+    UPDATE codex_workspace_commands
+    SET status = @status,
+        result_json = @resultJson,
+        error = @error,
+        leased_by = NULL,
+        lease_expires_at = NULL,
+        updated_at = @now
+    WHERE id = @commandId
+      AND status = 'leased'
+      AND leased_by = @leasedBy
+  `).run({
+    commandId,
+    status: ok ? "done" : "failed",
+    resultJson: JSON.stringify(result || {}).slice(0, 30000),
+    error,
+    now,
+    leasedBy: providedAgentId
+  });
+
+  return true;
+}
+
 export function acquireNextSessionCommand({ agentId, workspaces = [] } = {}) {
   refreshInteractiveSessionState();
 
@@ -966,6 +1091,7 @@ export function waitForSessionApprovalDecision(id, options = {}) {
 }
 
 export function resetStoreForTest() {
+  db.prepare("DELETE FROM codex_workspace_commands").run();
   db.prepare("DELETE FROM codex_session_attachments").run();
   db.prepare("DELETE FROM codex_session_messages").run();
   db.prepare("DELETE FROM codex_session_approvals").run();
@@ -1062,6 +1188,22 @@ function migrate() {
 
     CREATE INDEX IF NOT EXISTS idx_codex_session_commands_session
       ON codex_session_commands(session_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS codex_workspace_commands (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL CHECK (type IN ('create')),
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL CHECK (status IN ('queued', 'leased', 'done', 'failed')),
+      result_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      leased_by TEXT,
+      lease_expires_at TEXT,
+      error TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_codex_workspace_commands_status_created
+      ON codex_workspace_commands(status, created_at);
 
     CREATE TABLE IF NOT EXISTS codex_session_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1323,6 +1465,14 @@ function summarizeSessionCommand(row) {
   return {
     ...row,
     payload: parseJson(row.payloadJson, {})
+  };
+}
+
+function summarizeWorkspaceCommand(row) {
+  return {
+    ...row,
+    payload: parseJson(row.payloadJson, {}),
+    result: parseJson(row.resultJson, {})
   };
 }
 
@@ -1640,6 +1790,10 @@ function canMutateRunningJob(job, agentId) {
   return job.leasedBy === normalizeAgentId(providedAgentId);
 }
 
+function normalizeWorkspaceName(value) {
+  return String(value || "").trim().replace(/\s+/g, " ").slice(0, 80);
+}
+
 function normalizeWorkspaces(workspaces = []) {
   return Array.isArray(workspaces)
     ? workspaces
@@ -1918,6 +2072,20 @@ function reclaimExpiredSessionCommandLeases() {
   });
 
   reclaim();
+}
+
+function reclaimExpiredWorkspaceCommandLeases() {
+  const now = nowIso();
+  db.prepare(`
+    UPDATE codex_workspace_commands
+    SET status = 'queued',
+        leased_by = NULL,
+        lease_expires_at = NULL,
+        updated_at = @now
+    WHERE status = 'leased'
+      AND lease_expires_at IS NOT NULL
+      AND lease_expires_at < @now
+  `).run({ now });
 }
 
 function reclaimExpiredSessionLeases() {

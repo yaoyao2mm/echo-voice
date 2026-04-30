@@ -33,6 +33,7 @@ export function installCodex(app) {
       elements.codexStatusText.textContent = "Codex 未连接";
       elements.codexQueueMeta.textContent = "";
       state.codexWorkspaces = [];
+      state.codexAgentOnline = false;
       state.codexUnsupportedModels = [];
       state.codexAgentRuntime = {};
       app.refreshRuntimeDefaultOptions();
@@ -46,6 +47,7 @@ export function installCodex(app) {
   app.renderCodexStatus = function renderCodexStatus(codex) {
     const workspaces = codex.workspaces || [];
     state.codexWorkspaces = workspaces;
+    state.codexAgentOnline = Boolean(codex.agentOnline);
     state.codexUnsupportedModels = Array.isArray(codex.runtime?.unsupportedModels)
       ? codex.runtime.unsupportedModels.map((model) => String(model || "").trim()).filter(Boolean)
       : [];
@@ -507,6 +509,7 @@ export function installCodex(app) {
     elements.codexReasoningEffort.disabled = state.composerBusy;
     elements.codexPrompt.disabled = state.composerBusy;
     elements.composerAttachmentButton.disabled = state.composerBusy || attachmentsPending;
+    app.updateProjectCreateControls();
     if (elements.quickDeployButton) {
       elements.quickDeployButton.disabled =
         state.composerBusy || attachmentsPending || !hasProject || hasDraft || !app.canQuickDeploySelectedSession();
@@ -517,10 +520,95 @@ export function installCodex(app) {
     app.refreshComposerStatusBar();
   };
 
+  app.toggleProjectCreateForm = function toggleProjectCreateForm() {
+    if (state.projectCreateBusy || !state.codexAgentOnline) {
+      app.toast(state.codexAgentOnline ? "工程正在创建中" : "桌面 agent 在线后才能新建工程");
+      return;
+    }
+    elements.projectCreateForm.hidden = !elements.projectCreateForm.hidden;
+    if (!elements.projectCreateForm.hidden) {
+      elements.projectSheetStatus.textContent = "会在桌面默认工程目录下创建，并自动加入工程列表。";
+      elements.projectCreateName.focus({ preventScroll: true });
+    }
+  };
+
+  app.createProjectFromMobile = async function createProjectFromMobile(event) {
+    event?.preventDefault();
+    if (!state.codexAgentOnline) {
+      app.toast("桌面 agent 在线后才能新建工程");
+      return;
+    }
+
+    const name = elements.projectCreateName.value.trim();
+    if (!name) {
+      app.toast("先填写工程名称");
+      elements.projectCreateName.focus({ preventScroll: true });
+      return;
+    }
+
+    app.setProjectCreateBusy(true, "正在通知桌面 agent...");
+    try {
+      const created = await app.apiPost("/api/codex/workspaces", { name });
+      const command = await app.waitForProjectCreateCommand(created.command?.id);
+      const workspace = command.result?.workspace;
+      if (!workspace?.id) throw new Error("桌面 agent 没有返回新工程信息。");
+
+      localStorage.setItem("echoCodexProject", workspace.id);
+      elements.projectCreateName.value = "";
+      elements.projectCreateForm.hidden = true;
+      await app.refreshCodex();
+      app.selectProject(workspace.id);
+      elements.projectSheetStatus.textContent = `已创建 ${app.workspaceLabel(workspace)}`;
+      app.toast(`已新建并切换到 ${app.workspaceLabel(workspace)}`);
+    } catch (error) {
+      if (!app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
+        elements.projectSheetStatus.textContent = error.message;
+        app.toast(error.message);
+      }
+    } finally {
+      app.setProjectCreateBusy(false);
+    }
+  };
+
+  app.waitForProjectCreateCommand = async function waitForProjectCreateCommand(commandId) {
+    if (!commandId) throw new Error("新建工程请求没有排入队列。");
+
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 60000) {
+      const data = await app.apiGet(`/api/codex/workspaces/${encodeURIComponent(commandId)}`);
+      const command = data.command;
+      if (command?.status === "done") return command;
+      if (command?.status === "failed") {
+        throw new Error(command.error || command.result?.error || "新建工程失败。");
+      }
+      elements.projectSheetStatus.textContent = command?.status === "leased" ? "桌面 agent 正在创建目录..." : "等待桌面 agent 创建目录...";
+      await new Promise((resolve) => setTimeout(resolve, 900));
+    }
+
+    throw new Error("新建工程超时，请确认桌面 agent 已更新并在运行。");
+  };
+
+  app.setProjectCreateBusy = function setProjectCreateBusy(isBusy, message = "") {
+    state.projectCreateBusy = isBusy;
+    if (message) elements.projectSheetStatus.textContent = message;
+    app.updateProjectCreateControls();
+  };
+
+  app.updateProjectCreateControls = function updateProjectCreateControls() {
+    const disabled = state.projectCreateBusy || !state.codexAgentOnline;
+    if (elements.newProjectButton) elements.newProjectButton.disabled = disabled;
+    if (elements.projectCreateName) elements.projectCreateName.disabled = state.projectCreateBusy;
+    if (elements.projectCreateSubmit) {
+      elements.projectCreateSubmit.disabled = disabled;
+      elements.projectCreateSubmit.textContent = state.projectCreateBusy ? "创建中" : "创建";
+    }
+  };
+
   app.renderProjectPicker = function renderProjectPicker(agentOnline) {
     const selectedWorkspace = state.codexWorkspaces.find((workspace) => workspace.id === elements.codexProject.value) || null;
     const hasProjects = state.codexWorkspaces.length > 0;
     elements.projectSidebarCard.classList.toggle("empty", !selectedWorkspace);
+    app.updateProjectCreateControls();
 
     if (!hasProjects) {
       elements.projectPickerLabel.textContent = agentOnline ? "还没有授权工程目录" : "等待桌面 agent";

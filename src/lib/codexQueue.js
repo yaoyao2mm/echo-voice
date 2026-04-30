@@ -4,13 +4,17 @@ import {
   appendSessionEvents as appendStoredSessionEvents,
   archiveSession as archiveStoredSession,
   completeSessionCommand as completeStoredSessionCommand,
+  completeWorkspaceCommand as completeStoredWorkspaceCommand,
   createSessionApproval as createStoredSessionApproval,
   createSession as createStoredSession,
+  createWorkspaceCommand as createStoredWorkspaceCommand,
   decideSessionApproval as decideStoredSessionApproval,
   enqueueSessionMessage as enqueueStoredSessionMessage,
+  getWorkspaceCommand as getStoredWorkspaceCommand,
   getSessionAttachmentContent as getStoredSessionAttachmentContent,
   getSession as getStoredSession,
   listSessions as listStoredSessions,
+  acquireNextWorkspaceCommand,
   statusSnapshot,
   touchAgent,
   upsertAgent,
@@ -67,6 +71,48 @@ export function getCodexSession(id) {
 
 export function getCodexSessionAttachmentContent(id) {
   return getStoredSessionAttachmentContent(id);
+}
+
+export function createCodexWorkspace(input = {}) {
+  const command = createStoredWorkspaceCommand(input);
+  events.emit("codex-workspace-command");
+  return command;
+}
+
+export function getCodexWorkspaceCommand(id) {
+  return getStoredWorkspaceCommand(id);
+}
+
+export async function waitForCodexWorkspaceCommand(input = {}) {
+  const agent = updateCodexAgent(input.agent || {});
+  const immediateCommand = acquireNextWorkspaceCommand({ agentId: agent.id });
+  if (immediateCommand) return immediateCommand;
+
+  const waitMs = clampWaitMs(input.waitMs);
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      events.off("codex-workspace-command", handleCommand);
+      resolve(null);
+    }, waitMs);
+
+    function handleCommand() {
+      const command = acquireNextWorkspaceCommand({ agentId: agent.id });
+      if (!command) return;
+      clearTimeout(timeout);
+      events.off("codex-workspace-command", handleCommand);
+      resolve(command);
+    }
+
+    events.on("codex-workspace-command", handleCommand);
+  });
+}
+
+export function completeCodexWorkspaceCommand(id, result = {}, options = {}) {
+  if (options.agent) updateCodexAgent(options.agent);
+  else if (options.agentId) touchAgent(options.agentId);
+  const ok = completeStoredWorkspaceCommand(id, result, { agentId: options.agentId || options.agent?.id });
+  if (ok) events.emit("codex-workspace-command");
+  return ok;
 }
 
 export function archiveCodexSession(id, input = {}) {

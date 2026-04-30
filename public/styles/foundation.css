@@ -1734,6 +1734,57 @@ body {
   border-style: dashed;
 }
 
+.sidebar-project-add {
+  width: 34px;
+  min-height: 34px;
+  border-radius: 999px;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.project-create-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-create-form[hidden] {
+  display: none !important;
+}
+
+.project-create-form input {
+  min-width: 0;
+  min-height: 38px;
+  border: 1px solid rgba(126, 106, 84, 0.16);
+  border-radius: 14px;
+  background: rgba(255, 252, 247, 0.84);
+  color: var(--ink);
+  padding: 0 12px;
+  font-size: 13px;
+  outline: none;
+}
+
+.project-create-form input:focus {
+  border-color: rgba(197, 106, 45, 0.36);
+  box-shadow: 0 0 0 3px rgba(197, 106, 45, 0.1);
+}
+
+.project-create-submit {
+  min-height: 38px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--ink);
+  color: #fffaf4;
+  padding: 0 13px;
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.project-create-submit:disabled {
+  opacity: 0.48;
+}
+
 .project-sheet-list.sidebar-project-list {
   gap: 10px;
   max-height: 236px;

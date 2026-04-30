@@ -20,15 +20,19 @@ import {
   archiveCodexSession,
   codexStatus,
   completeCodexSessionCommand,
+  completeCodexWorkspaceCommand,
   getCodexSessionAttachmentContent,
   createCodexSessionApproval,
   createCodexSession,
+  createCodexWorkspace,
   decideCodexSessionApproval,
   enqueueCodexSessionMessage,
   getCodexSession,
+  getCodexWorkspaceCommand,
   listCodexSessions,
   waitForCodexSessionApproval,
-  waitForCodexSessionCommand
+  waitForCodexSessionCommand,
+  waitForCodexWorkspaceCommand
 } from "./lib/codexQueue.js";
 
 const app = express();
@@ -197,6 +201,32 @@ app.get("/api/codex/status", (req, res) => {
   res.json(codexStatus());
 });
 
+app.post("/api/codex/workspaces", (req, res) => {
+  try {
+    if (config.mode !== "relay") {
+      return res.status(400).json({ error: "Codex workspace management is only available in relay mode." });
+    }
+
+    const command = createCodexWorkspace({
+      name: req.body.name || req.body.label,
+      requestedBy: req.user?.username || req.user?.displayName || "mobile"
+    });
+    res.json({ command });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.get("/api/codex/workspaces/:id", (req, res) => {
+  if (config.mode !== "relay") {
+    return res.status(400).json({ error: "Codex workspace management is only available in relay mode." });
+  }
+
+  const command = getCodexWorkspaceCommand(req.params.id);
+  if (!command) return res.status(404).json({ error: "Codex workspace command not found." });
+  res.json({ command });
+});
+
 app.get("/api/codex/sessions", (req, res) => {
   if (config.mode !== "relay") {
     return res.status(400).json({ error: "Codex interactive sessions are only available in relay mode." });
@@ -322,6 +352,41 @@ app.post("/api/agent/codex/sessions/next", async (req, res) => {
   } catch (error) {
     handleError(res, error);
   }
+});
+
+app.post("/api/agent/codex/workspaces/next", async (req, res) => {
+  try {
+    if (config.mode !== "relay") {
+      return res.status(400).json({ error: "Codex workspace agent polling is only available in relay mode." });
+    }
+
+    const command = await waitForCodexWorkspaceCommand({
+      waitMs: Number(req.query.wait || req.body.wait || 25000),
+      agent: {
+        id: req.body.agentId || req.body.agent?.id,
+        workspaces: req.body.workspaces || [],
+        runtime: req.body.runtime || {}
+      }
+    });
+    res.json({ command });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.post("/api/agent/codex/workspaces/commands/complete", (req, res) => {
+  if (config.mode !== "relay") {
+    return res.status(400).json({ error: "Codex workspace agent completion is only available in relay mode." });
+  }
+
+  const ok = completeCodexWorkspaceCommand(req.body.id, req.body.result || {}, {
+    agent: {
+      id: req.body.agentId || req.body.agent?.id,
+      workspaces: req.body.workspaces || [],
+      runtime: req.body.runtime || {}
+    }
+  });
+  res.json({ ok });
 });
 
 app.post("/api/agent/codex/sessions/events", (req, res) => {

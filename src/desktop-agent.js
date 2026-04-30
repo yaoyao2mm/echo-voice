@@ -2,6 +2,7 @@ import { config } from "./config.js";
 import { loadDesktopAgentId } from "./lib/agentIdentity.js";
 import { CodexInteractiveRuntime } from "./lib/codexInteractiveRunner.js";
 import { publicCodexRuntime, publicWorkspaces } from "./lib/codexRunner.js";
+import { createManagedWorkspace, workspaceCreationRoot } from "./lib/codexWorkspaceManager.js";
 import { describeHttpNetwork, formatFetchError, httpFetch } from "./lib/http.js";
 
 if (!config.relayUrl) {
@@ -33,6 +34,7 @@ if (config.codex.enabled) {
   for (const workspace of publicWorkspaces()) {
     console.log(`  ${workspace.id}: ${workspace.path}`);
   }
+  console.log(`  new workspace root: ${workspaceCreationRoot()}`);
   if (!runtime.command) {
     console.error("Codex remote cannot start because the official Codex app is not available.");
     process.exit(1);
@@ -41,7 +43,44 @@ if (config.codex.enabled) {
 console.log("Waiting for mobile Codex tasks.\n");
 
 if (config.codex.enabled) {
+  runCodexWorkspaceLoop();
   runCodexSessionLoop();
+}
+
+async function runCodexWorkspaceLoop() {
+  while (true) {
+    let command = null;
+    try {
+      command = await pollNextCodexWorkspaceCommand();
+      if (!command) continue;
+
+      console.log(`[${new Date().toLocaleTimeString()}] codex workspace ${command.type}`);
+      const result = await handleCodexWorkspaceCommand(command);
+      await postJson("/api/agent/codex/workspaces/commands/complete", {
+        id: command.id,
+        agentId,
+        result,
+        workspaces: publicWorkspaces(),
+        runtime: publicCodexRuntime()
+      });
+      console.log(`  workspace ${command.type} ${result.ok ? "completed" : "failed"}`);
+    } catch (error) {
+      console.error(`[codex workspace ${new Date().toLocaleTimeString()}] ${formatFetchError(error)}`);
+      if (command?.id) {
+        await postJson("/api/agent/codex/workspaces/commands/complete", {
+          id: command.id,
+          agentId,
+          result: {
+            ok: false,
+            error: error.message
+          },
+          workspaces: publicWorkspaces(),
+          runtime: publicCodexRuntime()
+        }).catch(() => {});
+      }
+      await sleep(2500);
+    }
+  }
 }
 
 async function runCodexSessionLoop() {
@@ -79,6 +118,14 @@ async function runCodexSessionLoop() {
   }
 }
 
+async function handleCodexWorkspaceCommand(command) {
+  if (command.type !== "create") {
+    return { ok: false, error: `Unsupported workspace command: ${command.type}` };
+  }
+  const workspace = createManagedWorkspace(command.payload || {});
+  return { ok: true, workspace };
+}
+
 async function requestCodexApproval(approval) {
   const created = await postJson("/api/agent/codex/sessions/approvals", {
     agentId,
@@ -104,6 +151,24 @@ async function requestCodexApproval(approval) {
   return approval.method === "execCommandApproval" || approval.method === "applyPatchApproval"
     ? { decision: "timed_out" }
     : { decision: "cancel" };
+}
+
+async function pollNextCodexWorkspaceCommand() {
+  const response = await httpFetch(`${config.relayUrl}/api/agent/codex/workspaces/next?wait=25000`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders()
+    },
+    body: JSON.stringify({
+      agentId,
+      workspaces: publicWorkspaces(),
+      runtime: publicCodexRuntime()
+    }),
+    timeoutMs: 35000
+  });
+  const data = await parseApiResponse(response);
+  return data.command || null;
 }
 
 async function pollNextCodexSessionCommand() {

@@ -3,14 +3,24 @@ import path from "node:path";
 import { config } from "../config.js";
 import { resolveDesktopCodexCommand } from "./codexCommand.js";
 import { codexCompatibleModel, listUnsupportedCodexModels } from "./codexRuntime.js";
+import { managedWorkspaces } from "./codexWorkspaceManager.js";
 import { buildProxyEnv } from "./http.js";
 
 export function publicWorkspaces() {
-  return config.codex.workspaces.map((workspace) => ({
-    id: workspace.id,
-    label: workspace.label,
-    path: workspace.path
-  }));
+  const byKey = new Map();
+  for (const workspace of [...config.codex.workspaces, ...managedWorkspaces()]) {
+    const id = String(workspace.id || "").trim();
+    const workspacePath = String(workspace.path || "").trim();
+    if (!id || !workspacePath) continue;
+    const key = `${id}:${workspacePath}`;
+    if (byKey.has(key)) continue;
+    byKey.set(key, {
+      id,
+      label: String(workspace.label || id).trim(),
+      path: workspacePath
+    });
+  }
+  return Array.from(byKey.values());
 }
 
 export function publicCodexRuntime() {

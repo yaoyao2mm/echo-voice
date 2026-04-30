@@ -15,8 +15,8 @@
         if (localStorage.getItem("echoTheme") === "dark") document.documentElement.dataset.theme = "dark";
       } catch {}
     </script>
-    <link rel="manifest" href="/manifest.webmanifest?v=62" />
-    <link rel="stylesheet" href="/styles.css?v=62" />
+    <link rel="manifest" href="/manifest.webmanifest?v=63" />
+    <link rel="stylesheet" href="/styles.css?v=63" />
   </head>
   <body>
     <main class="shell">
@@ -142,7 +142,21 @@
           <section class="sidebar-panel sidebar-panel-projects">
             <div class="sidebar-panel-head">
               <strong>工程</strong>
+              <button
+                id="newProjectButton"
+                class="icon-button sidebar-project-add"
+                type="button"
+                aria-label="新建工程"
+                title="新建工程"
+              >
+                +
+              </button>
             </div>
+            <form id="projectCreateForm" class="project-create-form" hidden>
+              <label class="sr-only" for="projectCreateName">新工程名称</label>
+              <input id="projectCreateName" type="text" autocomplete="off" maxlength="80" placeholder="新工程名" />
+              <button id="projectCreateSubmit" class="project-create-submit" type="submit">创建</button>
+            </form>
             <div id="projectSidebarCard" class="project-sidebar-card">
               <strong id="projectPickerLabel" class="project-picker-label">等待桌面 agent</strong>
               <span id="projectPickerMeta" class="project-picker-meta">桌面端启动后会同步可切换项目。</span>
@@ -284,6 +298,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=62" type="module"></script>
+    <script src="/app.js?v=63" type="module"></script>
   </body>
 </html>

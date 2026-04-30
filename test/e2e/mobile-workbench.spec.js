@@ -6,7 +6,27 @@ const credentials = {
   password: "MobileE2EPass20260430"
 };
 
-async function touchMockAgent(request, runtimeOverrides = {}) {
+function defaultMockWorkspaces() {
+  return [
+    {
+      id: "echo",
+      label: "echo",
+      path: process.cwd()
+    }
+  ];
+}
+
+function defaultMockRuntime(runtimeOverrides = {}) {
+  return {
+    sandbox: "workspace-write",
+    approvalPolicy: "on-request",
+    model: "gpt-5.4-mini",
+    reasoningEffort: "medium",
+    ...runtimeOverrides
+  };
+}
+
+async function touchMockAgent(request, runtimeOverrides = {}, workspaces = defaultMockWorkspaces()) {
   const response = await request.post("/api/agent/codex/sessions/next?wait=1", {
     headers: {
       "X-Echo-Token": pairingToken
@@ -14,20 +34,8 @@ async function touchMockAgent(request, runtimeOverrides = {}) {
     data: {
       wait: 1,
       agentId: "mobile-e2e-agent",
-      workspaces: [
-        {
-          id: "echo",
-          label: "echo",
-          path: process.cwd()
-        }
-      ],
-      runtime: {
-        sandbox: "workspace-write",
-        approvalPolicy: "on-request",
-        model: "gpt-5.4-mini",
-        reasoningEffort: "medium",
-        ...runtimeOverrides
-      }
+      workspaces,
+      runtime: defaultMockRuntime(runtimeOverrides)
     }
   });
   expect(response.ok()).toBeTruthy();
@@ -41,19 +49,26 @@ async function leaseNextCodexCommand(request) {
     data: {
       wait: 1000,
       agentId: "mobile-e2e-agent",
-      workspaces: [
-        {
-          id: "echo",
-          label: "echo",
-          path: process.cwd()
-        }
-      ],
-      runtime: {
-        sandbox: "workspace-write",
-        approvalPolicy: "on-request",
-        model: "gpt-5.4-mini",
-        reasoningEffort: "medium"
-      }
+      workspaces: defaultMockWorkspaces(),
+      runtime: defaultMockRuntime()
+    }
+  });
+  expect(response.ok()).toBeTruthy();
+  const data = await response.json();
+  expect(data.command).toBeTruthy();
+  return data.command;
+}
+
+async function leaseNextWorkspaceCommand(request) {
+  const response = await request.post("/api/agent/codex/workspaces/next?wait=1000", {
+    headers: {
+      "X-Echo-Token": pairingToken
+    },
+    data: {
+      wait: 1000,
+      agentId: "mobile-e2e-agent",
+      workspaces: defaultMockWorkspaces(),
+      runtime: defaultMockRuntime()
     }
   });
   expect(response.ok()).toBeTruthy();
@@ -241,6 +256,53 @@ test("mobile composer disables models unsupported by the desktop Codex", async (
     await loginToWorkbench(page);
     await expect(page.locator("#codexModel")).toHaveValue("");
     await expect(page.locator('#codexModel option[value="gpt-5.5"]')).toHaveAttribute("disabled", "");
+  } finally {
+    clearInterval(keepAlive);
+  }
+});
+
+test("mobile sidebar creates and switches to a new project", async ({ page, request }) => {
+  await touchMockAgent(request);
+  const keepAlive = setInterval(() => {
+    touchMockAgent(request).catch(() => {});
+  }, 10000);
+
+  try {
+    await loginToWorkbench(page);
+    await page.locator("#toggleSessionsButton").click();
+    await expect(page.locator("#newProjectButton")).toBeEnabled();
+    await page.locator("#newProjectButton").click();
+    await expect(page.locator("#projectCreateForm")).toBeVisible();
+
+    const projectLabel = `mobile project ${Date.now()}`;
+    await page.locator("#projectCreateName").fill(projectLabel);
+    await page.locator("#projectCreateSubmit").click();
+
+    const command = await leaseNextWorkspaceCommand(request);
+    expect(command.payload.name).toBe(projectLabel);
+    const workspace = {
+      id: "mobile-project-e2e",
+      label: projectLabel,
+      path: `${process.cwd()}/mobile-project-e2e`
+    };
+    const completeResponse = await request.post("/api/agent/codex/workspaces/commands/complete", {
+      headers: {
+        "X-Echo-Token": pairingToken
+      },
+      data: {
+        id: command.id,
+        agentId: "mobile-e2e-agent",
+        result: { ok: true, workspace },
+        workspaces: [...defaultMockWorkspaces(), workspace],
+        runtime: defaultMockRuntime()
+      }
+    });
+    expect(completeResponse.ok()).toBeTruthy();
+
+    await expect(page.locator("#projectCreateForm")).toBeHidden();
+    await expect(page.locator("#projectPickerLabel")).toContainText(projectLabel);
+    await expect(page.locator("#codexProject")).toHaveValue(workspace.id);
+    await expect(page.locator(".project-option.active")).toContainText(projectLabel);
   } finally {
     clearInterval(keepAlive);
   }

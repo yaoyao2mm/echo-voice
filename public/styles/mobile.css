@@ -375,6 +375,31 @@
   background: transparent;
 }
 
+.sidebar-project-add {
+  width: 30px;
+  min-height: 30px;
+  border-radius: 10px;
+  font-size: 21px;
+}
+
+.project-create-form {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px;
+  padding: 2px 0 6px;
+}
+
+.project-create-form input {
+  min-height: 36px;
+  border-radius: 10px;
+  background: rgba(255, 252, 247, 0.7);
+}
+
+.project-create-submit {
+  min-height: 36px;
+  border-radius: 10px;
+  padding: 0 11px;
+}
+
 .project-sheet-list.sidebar-project-list {
   gap: 0;
   max-height: min(240px, 28vh);
