@@ -618,9 +618,15 @@
     display: inline-flex;
     width: 7px;
     height: 7px;
-    margin-left: auto;
-    margin-right: 12px;
+    margin-left: 2px;
     align-self: center;
+  }
+
+  body.mobile-ui .topbar-quick-deploy {
+    width: 34px;
+    min-height: 34px;
+    margin-left: auto;
+    margin-right: max(8px, var(--safe-right));
   }
 
   body.mobile-ui .codex-section,

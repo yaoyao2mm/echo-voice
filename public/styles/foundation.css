@@ -185,6 +185,31 @@ h1 {
   box-shadow: 0 0 0 1px rgba(181, 60, 53, 0.16);
 }
 
+.topbar-quick-deploy {
+  flex: 0 0 auto;
+  width: 34px;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(126, 106, 84, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 252, 247, 0.78);
+  color: #7c806c;
+  padding: 0;
+}
+
+.topbar-quick-deploy svg {
+  width: 16px;
+  height: 16px;
+}
+
+.topbar-quick-deploy:not(:disabled):hover,
+.topbar-quick-deploy:not(:disabled):focus-visible {
+  background: rgba(23, 20, 17, 0.06);
+  color: var(--ink);
+}
+
 p {
   margin: 5px 0 0;
   color: var(--muted);

@@ -127,10 +127,15 @@
 :root[data-theme="dark"] .secondary,
 :root[data-theme="dark"] .compact-action,
 :root[data-theme="dark"] .sidebar-add-button,
-:root[data-theme="dark"] .sidebar-section-toggle {
+:root[data-theme="dark"] .sidebar-section-toggle,
+:root[data-theme="dark"] .topbar-quick-deploy {
   border-color: rgba(139, 154, 174, 0.18);
   background: rgba(23, 28, 36, 0.72);
   color: var(--ink);
+}
+
+:root[data-theme="dark"] .topbar-quick-deploy:not(:disabled) {
+  color: #aab792;
 }
 
 :root[data-theme="dark"] .session-sidebar {
@@ -230,10 +235,6 @@
 :root[data-theme="dark"] .composer-attachment-tray {
   border-color: rgba(139, 154, 174, 0.13);
   background: rgba(14, 18, 24, 0.92);
-}
-
-:root[data-theme="dark"] .composer-status-action-deploy:not(:disabled) {
-  color: #aab792;
 }
 
 :root[data-theme="dark"] .context-usage-ring {
