@@ -3,8 +3,11 @@ const settingsKey = params.get("key") || "";
 const form = document.querySelector("#settingsForm");
 const output = document.querySelector("#output");
 const envPath = document.querySelector("#envPath");
+const agentWorkbench = document.querySelector("#agentWorkbench");
 const healthGrid = document.querySelector("#healthGrid");
 const pairingQr = document.querySelector("#pairingQr");
+const codexDetectedPath = document.querySelector("#codexDetectedPath");
+const codexDefaultPermissionMode = document.querySelector("#codexDefaultPermissionMode");
 const workspaceRows = document.querySelector("#workspaceRows");
 const workspaceRaw = document.querySelector('[data-key="ECHO_CODEX_WORKSPACES"]');
 const workspaceSuggestions = document.querySelector("#workspaceSuggestions");
@@ -25,6 +28,7 @@ if (!settingsKey) {
 } else {
   bindEvents();
   await loadState();
+  window.setInterval(() => loadHealth({ quiet: true }), 10000);
 }
 
 function bindEvents() {
@@ -50,6 +54,7 @@ function bindEvents() {
   document.querySelector("#browseHome").addEventListener("click", () => loadDirectory(directoryBrowserHome));
   document.querySelector("#browseParent").addEventListener("click", () => loadDirectoryParent());
   document.querySelector("#selectCurrentDirectory").addEventListener("click", () => chooseDirectory(directoryBrowserPath));
+  codexDefaultPermissionMode?.addEventListener("change", syncDefaultPermissionToHiddenFields);
 }
 
 function showPanel(name) {
@@ -64,6 +69,7 @@ async function loadState() {
     fillForm(state.fields);
     workspaceHealthItems = state.health?.workspaces?.items || [];
     renderWorkspaceRows(parseWorkspaceValue(valueOf(state.fields, "ECHO_CODEX_WORKSPACES")));
+    renderWorkbench(state.health);
     renderHealth(state.health);
     await loadPairing();
     writeOutput(formatState(state));
@@ -101,20 +107,217 @@ async function copyPairingUrl() {
   }
 }
 
-async function loadHealth() {
+async function loadHealth(options = {}) {
   try {
     const state = await apiGet("/api/desktop/health");
     workspaceHealthItems = state.health?.workspaces?.items || [];
     renderWorkspaceStatuses();
+    renderWorkbench(state.health);
     renderHealth(state.health);
-    writeOutput("Health refreshed.");
+    if (!options.quiet) writeOutput("Health refreshed.");
   } catch (error) {
-    writeOutput(error.message, true);
+    if (!options.quiet) writeOutput(error.message, true);
   }
+}
+
+function renderWorkbench(health) {
+  if (!agentWorkbench) return;
+
+  const relay = health?.relay || {};
+  const codex = relay.codex || {};
+  const runtime = codex.runtime || {};
+  const interactive = codex.interactive || {};
+  const sessions = Array.isArray(interactive.recent) ? interactive.recent : [];
+  const workspaces = Array.isArray(codex.workspaces) ? codex.workspaces : [];
+  const agentOnline = Boolean(codex.agentOnline);
+  const pendingApprovals = Number(interactive.pendingApprovals || 0);
+  const queuedCommands = Number(interactive.queuedCommands || 0);
+  const activeSessions = Number(interactive.activeSessions || 0);
+  const legacyQueued = Number(codex.queued || 0);
+  const legacyRunning = Number(codex.running || 0);
+  const currentSession = sessions.find(isLiveSession) || sessions[0] || null;
+
+  const header = element("div", "workbenchHero");
+  const headerCopy = element("div", "workbenchHeroCopy");
+  headerCopy.append(
+    element("h3", "", agentOnline ? "本机 Codex 在线" : relay.ok ? "等待桌面 agent" : "Relay 未连接"),
+    element("p", "", relay.detail || "桌面端会在这里显示真实的 Codex 运行状态。")
+  );
+  const statusPills = element("div", "workbenchPills");
+  statusPills.append(
+    statusPill(relay.ok, relay.status || "unknown"),
+    statusPill(agentOnline, agentOnline ? "agent online" : "agent offline"),
+    statusPill(pendingApprovals === 0, `待审批 ${pendingApprovals}`, pendingApprovals > 0 ? "warn" : "")
+  );
+  header.append(headerCopy, statusPills);
+
+  const metrics = element("div", "metricGrid");
+  metrics.append(
+    metricCard("活动会话", activeSessions, activeSessions > 0 ? "running" : "idle"),
+    metricCard("会话命令", queuedCommands, queuedCommands > 0 ? "queued" : "clear"),
+    metricCard("待审批", pendingApprovals, pendingApprovals > 0 ? "needs action" : "clear", pendingApprovals > 0 ? "warn" : ""),
+    metricCard("授权项目", workspaces.length, workspaces.length ? "available" : "none", workspaces.length ? "" : "bad"),
+    metricCard("模型", runtime.model || "默认", runtime.reasoningEffort || "desktop"),
+    metricCard("权限", runtimePermission(runtime), `${runtime.sandbox || "-"} · ${runtime.approvalPolicy || "-"}`)
+  );
+
+  const grid = element("div", "workbenchGrid");
+  grid.append(
+    workbenchPanel("当前会话", renderCurrentSession(currentSession)),
+    workbenchPanel("最近会话", renderSessionList(sessions)),
+    workbenchPanel("Runtime", renderRuntime(runtime, health?.codex)),
+    workbenchPanel("项目目录", renderRuntimeWorkspaces(workspaces, health?.workspaces?.items || []))
+  );
+
+  if (legacyQueued || legacyRunning) {
+    grid.append(
+      workbenchPanel(
+        "旧任务队列",
+        detailList([
+          ["queued", legacyQueued],
+          ["running", legacyRunning],
+          ["active job", codex.active?.id || "-"]
+        ])
+      )
+    );
+  }
+
+  agentWorkbench.replaceChildren(header, metrics, grid);
+}
+
+function renderCurrentSession(session) {
+  if (!session) return emptyState("还没有正在执行或最近的 Codex 会话。");
+  return sessionCard(session, { large: true });
+}
+
+function renderSessionList(sessions) {
+  const list = element("div", "sessionList");
+  if (!sessions.length) return emptyState("最近会话为空。");
+  for (const session of sessions.slice(0, 6)) list.append(sessionCard(session));
+  return list;
+}
+
+function renderRuntime(runtime, localCodex) {
+  const supportedModels = Array.isArray(runtime.supportedModels) ? runtime.supportedModels : [];
+  const unsupportedModels = Array.isArray(runtime.unsupportedModels) ? runtime.unsupportedModels : [];
+  return detailList([
+    ["command", runtime.command || localCodex?.command || "-"],
+    ["app", runtime.commandDetail || localCodex?.detail || "-"],
+    ["model", runtime.model || "Codex default"],
+    ["reasoning", runtime.reasoningEffort || "Codex default"],
+    ["permission", runtimePermission(runtime)],
+    ["sandbox", runtime.sandbox || "-"],
+    ["approval", runtime.approvalPolicy || "-"],
+    ["supported models", supportedModels.length ? `${supportedModels.length}` : "not probed"],
+    ["unsupported", unsupportedModels.length ? unsupportedModels.join(", ") : "-"],
+    ["probe", runtime.modelCapabilityError || runtime.modelCapabilitySource || "-"]
+  ]);
+}
+
+function renderRuntimeWorkspaces(agentWorkspaces, localWorkspaces) {
+  const items = agentWorkspaces.length ? agentWorkspaces : localWorkspaces;
+  const list = element("div", "workspaceMiniList");
+  if (!items.length) return emptyState("还没有可用项目。");
+  for (const workspace of items.slice(0, 8)) {
+    const row = element("div", "workspaceMiniItem");
+    row.append(
+      element("div", "workspaceMiniTitle", workspace.label || workspace.id || "workspace"),
+      element("div", "workspaceMiniPath", workspace.path || "-")
+    );
+    list.append(row);
+  }
+  return list;
+}
+
+function workbenchPanel(title, body) {
+  const panel = element("section", "workbenchPanel");
+  panel.append(element("h3", "", title), body);
+  return panel;
+}
+
+function metricCard(label, value, meta, tone = "") {
+  const card = element("div", `metricCard${tone ? ` ${tone}` : ""}`);
+  card.append(element("span", "metricLabel", label), element("strong", "", String(value)), element("small", "", String(meta || "")));
+  return card;
+}
+
+function sessionCard(session, options = {}) {
+  const card = element("article", `sessionCard${options.large ? " large" : ""}`);
+  const top = element("div", "sessionCardTop");
+  top.append(element("strong", "", session.title || "Untitled session"), statusPill(sessionStatusOk(session), session.status || "unknown", sessionStatusTone(session)));
+  const meta = element("div", "sessionMeta");
+  meta.textContent = [
+    session.projectId || "no project",
+    session.updatedAt ? formatDate(session.updatedAt) : "",
+    session.pendingCommandCount ? `命令 ${session.pendingCommandCount}` : "",
+    session.pendingApprovalCount ? `审批 ${session.pendingApprovalCount}` : ""
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const event = element("p", "sessionEvent", session.lastEvent?.text || session.finalMessage || session.lastError || "暂无输出。");
+  card.append(top, meta, event);
+  return card;
+}
+
+function detailList(items) {
+  const list = element("dl", "detailList");
+  for (const [label, value] of items) {
+    list.append(element("dt", "", label), element("dd", "", String(value || "-")));
+  }
+  return list;
+}
+
+function emptyState(text) {
+  return element("div", "emptyState", text);
+}
+
+function statusPill(ok, text, tone = "") {
+  const pill = element("span", `pill${ok ? "" : " bad"}${tone ? ` ${tone}` : ""}`);
+  pill.textContent = text;
+  return pill;
+}
+
+function isLiveSession(session) {
+  return ["starting", "active", "running"].includes(String(session?.status || "").toLowerCase());
+}
+
+function sessionStatusOk(session) {
+  const status = String(session?.status || "").toLowerCase();
+  return !["failed", "error", "cancelled"].includes(status);
+}
+
+function sessionStatusTone(session) {
+  if (session?.pendingApprovalCount) return "warn";
+  const status = String(session?.status || "").toLowerCase();
+  return ["starting", "active", "running"].includes(status) ? "live" : "";
+}
+
+function runtimePermission(runtime = {}) {
+  const profile = String(runtime.profile || runtime.permissionMode || "").trim();
+  if (["strict", "approve", "full"].includes(profile)) return profile;
+  if (runtime.sandbox === "danger-full-access" && (!runtime.approvalPolicy || runtime.approvalPolicy === "never")) return "full";
+  if (runtime.sandbox === "danger-full-access") return "full + approval";
+  if (runtime.sandbox === "read-only") return "strict";
+  if (runtime.sandbox === "workspace-write") return "approve";
+  return "custom";
+}
+
+function formatDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString([], { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function element(tag, className = "", text = undefined) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
 }
 
 function renderHealth(health) {
   if (!healthGrid || !health) return;
+  renderCodexDetection(health);
 
   const items = [
     {
@@ -126,6 +329,12 @@ function renderHealth(health) {
         health.connection?.tokenSet ? "token set" : "token missing",
         `proxy: ${health.connection?.proxy || "direct"}`
       ].join("\n")
+    },
+    {
+      title: "Relay Live",
+      ok: health.relay?.ok,
+      status: health.relay?.status || "unknown",
+      detail: health.relay?.detail || ""
     },
     {
       title: "Desktop Agent",
@@ -140,7 +349,7 @@ function renderHealth(health) {
       title: "Codex App",
       ok: health.codex?.ok,
       status: health.codex?.status || "unknown",
-      detail: [health.codex?.path, health.codex?.version, health.codex?.detail].filter(Boolean).join("\n")
+      detail: [health.codex?.path || health.codex?.command, health.codex?.version, health.codex?.detail].filter(Boolean).join("\n")
     },
     {
       title: "Workspaces",
@@ -153,6 +362,12 @@ function renderHealth(health) {
   ];
 
   healthGrid.replaceChildren(...items.map(renderHealthItem));
+}
+
+function renderCodexDetection(health) {
+  if (!codexDetectedPath) return;
+  const detail = [health.codex?.path || health.codex?.command, health.codex?.version].filter(Boolean).join(" · ");
+  codexDetectedPath.textContent = detail || health.codex?.detail || "未检测到 Codex App。";
 }
 
 function renderHealthItem(item) {
@@ -216,6 +431,7 @@ function fillForm(fields) {
   }
 
   for (const clear of form.querySelectorAll("[data-clear-secret]")) clear.checked = false;
+  syncDefaultPermissionFromHiddenFields();
 }
 
 async function saveConfig() {
@@ -229,6 +445,7 @@ async function saveConfig() {
     return;
   }
   workspaceRaw.value = serializeWorkspaceRows();
+  syncDefaultPermissionToHiddenFields();
 
   for (const input of form.querySelectorAll("[data-key]")) {
     const key = input.dataset.key;
@@ -249,6 +466,38 @@ async function saveConfig() {
   } catch (error) {
     writeOutput(error.message, true);
   }
+}
+
+function syncDefaultPermissionFromHiddenFields() {
+  if (!codexDefaultPermissionMode) return;
+  const sandbox = form.querySelector('[data-key="ECHO_CODEX_SANDBOX"]')?.value || "";
+  const approvalPolicy = form.querySelector('[data-key="ECHO_CODEX_APPROVAL_POLICY"]')?.value || "";
+  codexDefaultPermissionMode.value = permissionModeFromDesktopRuntime({ sandbox, approvalPolicy }) || "approve";
+  syncDefaultPermissionToHiddenFields();
+}
+
+function syncDefaultPermissionToHiddenFields() {
+  if (!codexDefaultPermissionMode) return;
+  const preset = permissionPresetForMode(codexDefaultPermissionMode.value);
+  const sandboxInput = form.querySelector('[data-key="ECHO_CODEX_SANDBOX"]');
+  const approvalInput = form.querySelector('[data-key="ECHO_CODEX_APPROVAL_POLICY"]');
+  if (sandboxInput) sandboxInput.value = preset.sandbox;
+  if (approvalInput) approvalInput.value = preset.approvalPolicy;
+}
+
+function permissionModeFromDesktopRuntime(runtime = {}) {
+  if (runtime.sandbox === "read-only") return "strict";
+  if (runtime.sandbox === "danger-full-access" && (!runtime.approvalPolicy || runtime.approvalPolicy === "never")) return "full";
+  if (runtime.sandbox === "danger-full-access") return "full-review";
+  if (runtime.sandbox === "workspace-write") return "approve";
+  return "";
+}
+
+function permissionPresetForMode(mode) {
+  if (mode === "strict") return { sandbox: "read-only", approvalPolicy: "on-request" };
+  if (mode === "full-review") return { sandbox: "danger-full-access", approvalPolicy: "on-request" };
+  if (mode === "full") return { sandbox: "danger-full-access", approvalPolicy: "never" };
+  return { sandbox: "workspace-write", approvalPolicy: "on-request" };
 }
 
 async function runAction(path, pendingText, body = {}) {

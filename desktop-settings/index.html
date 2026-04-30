@@ -22,7 +22,7 @@
     <main class="layout">
       <nav class="sidebar" aria-label="Settings sections">
         <div class="sidebarTitle">Desktop</div>
-        <button type="button" class="tab active" data-tab="overview">概览</button>
+        <button type="button" class="tab active" data-tab="overview">工作台</button>
         <button type="button" class="tab" data-tab="connection">连接</button>
         <button type="button" class="tab" data-tab="network">VPN</button>
         <button type="button" class="tab" data-tab="codex">Codex</button>
@@ -30,37 +30,28 @@
 
       <form id="settingsForm" class="content">
         <section class="panel active" data-panel="overview">
-          <div class="sectionHeader">
+          <div class="viewHeader">
             <div>
-              <h2>概览</h2>
-              <p>检查桌面端、Codex App、项目白名单和手机配对。</p>
+              <span class="viewEyebrow">Desktop Agent</span>
+              <h2>Agent Workbench</h2>
             </div>
             <button type="button" id="refreshHealth">刷新状态</button>
           </div>
-          <div class="pairingPanel">
-            <div>
-              <h3>手机扫码配对</h3>
-              <p>扫码会打开带配对 token 的手机端页面。</p>
-              <div class="pairingActions">
-                <button type="button" id="copyPairingUrl">复制链接</button>
-                <button type="button" id="refreshPairingQr">刷新二维码</button>
-              </div>
-            </div>
-            <div class="qrBox" id="pairingQr">Loading...</div>
-          </div>
+          <div id="agentWorkbench" class="agentWorkbench">Loading...</div>
+          <div class="sectionLabel">Diagnostics</div>
           <div id="healthGrid" class="healthGrid"></div>
         </section>
 
         <section class="panel" data-panel="connection">
-          <div class="sectionHeader">
+          <div class="viewHeader">
             <div>
+              <span class="viewEyebrow">Relay</span>
               <h2>连接</h2>
-              <p>公网 relay 和配对 token。</p>
             </div>
             <button type="submit">保存配置</button>
           </div>
           <div class="notice">
-            互联网 relay 模式下，手机端提交 Codex 任务；桌面端只负责拉取任务并在本机工作区执行 Codex。
+            互联网 relay 模式下，手机端发起和继续 Codex 会话；桌面 agent 拉取会话命令，并在本机授权工程目录里执行。
           </div>
           <div class="grid">
             <label>
@@ -77,10 +68,10 @@
         </section>
 
         <section class="panel" data-panel="network">
-          <div class="sectionHeader">
+          <div class="viewHeader">
             <div>
+              <span class="viewEyebrow">Network</span>
               <h2>VPN</h2>
-              <p>桌面 agent 出站网络和代理。</p>
             </div>
             <button type="submit">保存配置</button>
           </div>
@@ -109,10 +100,10 @@
         </section>
 
         <section class="panel" data-panel="codex">
-          <div class="sectionHeader">
+          <div class="viewHeader">
             <div>
+              <span class="viewEyebrow">Runtime</span>
               <h2>Codex</h2>
-              <p>任务队列真正执行时使用的本机 Codex 设置。</p>
             </div>
             <button type="submit">保存配置</button>
           </div>
@@ -150,24 +141,30 @@
               <textarea data-key="ECHO_CODEX_WORKSPACES" class="workspaceRaw" rows="4" aria-hidden="true" tabindex="-1"></textarea>
             </div>
             <label>
-              Codex App
-              <input value="macOS 桌面端固定使用官方 Codex.app" readonly />
+              Codex App Path
+              <input data-key="ECHO_CODEX_APP_PATH" autocomplete="off" placeholder="/Applications/Codex.app/Contents/Resources/codex" />
+              <span class="fieldHint" id="codexDetectedPath">检测中...</span>
             </label>
             <label>
-              Sandbox
-              <select data-key="ECHO_CODEX_SANDBOX">
-                <option value="workspace-write">workspace-write</option>
-                <option value="read-only">read-only</option>
-                <option value="danger-full-access">danger-full-access</option>
+              默认权限
+              <select id="codexDefaultPermissionMode">
+                <option value="approve">审批后写入</option>
+                <option value="strict">只读</option>
+                <option value="full-review">全权限 · 仍需审批</option>
+                <option value="full">全权限</option>
               </select>
+              <span class="fieldHint">只在手机端选择“默认”时生效；手机端仍可在允许范围内为每个会话选择权限。</span>
+            </label>
+            <input data-key="ECHO_CODEX_SANDBOX" type="hidden" />
+            <input data-key="ECHO_CODEX_APPROVAL_POLICY" type="hidden" />
+            <label>
+              Approval Timeout ms
+              <input data-key="ECHO_CODEX_APPROVAL_TIMEOUT_MS" type="number" min="10000" max="7200000" step="10000" />
             </label>
             <label>
-              Model
-              <input data-key="ECHO_CODEX_MODEL" autocomplete="off" />
-            </label>
-            <label>
-              Profile
-              <input data-key="ECHO_CODEX_PROFILE" autocomplete="off" />
+              手机端可用权限
+              <input data-key="ECHO_CODEX_ALLOWED_PERMISSION_MODES" autocomplete="off" placeholder="strict,approve,full" />
+              <span class="fieldHint">这是桌面端的安全边界，不是本次任务选择。模型和推理强度由手机端每次发送时选择。</span>
             </label>
             <label>
               Timeout ms
@@ -178,11 +175,25 @@
       </form>
 
       <aside class="outputPanel">
+        <section class="sideSection pairingPanel">
+          <div>
+            <div class="sectionHeader compact">
+              <h2>手机配对</h2>
+              <button type="button" id="refreshPairingQr">刷新</button>
+            </div>
+            <div class="qrBox" id="pairingQr">Loading...</div>
+            <div class="pairingActions">
+              <button type="button" id="copyPairingUrl">复制链接</button>
+            </div>
+          </div>
+        </section>
+        <section class="sideSection">
         <div class="sectionHeader compact">
           <h2>状态</h2>
           <button type="button" id="reloadState">刷新</button>
         </div>
         <pre id="output">Ready.</pre>
+        </section>
       </aside>
     </main>
 

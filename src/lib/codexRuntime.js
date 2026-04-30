@@ -85,12 +85,15 @@ export function sanitizeRuntimeForAgent(requestedRuntime = {}, agentRuntime = {}
   );
   const requestedMode = permissionModeFromRuntime(requested);
   const fallbackMode = permissionModeFromRuntime(normalizedAgent);
-  const permissionMode = allowedModes.includes(requestedMode)
-    ? requestedMode
-    : allowedModes.includes(fallbackMode)
-      ? fallbackMode
-      : allowedModes[0] || "";
+  const useRequestedMode = allowedModes.includes(requestedMode);
+  const useFallbackMode = !useRequestedMode && requestedMode && allowedModes.includes(fallbackMode);
+  const permissionMode = useRequestedMode ? requestedMode : useFallbackMode ? fallbackMode : "";
   const preset = permissionPresetForMode(permissionMode);
+  const desktopDefault = desktopPermissionDefault(normalizedAgent);
+  const sandbox = permissionMode ? preset.sandbox : desktopDefault.sandbox || permissionPresetForMode(allowedModes[0] || "").sandbox;
+  const approvalPolicy = permissionMode
+    ? preset.approvalPolicy
+    : desktopDefault.approvalPolicy || permissionPresetForMode(allowedModes[0] || "").approvalPolicy;
   const supportedModels = normalizeSupportedModels(normalizedAgent.supportedModels);
   const supportedModelIds = new Set(supportedModels.map((model) => model.id));
   const unsupportedModelIds = new Set(
@@ -103,8 +106,8 @@ export function sanitizeRuntimeForAgent(requestedRuntime = {}, agentRuntime = {}
 
   return {
     command: "",
-    sandbox: preset.sandbox,
-    approvalPolicy: preset.approvalPolicy,
+    sandbox,
+    approvalPolicy,
     model,
     unsupportedModels: [],
     reasoningEffort,
@@ -134,6 +137,16 @@ function normalizeSandboxModeValue(value) {
   if (normalized === "dangerFullAccess") return "danger-full-access";
   if (normalized === "readOnly") return "read-only";
   return normalized;
+}
+
+function desktopPermissionDefault(runtime = {}) {
+  const sandbox = normalizeSandboxModeValue(runtime.sandbox);
+  const approvalPolicy = String(runtime.approvalPolicy || "").trim().toLowerCase();
+  if (!sandbox && !approvalPolicy) return { sandbox: "", approvalPolicy: "" };
+  return {
+    sandbox: sandbox || "workspace-write",
+    approvalPolicy: approvalPolicy || "on-request"
+  };
 }
 
 function normalizeReasoningEfforts(value = []) {

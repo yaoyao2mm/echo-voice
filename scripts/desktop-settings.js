@@ -52,22 +52,37 @@ const fields = [
   { key: "OLLAMA_BASE_URL", section: "refine", type: "text" },
   { key: "OLLAMA_MODEL", section: "refine", type: "text" },
 
-  { key: "ECHO_CODEX_ENABLED", section: "codex", type: "boolean" },
+  { key: "ECHO_CODEX_ENABLED", section: "codex", type: "boolean", defaultValue: "true" },
   { key: "ECHO_CODEX_WORKSPACES", section: "codex", type: "textarea" },
+  { key: "ECHO_CODEX_APP_PATH", section: "codex", type: "text" },
   {
     key: "ECHO_CODEX_SANDBOX",
     section: "codex",
     type: "choice",
-    choices: ["workspace-write", "read-only", "danger-full-access"]
+    choices: ["workspace-write", "read-only", "danger-full-access"],
+    defaultValue: "workspace-write"
   },
-  { key: "ECHO_CODEX_MODEL", section: "codex", type: "text" },
-  { key: "ECHO_CODEX_PROFILE", section: "codex", type: "text" },
+  {
+    key: "ECHO_CODEX_APPROVAL_POLICY",
+    section: "codex",
+    type: "choice",
+    choices: ["on-request", "never"],
+    defaultValue: "on-request"
+  },
+  { key: "ECHO_CODEX_APPROVAL_TIMEOUT_MS", section: "codex", type: "number", min: 10000, max: 7200000, defaultValue: "300000" },
+  { key: "ECHO_CODEX_ALLOWED_PERMISSION_MODES", section: "codex", type: "text", defaultValue: "strict,approve,full" },
   { key: "ECHO_CODEX_TIMEOUT_MS", section: "codex", type: "number", min: 10000, max: 7200000 }
 ];
 
 const fieldByKey = new Map(fields.map((field) => [field.key, field]));
 const secretKeys = new Set(fields.filter((field) => field.type === "secret").map((field) => field.key));
-const deprecatedEnvKeys = new Set(["ECHO_CODEX_COMMAND"]);
+const deprecatedEnvKeys = new Set([
+  "ECHO_CODEX_COMMAND",
+  "ECHO_CODEX_MODEL",
+  "ECHO_CODEX_REASONING_EFFORT",
+  "ECHO_CODEX_MODEL_REASONING_EFFORT",
+  "ECHO_CODEX_PROFILE"
+]);
 
 const app = express();
 app.use(express.json({ limit: "256kb" }));
@@ -503,10 +518,11 @@ async function runCommand(command, args, timeoutMs) {
 }
 
 async function buildHealth(env) {
-  const [agent, codex, workspaces] = await Promise.all([
+  const [agent, codex, workspaces, relay] = await Promise.all([
     checkAgentStatus(),
     checkCodex(env),
-    checkWorkspaces(env)
+    checkWorkspaces(env),
+    checkRelayCodexStatus(env)
   ]);
 
   return {
@@ -519,7 +535,8 @@ async function buildHealth(env) {
     },
     agent,
     codex,
-    workspaces
+    workspaces,
+    relay
   };
 }
 
@@ -584,27 +601,38 @@ async function checkCodex(env) {
   }
 
   const command = commandInfo.command;
-  const result = await runCommand(
+  const pathResult = await runCommand(
     "zsh",
-    ["-lc", `command -v ${shellQuote(command)} >/dev/null 2>&1 && ${shellQuote(command)} --version`],
+    ["-lc", `command -v ${shellQuote(command)}`],
     8000
   );
-  const lines = result.stdout.split(/\r?\n/).filter(Boolean);
+  const versionResult =
+    pathResult.code === 0
+      ? await runCommand("zsh", ["-lc", `${shellQuote(command)} --version`], 8000)
+      : { code: pathResult.code, stdout: "", stderr: pathResult.stderr || pathResult.stdout };
+  const binaryPath = pathResult.stdout.split(/\r?\n/).find(Boolean) || "";
+  const version = versionResult.stdout.split(/\r?\n/).find(Boolean) || "";
+  const ok = pathResult.code === 0 && versionResult.code === 0;
   return {
-    ok: result.code === 0,
-    status: result.code === 0 ? "available" : "missing",
+    ok,
+    status: ok ? "available" : "missing",
     command,
-    path: lines[0] || "",
-    version: lines[1] || "",
+    path: binaryPath,
+    version,
     detail:
-      result.code === 0
+      ok
         ? commandInfo.detail
-        : [commandInfo.detail, result.stderr || result.stdout || `${command} was not found in PATH.`].filter(Boolean).join(" ")
+        : [commandInfo.detail, pathResult.stderr || versionResult.stderr || `${command} was not found in PATH.`]
+            .filter(Boolean)
+            .join(" ")
   };
 }
 
 async function checkWorkspaces(env) {
-  const items = parseWorkspaceList(env.ECHO_CODEX_WORKSPACES || rootDir);
+  const items = mergeWorkspaceItems([
+    ...parseWorkspaceList(env.ECHO_CODEX_WORKSPACES || rootDir).map((item) => ({ ...item, source: "configured" })),
+    ...(await readManagedWorkspaceItems())
+  ]);
   const results = await Promise.all(
     items.map(async (item) => {
       try {
@@ -628,6 +656,98 @@ async function checkWorkspaces(env) {
     ok: results.length > 0 && results.every((item) => item.ok),
     items: results
   };
+}
+
+async function checkRelayCodexStatus(env) {
+  if (!env.ECHO_RELAY_URL || !env.ECHO_TOKEN) {
+    return {
+      ok: false,
+      status: "missing config",
+      detail: "Set ECHO_RELAY_URL and ECHO_TOKEN.",
+      codex: null
+    };
+  }
+
+  try {
+    const response = await httpFetch(`${trimTrailingSlash(env.ECHO_RELAY_URL)}/api/agent/ping`, {
+      headers: {
+        "X-Echo-Token": env.ECHO_TOKEN
+      },
+      timeoutMs: 15000
+    });
+    const json = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return {
+        ok: false,
+        status: `relay ${response.status}`,
+        detail: json.error || response.statusText || "Relay status request failed.",
+        codex: null
+      };
+    }
+
+    const codex = json.codex || null;
+    return {
+      ok: Boolean(codex),
+      status: codex?.agentOnline ? "agent online" : "waiting agent",
+      detail: codex?.agentOnline
+        ? `last seen ${codex.lastAgentSeenAt || "now"}`
+        : codex
+          ? "Relay is reachable, but no desktop agent is online."
+          : "Relay is reachable, but Codex relay mode is not available.",
+      mode: json.mode || "",
+      refine: json.refine || null,
+      codex
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: "unreachable",
+      detail: error.message,
+      codex: null
+    };
+  }
+}
+
+async function readManagedWorkspaceItems() {
+  const file = path.join(os.homedir(), ".echo-voice", "codex-workspaces.json");
+  try {
+    const content = await fs.readFile(file, "utf8");
+    const parsed = JSON.parse(content);
+    const workspaces = Array.isArray(parsed?.workspaces) ? parsed.workspaces : [];
+    return workspaces
+      .map((workspace) => {
+        const workspacePath = String(workspace?.path || "").trim();
+        const label = String(workspace?.label || workspace?.id || workspaceLabelFromPath(workspacePath)).trim();
+        if (!workspacePath || !label) return null;
+        return {
+          label,
+          path: path.resolve(expandHome(workspacePath)),
+          source: "mobile"
+        };
+      })
+      .filter(Boolean);
+  } catch (error) {
+    if (error.code !== "ENOENT") console.warn("Could not read managed Codex workspaces:", error.message);
+    return [];
+  }
+}
+
+function mergeWorkspaceItems(items) {
+  const byKey = new Map();
+  for (const item of items) {
+    const workspacePath = String(item.path || "").trim();
+    const label = String(item.label || workspaceLabelFromPath(workspacePath)).trim();
+    if (!workspacePath || !label) continue;
+    const key = path.resolve(expandHome(workspacePath));
+    if (!byKey.has(key)) {
+      byKey.set(key, {
+        ...item,
+        label,
+        path: key
+      });
+    }
+  }
+  return Array.from(byKey.values());
 }
 
 async function discoverWorkspaceSuggestions(env) {

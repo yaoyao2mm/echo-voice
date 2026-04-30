@@ -190,6 +190,8 @@ pnpm run desktop:mac:dmg
 | `ECHO_PROXY_URL` | 出站代理，macOS 可用 `system` | 空 |
 | `POSTPROCESS_PROVIDER` | `auto`、`openai`、`volcengine`、`ollama`、`rules`、`none` | `auto` |
 
+桌面端只负责本机能力和安全边界：Codex App 路径、工程目录 allowlist、默认权限、允许的权限模式和超时。模型和推理强度属于每次会话的选择，应在手机端发送任务时选择；桌面端会公布 Codex App 支持的模型列表，relay 会在入队时校验。
+
 `ECHO_CODEX_WORKSPACES` 支持逗号分隔的 `label=/absolute/path`：
 
 ```bash
@@ -450,6 +452,8 @@ Common environment variables:
 | `ECHO_CODEX_APPROVAL_POLICY` | Codex approval policy | `on-request` |
 | `ECHO_PROXY_URL` | Outbound proxy; `system` follows macOS system proxy | empty |
 | `POSTPROCESS_PROVIDER` | `auto`, `openai`, `volcengine`, `ollama`, `rules`, or `none` | `auto` |
+
+The desktop controls local capability and safety boundaries only: Codex App path, workspace allowlist, default permission, allowed permission modes, and timeouts. Model and reasoning effort are per-session choices from mobile; the desktop advertises supported Codex App models and the relay validates each queued session.
 
 `ECHO_CODEX_WORKSPACES` accepts comma-separated `label=/absolute/path` entries:
 
