@@ -196,10 +196,10 @@ test("mobile login, pairing, sidebar, and session creation", async ({ page, requ
     await expect(page.locator("#sendCodexButton")).toBeEnabled();
     await page.locator("#sendCodexButton").click();
 
-    await expect(page.locator(".toast")).toContainText("已发送");
     await expect(page.locator(".conversation-item")).toHaveCount(1);
     await expect(page.locator("#activeSessionMeta")).toContainText(/排队中|启动中|运行中/);
     await expect(page.locator("#codexRunSummary")).toContainText("E2E mobile workbench smoke test");
+    await expect(page.locator(".toast", { hasText: "已发送" })).toHaveCount(0);
     await expect(page.locator("#sendCodexButton")).toBeDisabled();
     await expect(page.locator("#contextUsageIndicator")).toHaveAttribute("aria-label", /上下文使用约/);
     await expect
@@ -344,7 +344,6 @@ test("mobile composer sends text and screenshot in the same session message", as
     await expect(page.locator("#sendCodexButton")).toBeEnabled();
 
     await page.locator("#sendCodexButton").click();
-    await expect(page.locator(".toast")).toContainText("已发送 1 个附件");
 
     const sessionsResponse = await request.get("/api/codex/sessions", { headers });
     expect(sessionsResponse.ok()).toBeTruthy();
@@ -358,6 +357,7 @@ test("mobile composer sends text and screenshot in the same session message", as
     const userMessage = sessionData.session.messages.find((message) => message.role === "user" && message.text === prompt);
     expect(userMessage).toBeTruthy();
     expect(userMessage.attachments).toHaveLength(1);
+    await expect(page.locator(".toast", { hasText: "已发送 1 个附件" })).toHaveCount(0);
     expect(userMessage.attachments[0].name).toBe("mobile-layout.png");
     expect(userMessage.attachments[0].downloadPath).toContain("/api/codex/attachments/");
     const attachmentResponse = await request.get(userMessage.attachments[0].downloadPath, { headers });
@@ -514,8 +514,8 @@ test("mobile quick deploy sends the fixed deployment prompt", async ({ page, req
 
     await page.locator("#quickDeployButton").click();
 
-    await expect(page.locator(".toast")).toContainText("已发送部署指令");
     await expect(page.locator("#codexRunSummary")).toContainText("请把当前对话中已经完成且适合发布的代码改动提交、推送");
+    await expect(page.locator(".toast", { hasText: "已发送部署指令" })).toHaveCount(0);
     await expect(page.locator("#quickDeployButton")).toBeDisabled();
 
     const sessionResponse = await request.get(`/api/codex/sessions/${created.session.id}`, { headers });

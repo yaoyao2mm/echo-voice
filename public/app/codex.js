@@ -273,7 +273,6 @@ export function installCodex(app) {
       await app.loadCodexJobs();
       await app.showCodexJob(data.session.id);
       app.clearComposerAttachments({ silent: true });
-      app.toast(attachments.length > 0 ? `已发送 ${attachments.length} 个附件` : "已发送");
       await app.refreshStatus({ silentAuthFailure: true });
     } catch (error) {
       if (!app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
@@ -322,7 +321,6 @@ export function installCodex(app) {
       app.applyRuntimeDraft(state.selectedCodexSession.runtime || runtime, { persist: false, dirty: false });
       await app.loadCodexJobs();
       await app.showCodexJob(data.session.id);
-      app.toast("已发送部署指令");
       await app.refreshStatus({ silentAuthFailure: true });
     } catch (error) {
       if (!app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
