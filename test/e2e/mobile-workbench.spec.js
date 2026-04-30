@@ -310,6 +310,61 @@ test("mobile composer stays pinned while the conversation surface scrolls", asyn
   }
 });
 
+test("mobile codex polling keeps the conversation viewport stable", async ({ page, request }) => {
+  await touchMockAgent(request);
+  const keepAlive = setInterval(() => {
+    touchMockAgent(request).catch(() => {});
+  }, 10000);
+
+  try {
+    const headers = await authHeadersForSessionRequests(request);
+    const suffix = Date.now();
+    const longPrompt = [
+      `轮询不应该推动对话 ${suffix}`,
+      ...Array.from({ length: 100 }, (_, index) => `稳定滚动行 ${index + 1}`)
+    ].join("\n");
+
+    const response = await request.post("/api/codex/sessions", {
+      headers,
+      data: {
+        projectId: "echo",
+        prompt: longPrompt,
+        runtime: {}
+      }
+    });
+    expect(response.ok()).toBeTruthy();
+
+    await loginToWorkbench(page);
+    await expect(page.locator("#codexRunSummary")).toContainText(`轮询不应该推动对话 ${suffix}`);
+    await page.waitForTimeout(120);
+
+    const before = await page.locator("#codexJobDetail").evaluate(async (node) => {
+      const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+      node.scrollTop = 0;
+      node.dispatchEvent(new Event("scroll"));
+      await nextFrame();
+      node.scrollTop = 160;
+      node.dispatchEvent(new Event("scroll"));
+      await nextFrame();
+      return {
+        scrollTop: Math.round(node.scrollTop),
+        distanceToBottom: Math.round(node.scrollHeight - node.clientHeight - node.scrollTop)
+      };
+    });
+    expect(before.scrollTop).toBeGreaterThan(0);
+    expect(before.distanceToBottom).toBeGreaterThan(32);
+    await expect(page.locator("body")).toHaveClass(/topbar-collapsed/);
+
+    await page.waitForTimeout(3900);
+
+    await expect(page.locator("body")).toHaveClass(/topbar-collapsed/);
+    const after = await page.locator("#codexJobDetail").evaluate((node) => Math.round(node.scrollTop));
+    expect(Math.abs(after - before.scrollTop)).toBeLessThanOrEqual(2);
+  } finally {
+    clearInterval(keepAlive);
+  }
+});
+
 test("mobile opens a historical conversation at the latest message", async ({ page, request }) => {
   await touchMockAgent(request);
   const keepAlive = setInterval(() => {

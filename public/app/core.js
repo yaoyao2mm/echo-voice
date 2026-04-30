@@ -72,6 +72,8 @@ export function createAppContext(windowRef = window, documentRef = document) {
       lastTopbarScrollY: 0,
       topbarScrollAccumulator: 0,
       topbarCollapsed: false,
+      renderedCodexSessionId: "",
+      renderedCodexSessionSignature: "",
       composerAttachments: [],
       composerAttachmentPendingCount: 0
     }

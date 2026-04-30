@@ -120,6 +120,8 @@ export function installSessions(app) {
     const switchingSession = Boolean(previousSessionId && previousSessionId !== id);
     const shouldScrollToBottom = options.scrollToBottom !== false && (!state.selectedCodexSession || switchingSession || !options.keepSelection);
     const scrollSnapshot = options.keepSelection ? app.conversationScrollSnapshot() : null;
+    const preserveCurrentView = Boolean(options.keepSelection && !switchingSession);
+    const forceTopbarVisible = !preserveCurrentView;
     state.selectedCodexJobId = id;
     if (options.resetComposerAttachments || switchingSession) {
       app.clearComposerAttachments({ silent: true });
@@ -139,14 +141,29 @@ export function installSessions(app) {
       });
     }
     const errorText = app.humanizeCodexError(job.error || job.lastError);
+    const timeline = app.buildConversationTimeline(job, errorText);
+    const renderSignature = app.sessionRenderSignature(job, errorText, timeline);
+    const canSkipDetailRender =
+      preserveCurrentView &&
+      state.renderedCodexSessionId === job.id &&
+      state.renderedCodexSessionSignature === renderSignature;
+
+    if (canSkipDetailRender) {
+      app.refreshActiveSessionHeader();
+      app.updateComposerAvailability();
+      return;
+    }
+
     elements.codexJobDetail.hidden = false;
     elements.runLog.hidden = false;
     elements.activeSessionTitle.textContent = app.jobTitle(job);
     elements.codexRunSummary.innerHTML = `
       <div class="conversation-thread">
-        ${app.renderConversationThread(job, errorText)}
+        ${timeline.map((entry) => app.renderConversationEntry(entry)).join("")}
       </div>
     `;
+    state.renderedCodexSessionId = job.id;
+    state.renderedCodexSessionSignature = renderSignature;
     app.renderApprovals(job);
     const lines = [
       `# ${job.status} · ${job.projectId}`,
@@ -158,11 +175,12 @@ export function installSessions(app) {
     elements.codexLog.textContent = lines.join("\n\n");
     app.refreshActiveSessionHeader();
     app.updateComposerAvailability();
-    app.resetTopbarScrollTracking({ forceVisible: true });
     if (shouldScrollToBottom || app.wasConversationNearBottom(scrollSnapshot)) {
-      app.scrollConversationToBottom();
+      app.scrollConversationToBottom({ forceTopbarVisible });
     } else if (scrollSnapshot) {
-      app.restoreConversationScroll(scrollSnapshot);
+      app.restoreConversationScroll(scrollSnapshot, { forceTopbarVisible });
+    } else if (forceTopbarVisible) {
+      app.resetTopbarScrollTracking({ forceVisible: true });
     }
   };
 
@@ -183,12 +201,13 @@ export function installSessions(app) {
     return Boolean(snapshot) && snapshot.distanceToBottom <= 48;
   };
 
-  app.restoreConversationScroll = function restoreConversationScroll(snapshot) {
+  app.restoreConversationScroll = function restoreConversationScroll(snapshot, options = {}) {
+    const forceTopbarVisible = options.forceTopbarVisible !== false;
     const restore = () => {
       const target = app.conversationScrollTarget();
       if (!target) return;
       target.scrollTop = snapshot.scrollTop;
-      app.resetTopbarScrollTracking({ forceVisible: true });
+      app.resetTopbarScrollTracking({ forceVisible: forceTopbarVisible });
     };
 
     windowRef.requestAnimationFrame(() => {
@@ -197,14 +216,15 @@ export function installSessions(app) {
     });
   };
 
-  app.scrollConversationToBottom = function scrollConversationToBottom() {
+  app.scrollConversationToBottom = function scrollConversationToBottom(options = {}) {
+    const forceTopbarVisible = options.forceTopbarVisible !== false;
     const targets = [elements.codexRunSummary, elements.codexJobDetail].filter(Boolean);
     const scroll = () => {
       for (const target of targets) {
         if (target.hidden) continue;
         target.scrollTop = target.scrollHeight;
       }
-      app.resetTopbarScrollTracking({ forceVisible: true });
+      app.resetTopbarScrollTracking({ forceVisible: forceTopbarVisible });
     };
 
     windowRef.requestAnimationFrame(() => {
@@ -216,6 +236,8 @@ export function installSessions(app) {
   app.renderEmptySessionDetail = function renderEmptySessionDetail({ title, body }) {
     elements.codexJobDetail.hidden = false;
     elements.activeSessionTitle.textContent = title;
+    state.renderedCodexSessionId = "";
+    state.renderedCodexSessionSignature = "";
     elements.codexApprovals.hidden = true;
     elements.codexApprovals.innerHTML = "";
     elements.runLog.hidden = true;
@@ -293,6 +315,48 @@ export function installSessions(app) {
   app.renderConversationThread = function renderConversationThread(job, errorText = "") {
     const timeline = app.buildConversationTimeline(job, errorText);
     return timeline.map(app.renderConversationEntry).join("");
+  };
+
+  app.sessionRenderSignature = function sessionRenderSignature(job, errorText = "", timeline = null) {
+    const entries = timeline || app.buildConversationTimeline(job, errorText);
+    return JSON.stringify({
+      id: job.id || "",
+      status: job.status || "",
+      projectId: job.projectId || "",
+      archivedAt: job.archivedAt || "",
+      pendingApprovalCount: job.pendingApprovalCount || 0,
+      pendingCommandCount: job.pendingCommandCount || 0,
+      title: app.jobTitle(job),
+      errorText,
+      timeline: entries.map((entry) => ({
+        kind: entry.kind || "",
+        role: entry.role || "",
+        text: entry.text || "",
+        title: entry.title || "",
+        body: entry.body || "",
+        at: entry.at || "",
+        draft: Boolean(entry.draft),
+        attachments: (entry.attachments || []).map((attachment) => ({
+          type: attachment?.type || "",
+          name: attachment?.name || "",
+          id: attachment?.id || "",
+          downloadPath: attachment?.downloadPath || ""
+        }))
+      })),
+      approvals: (job.approvals || []).map((approval) => ({
+        id: approval.id || "",
+        method: approval.method || "",
+        prompt: approval.prompt || "",
+        title: app.approvalTitle(approval),
+        detail: app.approvalDetail(approval)
+      })),
+      logEvents: (job.events || []).slice(-80).map((event) => ({
+        at: event.at || "",
+        type: event.type || "",
+        text: event.text || "",
+        error: event.error || ""
+      }))
+    });
   };
 
   app.buildConversationTimeline = function buildConversationTimeline(job, errorText = "") {
