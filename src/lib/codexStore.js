@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { config } from "../config.js";
+import { codexCompatibleModel } from "./codexRuntime.js";
 
 const dbPath = path.join(config.dataDir, "echo.sqlite");
 const attachmentStorageDir = path.join(config.dataDir, "codex-attachments");
@@ -1509,6 +1510,9 @@ function buildAgentSessionCommand(command) {
         : { text: message.text, attachments: commandAttachmentsFromMessage(message) }
       : {})
   };
+  if (parsed.type === "message") {
+    payload.history = commandHistoryForSession(parsed.sessionId, message?.id);
+  }
   return {
     id: parsed.id,
     sessionId: parsed.sessionId,
@@ -1520,6 +1524,19 @@ function buildAgentSessionCommand(command) {
     payload,
     createdAt: parsed.createdAt
   };
+}
+
+function commandHistoryForSession(sessionId, currentMessageId) {
+  return listSessionMessages(sessionId)
+    .filter((message) => message.id !== currentMessageId)
+    .filter((message) => ["user", "assistant"].includes(message.role))
+    .filter((message) => String(message.text || "").trim())
+    .slice(-12)
+    .map((message) => ({
+      role: message.role,
+      text: String(message.text || "").trim().slice(0, 4000),
+      createdAt: message.createdAt
+    }));
 }
 
 function deriveSessionUpdate(events, session) {
@@ -1634,7 +1651,7 @@ function normalizeRuntime(runtime = {}) {
         command: String(runtime.command || "").trim(),
         sandbox: String(runtime.sandbox || "").trim(),
         approvalPolicy: String(runtime.approvalPolicy || "").trim(),
-        model: String(runtime.model || "").trim(),
+        model: codexCompatibleModel(runtime.model),
         reasoningEffort: String(runtime.reasoningEffort || runtime.effort || "").trim().toLowerCase(),
         profile: String(runtime.profile || "").trim(),
         timeoutMs: Number(runtime.timeoutMs || 0) || null

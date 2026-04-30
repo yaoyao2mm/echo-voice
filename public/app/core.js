@@ -3,7 +3,6 @@ const MAX_COMPOSER_ATTACHMENT_BYTES = 6 * 1024 * 1024;
 
 const MODEL_OPTIONS = [
   { value: "", label: "桌面默认" },
-  { value: "gpt-5.5", label: "GPT-5.5" },
   { value: "gpt-5.4", label: "GPT-5.4" },
   { value: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
   { value: "gpt-5.3-codex", label: "GPT-5.3-Codex" },
@@ -350,7 +349,8 @@ export function installCore(app) {
     const permissionMode = app.normalizePermissionMode(
       runtime.permissionMode || runtime.permissionsMode || runtime.profile || app.permissionModeFromRuntime(runtime)
     );
-    const model = String(runtime.model || "").trim();
+    const rawModel = String(runtime.model || "").trim();
+    const model = app.modelRequiresNewerCodex(rawModel) ? "" : rawModel;
     const reasoningEffort = String(runtime.reasoningEffort || runtime.effort || "").trim().toLowerCase();
     return {
       permissionMode,
@@ -485,6 +485,10 @@ export function installCore(app) {
   app.modelDisplayName = function modelDisplayName(value) {
     const normalized = String(value || "").trim();
     return modelOptions.find((option) => option.value === normalized)?.label || normalized;
+  };
+
+  app.modelRequiresNewerCodex = function modelRequiresNewerCodex(value) {
+    return String(value || "").trim() === "gpt-5.5";
   };
 
   app.modelSupportsImages = function modelSupportsImages(value) {

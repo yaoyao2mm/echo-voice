@@ -1,6 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import { config } from "../config.js";
+import { codexCompatibleModel } from "./codexRuntime.js";
 import { buildProxyEnv } from "./http.js";
 
 export function publicWorkspaces() {
@@ -17,7 +18,7 @@ export function publicCodexRuntime() {
     sandbox: config.codex.sandbox || "workspace-write",
     approvalPolicy: config.codex.approvalPolicy,
     approvalTimeoutMs: config.codex.approvalTimeoutMs,
-    model: config.codex.model,
+    model: codexCompatibleModel(config.codex.model),
     reasoningEffort: config.codex.reasoningEffort,
     profile: config.codex.profile,
     timeoutMs: config.codex.timeoutMs

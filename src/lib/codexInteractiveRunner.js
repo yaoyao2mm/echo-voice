@@ -3,6 +3,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { config } from "../config.js";
 import { CodexAppServerClient, buildUserInputs } from "./codexAppServerClient.js";
+import { codexCompatibleModel } from "./codexRuntime.js";
 
 export class CodexInteractiveRuntime {
   constructor(options = {}) {
@@ -74,20 +75,34 @@ export class CodexInteractiveRuntime {
 
   async #sendMessage(command, workspace) {
     const runtime = this.#runtimeFor(command);
-    const appThreadId = await this.#ensureThread(command, workspace, runtime);
-    const text = String(command.payload?.text || "").trim();
+    let thread = await this.#ensureThread(command, workspace, runtime);
+    const rawText = String(command.payload?.text || "").trim();
     const attachments = Array.isArray(command.payload?.attachments) ? command.payload.attachments : [];
-    if (!text && attachments.length === 0) throw new Error("Codex session message is empty.");
+    if (!rawText && attachments.length === 0) throw new Error("Codex session message is empty.");
 
-    const turn = await this.#startOrSteerTurn({
-      sessionId: command.sessionId,
-      threadId: appThreadId,
-      text,
-      attachments,
-      workspace,
-      runtime
-    });
-    return { ok: true, appThreadId, activeTurnId: turn.id, sessionStatus: "running" };
+    try {
+      const turn = await this.#startOrSteerTurn({
+        sessionId: command.sessionId,
+        threadId: thread.appThreadId,
+        text: thread.recovered ? recoveredThreadPrompt(command.payload?.history, rawText) : rawText,
+        attachments,
+        workspace,
+        runtime
+      });
+      return { ok: true, appThreadId: thread.appThreadId, activeTurnId: turn.id, sessionStatus: "running" };
+    } catch (error) {
+      if (!isThreadNotFoundError(error) || thread.recovered) throw error;
+      thread = await this.#startReplacementThread(command, workspace, runtime, error);
+      const turn = await this.#startOrSteerTurn({
+        sessionId: command.sessionId,
+        threadId: thread.appThreadId,
+        text: recoveredThreadPrompt(command.payload?.history, rawText),
+        attachments,
+        workspace,
+        runtime
+      });
+      return { ok: true, appThreadId: thread.appThreadId, activeTurnId: turn.id, sessionStatus: "running" };
+    }
   }
 
   async #stopTurn(command) {
@@ -156,14 +171,20 @@ export class CodexInteractiveRuntime {
   async #ensureThread(command, workspace, runtime) {
     if (command.appThreadId) {
       if (!this.threadToSession.has(command.appThreadId)) {
-        const resumeResult = await this.client.request(
-          "thread/resume",
-          {
-            threadId: command.appThreadId,
-            ...this.#resumeConfig(workspace, runtime)
-          },
-          120000
-        );
+        let resumeResult;
+        try {
+          resumeResult = await this.client.request(
+            "thread/resume",
+            {
+              threadId: command.appThreadId,
+              ...this.#resumeConfig(workspace, runtime)
+            },
+            120000
+          );
+        } catch (error) {
+          if (!isThreadNotFoundError(error)) throw error;
+          return this.#startReplacementThread(command, workspace, runtime, error);
+        }
         await this.#emit(command.sessionId, [
           {
             type: "thread.resumed",
@@ -175,13 +196,41 @@ export class CodexInteractiveRuntime {
         ]);
       }
       this.#rememberSession(command.sessionId, command.appThreadId, workspace.id, runtime);
-      return command.appThreadId;
+      if (command.activeTurnId) this.activeTurns.set(command.appThreadId, command.activeTurnId);
+      return { appThreadId: command.appThreadId, recovered: false };
     }
 
     const remembered = this.sessions.get(command.sessionId);
-    if (remembered?.appThreadId) return remembered.appThreadId;
+    if (remembered?.appThreadId) return { appThreadId: remembered.appThreadId, recovered: false };
 
     throw new Error("Codex session has no app-server thread id yet.");
+  }
+
+  async #startReplacementThread(command, workspace, runtime, reason) {
+    if (command.appThreadId) {
+      this.activeTurns.delete(command.appThreadId);
+      this.threadToSession.delete(command.appThreadId);
+    }
+    const threadResult = await this.client.request("thread/start", this.#threadConfig(workspace, runtime), 120000);
+    const appThreadId = threadResult?.thread?.id;
+    if (!appThreadId) throw new Error("Codex app-server did not return a replacement thread id.");
+
+    this.#rememberSession(command.sessionId, appThreadId, workspace.id, runtime);
+    await this.#emit(command.sessionId, [
+      {
+        type: "thread.restarted",
+        text: `Previous Codex thread ${command.appThreadId || "unknown"} could not be resumed; a fresh thread was started.`,
+        appThreadId,
+        sessionStatus: "active",
+        raw: {
+          method: "thread/start",
+          reason: reason?.message || "",
+          previousAppThreadId: command.appThreadId || "",
+          result: threadResult
+        }
+      }
+    ]);
+    return { appThreadId, recovered: true };
   }
 
   async #ensureClient() {
@@ -240,8 +289,9 @@ export class CodexInteractiveRuntime {
   }
 
   #rememberCommand(command) {
-    if (command.appThreadId) this.#rememberSession(command.sessionId, command.appThreadId, command.projectId, this.#runtimeFor(command));
-    if (command.appThreadId && command.activeTurnId) this.activeTurns.set(command.appThreadId, command.activeTurnId);
+    if (!command.appThreadId || !this.threadToSession.has(command.appThreadId)) return;
+    this.#rememberSession(command.sessionId, command.appThreadId, command.projectId, this.#runtimeFor(command));
+    if (command.activeTurnId) this.activeTurns.set(command.appThreadId, command.activeTurnId);
   }
 
   #rememberSession(sessionId, appThreadId, projectId, runtime) {
@@ -255,7 +305,7 @@ export class CodexInteractiveRuntime {
     return {
       approvalPolicy: String(runtime.approvalPolicy || config.codex.approvalPolicy || "on-request").trim() || "on-request",
       sandbox: String(runtime.sandbox || config.codex.sandbox || "workspace-write").trim() || "workspace-write",
-      model: String(runtime.model || config.codex.model || "").trim() || null,
+      model: codexCompatibleModel(runtime.model || config.codex.model) || null,
       reasoningEffort:
         String(runtime.reasoningEffort || runtime.effort || config.codex.reasoningEffort || "").trim().toLowerCase() || null
     };
@@ -399,6 +449,35 @@ function extensionFromMimeType(mimeType) {
   if (mimeType === "image/jpeg") return "jpg";
   if (mimeType === "image/svg+xml") return "svg";
   return mimeType.split("/")[1]?.replace(/[^a-z0-9.+_-]+/gi, "") || "png";
+}
+
+function isThreadNotFoundError(error) {
+  return /thread not found|not found.*thread/i.test(String(error?.message || ""));
+}
+
+function recoveredThreadPrompt(history = [], currentText = "") {
+  const current = String(currentText || "").trim();
+  const visibleHistory = Array.isArray(history)
+    ? history
+        .map((message) => ({
+          role: message?.role === "assistant" ? "Codex" : "User",
+          text: String(message?.text || "").trim()
+        }))
+        .filter((message) => message.text)
+        .slice(-12)
+    : [];
+  if (visibleHistory.length === 0) return current;
+
+  const lines = [
+    "这是一个从移动端恢复的 Codex 会话。之前的本地 Codex thread 已失效，下面是这次会话中可见的最近上下文，请在此基础上继续。",
+    "",
+    "最近上下文："
+  ];
+  for (const message of visibleHistory) {
+    lines.push(`${message.role}: ${message.text}`);
+  }
+  lines.push("", "当前用户消息：", current || "（本条消息只有附件或截图，请结合附件继续。）");
+  return lines.join("\n");
 }
 
 function normalizeSandboxMode(value) {

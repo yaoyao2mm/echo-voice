@@ -272,6 +272,27 @@ test("interactive Codex image sessions fall back away from unsupported models", 
   assert.equal(command.payload.attachments[0].type, "localImage");
 });
 
+test("interactive Codex sessions avoid models that require a newer CLI", async () => {
+  store.resetStoreForTest();
+
+  const agent = {
+    id: "model-fallback-agent",
+    workspaces: [{ id: "demo", path: process.cwd() }]
+  };
+
+  const created = queue.createCodexSession({
+    projectId: "demo",
+    prompt: "现在如何了？",
+    runtime: { model: "gpt-5.5", sandbox: "danger-full-access", approvalPolicy: "never", reasoningEffort: "xhigh", profile: "full" }
+  });
+  assert.equal(created.runtime.model, "");
+  assert.equal(created.runtime.sandbox, "danger-full-access");
+
+  const command = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  assert.equal(command.runtime.model, "");
+  assert.equal(command.payload.prompt, "现在如何了？");
+});
+
 test("interactive Codex sessions recover expired running leases instead of looking stuck forever", async () => {
   store.resetStoreForTest();
 
