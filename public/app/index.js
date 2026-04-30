@@ -25,6 +25,7 @@ export function createApp(windowRef = window, documentRef = document) {
     elements.refreshCodex?.addEventListener("click", app.refreshCodex);
     elements.newCodexSessionButton.addEventListener("click", app.startNewCodexSession);
     elements.sendCodexButton.addEventListener("click", app.sendToCodex);
+    elements.stopCodexTurnButton?.addEventListener("click", app.cancelSelectedCodexTurn);
     elements.quickDeployButton?.addEventListener("click", app.sendQuickDeployPrompt);
     elements.composerPlanModeButton?.addEventListener("click", app.toggleComposerPlanMode);
     elements.compactContextButton?.addEventListener("click", () => app.requestContextCompaction({ automatic: false }));

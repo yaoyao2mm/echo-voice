@@ -195,6 +195,7 @@ export function installCodex(app) {
     state.composingNewSession = false;
     state.selectedCodexJobId = "";
     state.selectedCodexSession = null;
+    app.closeCodexSessionStream?.();
     app.applyRuntimeDraft(state.runtimePreferences, { persist: false, dirty: false });
     app.renderEmptySessionDetail(
       archived
@@ -208,6 +209,7 @@ export function installCodex(app) {
     state.selectedCodexJobId = "";
     state.selectedCodexSession = null;
     state.composingNewSession = true;
+    app.closeCodexSessionStream?.();
     app.clearComposerAttachments({ silent: true });
     app.applyRuntimeDraft(state.runtimePreferences, { persist: false, dirty: false });
     if (state.showArchivedSessions) {
@@ -642,6 +644,7 @@ export function installCodex(app) {
       elements.quickDeployButton.disabled =
         state.composerBusy || attachmentsPending || !hasProject || hasDraft || !app.canQuickDeploySelectedSession();
     }
+    app.updateStopButton?.();
     app.refreshComposerMeta();
     app.refreshTopbarProjectChip();
     app.updateComposerModeControls();

@@ -170,6 +170,12 @@ async function authHeadersForSessionRequests(request) {
 }
 
 test("mobile login, pairing, sidebar, and session creation", async ({ page, request }) => {
+  const eventStreamUrls = [];
+  page.on("request", (request) => {
+    const url = request.url();
+    if (url.includes("/api/codex/sessions/") && url.includes("/events?")) eventStreamUrls.push(url);
+  });
+
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -202,6 +208,13 @@ test("mobile login, pairing, sidebar, and session creation", async ({ page, requ
 
     await expect(page.locator(".conversation-item")).toHaveCount(1);
     await expect(page.locator("#activeSessionMeta")).toContainText(/排队中|启动中|运行中/);
+    await expect(page.locator("#stopCodexTurnButton")).toBeVisible();
+    await expect.poll(() => eventStreamUrls.length).toBeGreaterThan(0);
+    const eventStreamUrl = eventStreamUrls.at(-1);
+    const sessionToken = await page.evaluate(() => localStorage.getItem("echoSession") || "");
+    expect(eventStreamUrl).toContain("ticket=");
+    expect(eventStreamUrl).not.toContain(pairingToken);
+    if (sessionToken) expect(eventStreamUrl).not.toContain(encodeURIComponent(sessionToken));
     await expect(page.locator("#codexRunSummary")).toContainText("E2E mobile workbench smoke test");
     await expect(page.locator(".toast", { hasText: "已发送" })).toHaveCount(0);
     await expect(page.locator("#sendCodexButton")).toBeDisabled();

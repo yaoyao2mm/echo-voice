@@ -40,6 +40,8 @@ Echo Codex 把手机变成 Codex 的轻量移动端入口：
 - **交互式 Codex 会话**：通过本地 `codex app-server` 支持新会话、继续会话、归档/恢复会话和最终结果查看。
 - **受控项目访问**：手机只能选择 `ECHO_CODEX_WORKSPACES` 中的目录，不能提交任意本机路径或远程 shell 命令。
 - **审批流转发**：Codex 请求执行命令或应用补丁时，relay 会把审批请求展示到手机端，由用户显式批准或拒绝。
+- **中断与实时进度**：手机端可以中断当前 Codex turn，并通过 SSE 实时接收会话更新，轮询作为兜底。
+- **结果摘要与隔离执行**：桌面端会在 turn 完成后回传 Git 变更摘要；开启 worktree 模式后，新会话会在受控 Git worktree 中运行。
 - **持久化队列**：relay 使用 SQLite 保存会话、事件、审批、agent 心跳、租约和最终消息。
 - **本地/LAN 与公网 relay 两种模式**：本地调试简单，公网 relay 适合手机和电脑不在同一网络时使用。
 - **提示词整理**：支持 OpenAI-compatible 接口、Volcengine Ark、Ollama，也可以退回到规则清理。
@@ -187,6 +189,8 @@ pnpm run desktop:mac:dmg
 | `ECHO_CODEX_WORKSPACES` | Codex 可访问的项目 allowlist | 当前目录 |
 | `ECHO_CODEX_SANDBOX` | Codex sandbox 模式 | `workspace-write` |
 | `ECHO_CODEX_APPROVAL_POLICY` | Codex 审批策略 | `on-request` |
+| `ECHO_CODEX_WORKTREE_MODE` | 是否为新会话创建隔离 Git worktree，`off` 或 `always` | `off` |
+| `ECHO_CODEX_WORKTREE_ROOT` | 隔离 worktree 根目录 | `~/.echo-voice/worktrees` |
 | `ECHO_PROXY_URL` | 出站代理，macOS 可用 `system` | 空 |
 | `POSTPROCESS_PROVIDER` | `auto`、`openai`、`volcengine`、`ollama`、`rules`、`none` | `auto` |
 
@@ -303,6 +307,8 @@ The boundary is intentional: the phone captures and reviews, the relay authentic
 - **Interactive Codex sessions**: start, continue, archive, restore, and inspect Codex app-server backed conversations.
 - **Controlled workspace access**: the phone can only select entries from `ECHO_CODEX_WORKSPACES`; it cannot send arbitrary local paths or shell commands.
 - **Approval forwarding**: command execution and patch approval requests are surfaced on the phone for explicit approve/deny decisions.
+- **Interrupts and live progress**: mobile can interrupt the active Codex turn, and session updates stream over SSE with polling kept as fallback.
+- **Result summaries and isolated execution**: the desktop agent posts Git change summaries after turns complete; when worktree mode is enabled, new sessions run in controlled Git worktrees.
 - **Persistent queue**: SQLite-backed sessions, events, approvals, agent heartbeats, leases, and final messages.
 - **Local/LAN and internet relay modes**: simple local testing plus a public relay mode for phone and desktop devices on different networks.
 - **Prompt refinement**: OpenAI-compatible endpoints, Volcengine Ark, Ollama, and rule-based cleanup fallback.
@@ -450,6 +456,8 @@ Common environment variables:
 | `ECHO_CODEX_WORKSPACES` | Allowlisted Codex project directories | current directory |
 | `ECHO_CODEX_SANDBOX` | Codex sandbox mode | `workspace-write` |
 | `ECHO_CODEX_APPROVAL_POLICY` | Codex approval policy | `on-request` |
+| `ECHO_CODEX_WORKTREE_MODE` | Create isolated Git worktrees for new sessions, `off` or `always` | `off` |
+| `ECHO_CODEX_WORKTREE_ROOT` | Isolated worktree root directory | `~/.echo-voice/worktrees` |
 | `ECHO_PROXY_URL` | Outbound proxy; `system` follows macOS system proxy | empty |
 | `POSTPROCESS_PROVIDER` | `auto`, `openai`, `volcengine`, `ollama`, `rules`, or `none` | `auto` |
 

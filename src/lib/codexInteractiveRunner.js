@@ -3,6 +3,7 @@ import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { config } from "../config.js";
 import { CodexAppServerClient, buildUserInputs } from "./codexAppServerClient.js";
+import { formatGitSummary, summarizeGitWorkspace } from "./codexGitSummary.js";
 import { publicWorkspaces } from "./codexRunner.js";
 import { codexCompatibleModel } from "./codexRuntime.js";
 import { httpFetch } from "./http.js";
@@ -23,7 +24,7 @@ export class CodexInteractiveRuntime {
 
   async handleCommand(command) {
     await this.#ensureClient();
-    const workspace = this.#workspaceFor(command.projectId);
+    const workspace = this.#workspaceFor(command);
     this.#rememberCommand(command);
 
     if (command.type === "start") return this.#startSession(command, workspace);
@@ -50,7 +51,7 @@ export class CodexInteractiveRuntime {
     const appThreadId = threadResult?.thread?.id;
     if (!appThreadId) throw new Error("Codex app-server did not return a thread id.");
 
-    this.#rememberSession(command.sessionId, appThreadId, workspace.id, runtime);
+    this.#rememberSession(command.sessionId, appThreadId, workspace, runtime);
     await this.#emit(command.sessionId, [
       {
         type: "thread.started",
@@ -119,6 +120,16 @@ export class CodexInteractiveRuntime {
     await this.client.request("turn/interrupt", { threadId: appThreadId, turnId: activeTurnId }, 30000);
     this.activeTurns.delete(appThreadId);
     await this.#cleanupAttachmentDir(appThreadId);
+    await this.#emit(command.sessionId, [
+      {
+        type: "turn.interrupted",
+        text: "Codex turn interrupted from mobile.",
+        appThreadId,
+        clearActiveTurnId: true,
+        sessionStatus: "active",
+        raw: { method: "turn/interrupt", threadId: appThreadId, turnId: activeTurnId }
+      }
+    ]);
     return { ok: true, appThreadId, sessionStatus: "active" };
   }
 
@@ -216,7 +227,7 @@ export class CodexInteractiveRuntime {
           }
         ]);
       }
-      this.#rememberSession(command.sessionId, command.appThreadId, workspace.id, runtime);
+      this.#rememberSession(command.sessionId, command.appThreadId, workspace, runtime);
       if (command.activeTurnId) this.activeTurns.set(command.appThreadId, command.activeTurnId);
       return { appThreadId: command.appThreadId, recovered: false };
     }
@@ -255,7 +266,7 @@ export class CodexInteractiveRuntime {
         throw new Error("Codex thread can no longer be compacted because the local app-server thread was not found.");
       }
     }
-    this.#rememberSession(command.sessionId, appThreadId, workspace.id, runtime);
+    this.#rememberSession(command.sessionId, appThreadId, workspace, runtime);
     return { appThreadId };
   }
 
@@ -268,7 +279,7 @@ export class CodexInteractiveRuntime {
     const appThreadId = threadResult?.thread?.id;
     if (!appThreadId) throw new Error("Codex app-server did not return a replacement thread id.");
 
-    this.#rememberSession(command.sessionId, appThreadId, workspace.id, runtime);
+    this.#rememberSession(command.sessionId, appThreadId, workspace, runtime);
     await this.#emit(command.sessionId, [
       {
         type: "thread.restarted",
@@ -331,22 +342,37 @@ export class CodexInteractiveRuntime {
     };
   }
 
-  #workspaceFor(projectId) {
+  #workspaceFor(commandOrProjectId) {
+    const projectId =
+      typeof commandOrProjectId === "object" ? String(commandOrProjectId.projectId || "").trim() : String(commandOrProjectId || "").trim();
     const workspace = publicWorkspaces().find((item) => item.id === projectId);
     if (!workspace) {
       throw new Error(`Project is not allowed on this desktop agent: ${projectId}`);
     }
-    return workspace;
+    const execution = typeof commandOrProjectId === "object" && commandOrProjectId.execution ? commandOrProjectId.execution : null;
+    const executionPath = String(execution?.path || "").trim();
+    if (!executionPath) return workspace;
+    const resolvedExecutionPath = path.resolve(executionPath);
+    const resolvedWorktreeRoot = path.resolve(config.codex.worktreeRoot || path.join(config.dataDir, "worktrees"));
+    if (!isPathInside(resolvedExecutionPath, resolvedWorktreeRoot)) {
+      throw new Error("Codex execution path is outside the desktop-controlled worktree root.");
+    }
+    return {
+      ...workspace,
+      path: resolvedExecutionPath,
+      basePath: workspace.path,
+      execution
+    };
   }
 
   #rememberCommand(command) {
     if (!command.appThreadId || !this.threadToSession.has(command.appThreadId)) return;
-    this.#rememberSession(command.sessionId, command.appThreadId, command.projectId, this.#runtimeFor(command));
+    this.#rememberSession(command.sessionId, command.appThreadId, this.#workspaceFor(command), this.#runtimeFor(command));
     if (command.activeTurnId) this.activeTurns.set(command.appThreadId, command.activeTurnId);
   }
 
-  #rememberSession(sessionId, appThreadId, projectId, runtime) {
-    this.sessions.set(sessionId, { appThreadId, projectId, runtime });
+  #rememberSession(sessionId, appThreadId, workspace, runtime) {
+    this.sessions.set(sessionId, { appThreadId, projectId: workspace.id, workspace, runtime });
     this.threadToSession.set(appThreadId, sessionId);
   }
 
@@ -377,6 +403,10 @@ export class CodexInteractiveRuntime {
       this.#cleanupAttachmentDir(threadId).catch((error) => {
         console.error(`[codex attachment cleanup] ${error.message}`);
       });
+      this.#emitTurnCompleted(sessionId, threadId, event).catch((error) => {
+        console.error(`[codex app-server event] ${error.message}`);
+      });
+      return;
     }
     this.#emit(sessionId, [event]).catch((error) => {
       console.error(`[codex app-server event] ${error.message}`);
@@ -421,6 +451,32 @@ export class CodexInteractiveRuntime {
 
   async #emit(sessionId, events) {
     await this.onEvents(sessionId, events);
+  }
+
+  async #emitTurnCompleted(sessionId, threadId, event) {
+    const events = [event];
+    try {
+      const gitSummary = await this.#gitSummaryEvent(sessionId, threadId);
+      if (gitSummary) events.push(gitSummary);
+    } catch (error) {
+      console.error(`[codex git summary] ${error.message}`);
+    }
+    await this.#emit(sessionId, events);
+  }
+
+  async #gitSummaryEvent(sessionId, threadId) {
+    const workspacePath = this.sessions.get(sessionId)?.workspace?.path;
+    const summary = await summarizeGitWorkspace(workspacePath);
+    if (!summary) return null;
+    return {
+      type: "git.summary",
+      text: formatGitSummary(summary),
+      appThreadId: threadId,
+      raw: {
+        source: "desktop-agent",
+        gitSummary: summary
+      }
+    };
   }
 
   async #materializeAttachments({ sessionId, threadId, attachments, workspace }) {
@@ -481,6 +537,11 @@ function sanitizePathSegment(value) {
     .replace(/[^a-zA-Z0-9._-]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 80) || "attachment";
+}
+
+function isPathInside(candidatePath, rootPath) {
+  const relative = path.relative(rootPath, candidatePath);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 function parseImageDataUrl(url) {

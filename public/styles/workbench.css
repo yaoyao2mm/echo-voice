@@ -608,6 +608,10 @@
 }
 
 .conversation-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 2px 2px 0;
 }
 
@@ -633,6 +637,25 @@
   margin-top: 4px;
   font-size: 12px;
   max-width: 28rem;
+}
+
+.session-stop-action {
+  flex: 0 0 auto;
+  color: #9b2f2f;
+}
+
+.session-stop-action:not(:disabled):hover,
+.session-stop-action:not(:disabled):focus-visible {
+  color: #842626;
+  background: rgba(155, 47, 47, 0.08);
+}
+
+.thread-git-summary {
+  margin: 0;
+  white-space: pre-wrap;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .codex-job-detail {

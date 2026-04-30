@@ -552,6 +552,43 @@ test("interactive Codex sessions can request app-server context compaction", asy
   assert.equal(compacted.events.some((event) => event.raw?.params?.item?.type === "contextCompaction"), true);
 });
 
+test("interactive Codex sessions can queue mobile cancellation for the active turn", async () => {
+  store.resetStoreForTest();
+
+  const agent = {
+    id: "cancel-agent",
+    workspaces: [{ id: "demo", path: process.cwd() }]
+  };
+
+  const session = queue.createCodexSession({
+    projectId: "demo",
+    prompt: "run a long task"
+  });
+  const command = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  queue.appendCodexSessionEvents(session.id, [{ type: "thread.started", text: "started", appThreadId: "thr_cancel" }], {
+    agentId: agent.id
+  });
+  queue.completeCodexSessionCommand(command.id, { ok: true, appThreadId: "thr_cancel", activeTurnId: "turn_cancel", sessionStatus: "running" }, { agentId: agent.id });
+
+  const queuedFollowUp = queue.enqueueCodexSessionMessage(session.id, {
+    text: "this queued message should not run before stop"
+  });
+  assert.equal(queuedFollowUp.pendingCommandCount, 1);
+
+  const cancelled = queue.cancelCodexSession(session.id, { reason: "stop from test" });
+  assert.equal(cancelled.pendingCommandCount, 1);
+  assert.equal(cancelled.events.some((event) => event.type === "turn.cancel.requested"), true);
+
+  const stopCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  assert.equal(stopCommand.type, "stop");
+  assert.equal(stopCommand.appThreadId, "thr_cancel");
+  assert.equal(stopCommand.activeTurnId, "turn_cancel");
+  assert.equal(stopCommand.payload.reason, "stop from test");
+
+  const nextCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  assert.equal(nextCommand, null);
+});
+
 test("plan mode keeps the visible user message clean while sending plan instructions to Codex", async () => {
   store.resetStoreForTest();
 

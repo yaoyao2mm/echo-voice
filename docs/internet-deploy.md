@@ -124,6 +124,18 @@ pnpm run desktop
 
 The phone can only choose these workspace ids; it cannot send arbitrary paths or shell commands.
 
+To keep remote Codex work out of your active checkout, enable desktop-controlled worktrees:
+
+```bash
+ECHO_CODEX_WORKTREE_MODE=always \
+ECHO_CODEX_WORKTREE_ROOT=~/.echo-voice/worktrees \
+pnpm run desktop
+```
+
+In this mode, each new session requires the selected allowlisted workspace to be a clean Git repository.
+The desktop agent creates an `echo/job-...` branch and runs Codex inside the worktree. Follow-up
+messages continue in that same worktree.
+
 Codex remote jobs are persisted on the relay in `~/.echo-voice/echo.sqlite`. The desktop agent
 registers a stable local agent id and leases each job before running it. Event and completion
 updates renew that lease. While a long Codex task is running, the desktop agent also sends quiet

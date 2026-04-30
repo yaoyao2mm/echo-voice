@@ -11,6 +11,7 @@ export function installSessions(app) {
       state.selectedCodexSession = null;
       if (!state.composingNewSession) {
         state.selectedCodexJobId = "";
+        app.closeCodexSessionStream();
         app.applyRuntimeDraft(state.runtimePreferences, { persist: false, dirty: false });
         app.renderEmptySessionDetail({
           title: state.showArchivedSessions ? "归档" : "新会话",
@@ -36,6 +37,7 @@ export function installSessions(app) {
     }
 
     state.selectedCodexSession = null;
+    app.closeCodexSessionStream();
     app.applyRuntimeDraft(state.runtimePreferences, { persist: false, dirty: false });
     app.renderEmptySessionDetail({ title: "新会话", body: "直接发送，开始新的 Codex 会话。" });
   };
@@ -92,6 +94,43 @@ export function installSessions(app) {
     }
   };
 
+  app.cancelSelectedCodexTurn = async function cancelSelectedCodexTurn() {
+    const session = state.selectedCodexSession;
+    if (!session?.id || !app.canCancelSession(session)) return;
+
+    elements.stopCodexTurnButton.disabled = true;
+    try {
+      const data = await app.apiPost(`/api/codex/sessions/${encodeURIComponent(session.id)}/cancel`, {
+        reason: "Cancelled from mobile."
+      });
+      state.selectedCodexSession = data.session || session;
+      app.toast("已请求中断");
+      await app.showCodexJob(session.id, { keepSelection: true });
+    } catch (error) {
+      if (!app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
+        app.toast(error.message);
+      }
+    } finally {
+      app.updateStopButton();
+    }
+  };
+
+  app.canCancelSession = function canCancelSession(session) {
+    if (!session || session.archivedAt) return false;
+    if (session.status === "queued") return true;
+    if (session.status === "starting" || session.status === "running") return true;
+    if (Number(session.pendingCommandCount || 0) > 0 && !["cancelled", "closed", "failed", "stale"].includes(session.status)) return true;
+    return Boolean(session.activeTurnId);
+  };
+
+  app.updateStopButton = function updateStopButton() {
+    if (!elements.stopCodexTurnButton) return;
+    const session = state.composingNewSession ? null : state.selectedCodexSession;
+    const canCancel = app.canCancelSession(session);
+    elements.stopCodexTurnButton.hidden = !canCancel;
+    elements.stopCodexTurnButton.disabled = state.composerBusy || !canCancel;
+  };
+
   app.preferredSession = function preferredSession(jobs) {
     return (
       jobs.find((job) => job.pendingApprovalCount > 0) ||
@@ -118,10 +157,6 @@ export function installSessions(app) {
   app.showCodexJob = async function showCodexJob(id, options = {}) {
     const previousSessionId = state.selectedCodexSession?.id || state.selectedCodexJobId;
     const switchingSession = Boolean(previousSessionId && previousSessionId !== id);
-    const shouldScrollToBottom = options.scrollToBottom !== false && (!state.selectedCodexSession || switchingSession || !options.keepSelection);
-    const scrollSnapshot = options.keepSelection ? app.conversationScrollSnapshot() : null;
-    const preserveCurrentView = Boolean(options.keepSelection && !switchingSession);
-    const forceTopbarVisible = !preserveCurrentView;
     state.selectedCodexJobId = id;
     if (options.resetComposerAttachments || switchingSession) {
       app.clearComposerAttachments({ silent: true });
@@ -132,7 +167,19 @@ export function installSessions(app) {
       }
     }
     const data = await app.apiGet(`/api/codex/sessions/${encodeURIComponent(id)}`);
-    const job = data.session;
+    app.openCodexSessionStream(id);
+    app.renderCodexJob(data.session, { ...options, previousSessionId, switchingSession });
+  };
+
+  app.renderCodexJob = function renderCodexJob(job, options = {}) {
+    if (!job?.id) return;
+    const previousSessionId = options.previousSessionId || state.selectedCodexSession?.id || state.selectedCodexJobId;
+    const switchingSession = options.switchingSession ?? Boolean(previousSessionId && previousSessionId !== job.id);
+    const shouldScrollToBottom = options.scrollToBottom !== false && (!state.selectedCodexSession || switchingSession || !options.keepSelection);
+    const scrollSnapshot = options.keepSelection ? app.conversationScrollSnapshot() : null;
+    const preserveCurrentView = Boolean(options.keepSelection && !switchingSession);
+    const forceTopbarVisible = !preserveCurrentView;
+    state.selectedCodexJobId = job.id;
     state.selectedCodexSession = job;
     if (!(options.keepSelection && state.runtimeDirty)) {
       app.applyRuntimeDraft(app.runtimeChoiceWithFallback(job.runtime, state.runtimePreferences), {
@@ -151,6 +198,7 @@ export function installSessions(app) {
     if (canSkipDetailRender) {
       app.refreshActiveSessionHeader();
       app.updateComposerAvailability();
+      app.updateStopButton();
       return;
     }
 
@@ -175,6 +223,7 @@ export function installSessions(app) {
     elements.codexLog.textContent = lines.join("\n\n");
     app.refreshActiveSessionHeader();
     app.updateComposerAvailability();
+    app.updateStopButton();
     if (shouldScrollToBottom || app.wasConversationNearBottom(scrollSnapshot)) {
       app.scrollConversationToBottom({ forceTopbarVisible });
     } else if (scrollSnapshot) {
@@ -182,6 +231,64 @@ export function installSessions(app) {
     } else if (forceTopbarVisible) {
       app.resetTopbarScrollTracking({ forceVisible: true });
     }
+  };
+
+  app.openCodexSessionStream = async function openCodexSessionStream(sessionId) {
+    if (!windowRef.EventSource || !sessionId || state.sessionEventSourceId === sessionId) return;
+    app.closeCodexSessionStream();
+
+    let ticket = "";
+    try {
+      const data = await app.apiPost(`/api/codex/sessions/${encodeURIComponent(sessionId)}/events-ticket`, {});
+      ticket = String(data.ticket || "");
+    } catch {
+      return;
+    }
+    if (!ticket || state.selectedCodexJobId !== sessionId) return;
+
+    const params = new URLSearchParams({ ticket });
+    const source = new EventSource(`/api/codex/sessions/${encodeURIComponent(sessionId)}/events?${params.toString()}`);
+    state.sessionEventSource = source;
+    state.sessionEventSourceId = sessionId;
+
+    source.addEventListener("session", (event) => {
+      let data = null;
+      try {
+        data = JSON.parse(event.data || "{}");
+      } catch {
+        return;
+      }
+      const session = data?.session;
+      if (!session?.id || session.id !== state.selectedCodexJobId) return;
+      app.renderCodexJob(session, { keepSelection: true, scrollToBottom: false });
+      app.scheduleSessionListRefresh();
+    });
+
+    source.onerror = () => {
+      if (state.sessionEventSource !== source) return;
+      app.closeCodexSessionStream();
+      app.scheduleSessionListRefresh();
+    };
+  };
+
+  app.closeCodexSessionStream = function closeCodexSessionStream() {
+    if (state.sessionEventSource) {
+      state.sessionEventSource.close();
+      state.sessionEventSource = null;
+    }
+    if (state.sessionListRefreshTimer) {
+      windowRef.clearTimeout(state.sessionListRefreshTimer);
+      state.sessionListRefreshTimer = null;
+    }
+    state.sessionEventSourceId = "";
+  };
+
+  app.scheduleSessionListRefresh = function scheduleSessionListRefresh() {
+    if (state.sessionListRefreshTimer) return;
+    state.sessionListRefreshTimer = windowRef.setTimeout(() => {
+      state.sessionListRefreshTimer = null;
+      if (app.isLoggedIn() && state.token) app.loadCodexJobs().catch(() => {});
+    }, 1200);
   };
 
   app.conversationScrollTarget = function conversationScrollTarget() {
@@ -251,6 +358,7 @@ export function installSessions(app) {
       </div>
     `;
     app.refreshActiveSessionHeader();
+    app.updateStopButton();
     app.resetTopbarScrollTracking({ forceVisible: true });
   };
 
@@ -464,6 +572,19 @@ export function installSessions(app) {
       seenSystem.add(system.text);
       timeline.push(system);
     }
+
+    const worktree = app.worktreeEntryFromSession(job);
+    if (worktree?.text && !seenSystem.has(worktree.text)) {
+      seenSystem.add(worktree.text);
+      timeline.push(worktree);
+    }
+
+    for (const event of job.events || []) {
+      const gitSummary = app.gitSummaryEntryFromEvent(event);
+      if (!gitSummary?.text || seenSystem.has(gitSummary.text)) continue;
+      seenSystem.add(gitSummary.text);
+      timeline.push(gitSummary);
+    }
   };
 
   app.sortTimelineEntries = function sortTimelineEntries(timeline) {
@@ -511,6 +632,31 @@ export function installSessions(app) {
     return null;
   };
 
+  app.gitSummaryEntryFromEvent = function gitSummaryEntryFromEvent(event) {
+    if (event.type !== "git.summary") return null;
+    const summary = event.raw?.gitSummary || {};
+    const changedCount = Array.isArray(summary.changedFiles) ? summary.changedFiles.length : 0;
+    const title = changedCount > 0 ? `Git 变更 ${changedCount} 个文件` : "Git 无变更";
+    const detail = String(event.text || "").trim();
+    return {
+      kind: "git",
+      title,
+      text: detail || title,
+      at: event.at || ""
+    };
+  };
+
+  app.worktreeEntryFromSession = function worktreeEntryFromSession(session) {
+    const execution = session?.execution || {};
+    if (execution.mode !== "worktree") return null;
+    const branch = execution.branchName ? ` · ${execution.branchName}` : "";
+    return {
+      kind: "system",
+      text: `隔离 worktree${branch}`,
+      at: execution.createdAt || session.createdAt || ""
+    };
+  };
+
   app.renderConversationEntry = function renderConversationEntry(entry) {
     if (entry.kind === "error") {
       return `
@@ -546,6 +692,20 @@ export function installSessions(app) {
               ${entry.at ? `<span class="thread-message-time">${app.escapeHtml(app.formatMessageTime(entry.at))}</span>` : ""}
             </div>
             <div class="thread-plan-card-body">${app.escapeHtml(entry.text)}</div>
+          </div>
+        </article>
+      `;
+    }
+
+    if (entry.kind === "git") {
+      return `
+        <article class="thread-message thread-message-system">
+          <div class="thread-plan-card thread-git-card">
+            <div class="thread-plan-card-head">
+              <span class="thread-status-pill">${app.escapeHtml(entry.title || "Git 摘要")}</span>
+              ${entry.at ? `<span class="thread-message-time">${app.escapeHtml(app.formatMessageTime(entry.at))}</span>` : ""}
+            </div>
+            <pre class="thread-git-summary">${app.escapeHtml(entry.text)}</pre>
           </div>
         </article>
       `;
@@ -787,6 +947,7 @@ export function installSessions(app) {
     elements.activeSessionMeta.textContent = parts.filter(Boolean).join(" · ") || "选择权限、模型和推理强度后直接发送。";
     app.refreshComposerMeta();
     app.refreshComposerStatusBar();
+    app.updateStopButton?.();
   };
 
   app.refreshComposerMeta = function refreshComposerMeta() {

@@ -80,7 +80,9 @@ export const config = {
     profile: process.env.ECHO_CODEX_PROFILE || "",
     timeoutMs: Number(process.env.ECHO_CODEX_TIMEOUT_MS || 30 * 60 * 1000),
     leaseMs: Number(process.env.ECHO_CODEX_LEASE_MS || 10 * 60 * 1000),
-    maxEvents: Number(process.env.ECHO_CODEX_MAX_EVENTS || 500)
+    maxEvents: Number(process.env.ECHO_CODEX_MAX_EVENTS || 500),
+    worktreeMode: normalizeWorktreeMode(process.env.ECHO_CODEX_WORKTREE_MODE || "off"),
+    worktreeRoot: path.resolve(expandHome(process.env.ECHO_CODEX_WORKTREE_ROOT || path.join(os.homedir(), ".echo-voice", "worktrees")))
   }
 };
 
@@ -116,6 +118,11 @@ function hasExplicitOpenAiCompatibleRefineKey() {
 function parseBoolean(value, fallback) {
   if (value === undefined || value === "") return fallback;
   return ["1", "true", "yes", "on"].includes(String(value).toLowerCase());
+}
+
+function normalizeWorktreeMode(value) {
+  const mode = String(value || "").trim().toLowerCase();
+  return ["off", "optional", "always"].includes(mode) ? mode : "off";
 }
 
 function parseAuthUsers() {

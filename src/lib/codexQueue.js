@@ -3,6 +3,7 @@ import {
   acquireNextSessionCommand,
   appendSessionEvents as appendStoredSessionEvents,
   archiveSession as archiveStoredSession,
+  cancelSession as cancelStoredSession,
   compactSession as compactStoredSession,
   completeSessionCommand as completeStoredSessionCommand,
   completeWorkspaceCommand as completeStoredWorkspaceCommand,
@@ -49,6 +50,7 @@ export function createCodexSession(input) {
 
   const session = createStoredSession({ projectId, prompt, attachments, runtime: input.runtime || {}, mode: input.mode });
   events.emit("codex-session-command");
+  notifySessionChanged(session?.id);
   return session;
 }
 
@@ -60,6 +62,7 @@ export function enqueueCodexSessionMessage(id, input = {}) {
     mode: input.mode
   });
   events.emit("codex-session-command");
+  notifySessionChanged(session?.id);
   return session;
 }
 
@@ -120,12 +123,21 @@ export function completeCodexWorkspaceCommand(id, result = {}, options = {}) {
 export function archiveCodexSession(id, input = {}) {
   const session = archiveStoredSession(id, input);
   if (session) events.emit("codex-session-command");
+  notifySessionChanged(session?.id || id);
   return session;
 }
 
 export function compactCodexSession(id, input = {}) {
   const session = compactStoredSession(id, input);
   if (session) events.emit("codex-session-command");
+  notifySessionChanged(session?.id || id);
+  return session;
+}
+
+export function cancelCodexSession(id, input = {}) {
+  const session = cancelStoredSession(id, input);
+  if (session) events.emit("codex-session-command");
+  notifySessionChanged(session?.id || id);
   return session;
 }
 
@@ -156,7 +168,9 @@ export async function waitForCodexSessionCommand(input = {}) {
 export function appendCodexSessionEvents(id, incomingEvents = [], options = {}) {
   if (options.agent) updateCodexAgent(options.agent);
   else if (options.agentId) touchAgent(options.agentId);
-  return appendStoredSessionEvents(id, incomingEvents, { agentId: options.agentId || options.agent?.id });
+  const ok = appendStoredSessionEvents(id, incomingEvents, { agentId: options.agentId || options.agent?.id });
+  if (ok) notifySessionChanged(id);
+  return ok;
 }
 
 export function createCodexSessionApproval(input = {}, options = {}) {
@@ -164,12 +178,14 @@ export function createCodexSessionApproval(input = {}, options = {}) {
   else if (options.agentId) touchAgent(options.agentId);
   const approval = createStoredSessionApproval(input, { agentId: options.agentId || options.agent?.id });
   if (approval) events.emit(`codex-approval-${approval.id}`);
+  notifySessionChanged(approval?.sessionId);
   return approval;
 }
 
 export function decideCodexSessionApproval(id, input = {}, options = {}) {
   const approval = decideStoredSessionApproval(id, input, options);
   if (approval) events.emit(`codex-approval-${approval.id}`);
+  notifySessionChanged(approval?.sessionId);
   return approval;
 }
 
@@ -205,7 +221,24 @@ export function completeCodexSessionCommand(id, result = {}, options = {}) {
   else if (options.agentId) touchAgent(options.agentId);
   const ok = completeStoredSessionCommand(id, result, { agentId: options.agentId || options.agent?.id });
   if (ok) events.emit("codex-session-command");
+  if (ok && result?.sessionId) notifySessionChanged(result.sessionId);
   return ok;
+}
+
+export function subscribeCodexSession(id, listener) {
+  const eventName = sessionChangedEventName(id);
+  events.on(eventName, listener);
+  return () => events.off(eventName, listener);
+}
+
+function notifySessionChanged(id) {
+  const sessionId = String(id || "").trim();
+  if (!sessionId) return;
+  events.emit(sessionChangedEventName(sessionId), sessionId);
+}
+
+function sessionChangedEventName(id) {
+  return `codex-session-changed-${id}`;
 }
 
 function clampWaitMs(value) {

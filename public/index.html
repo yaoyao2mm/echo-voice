@@ -322,6 +322,18 @@
                 </div>
                 <div class="composer-status-right">
                   <span id="composerStatusText" class="composer-status-text" aria-live="polite"></span>
+                  <button
+                    id="stopCodexTurnButton"
+                    class="composer-status-action session-stop-action"
+                    type="button"
+                    aria-label="中断当前 Codex turn"
+                    title="中断当前 Codex turn"
+                    hidden
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" />
+                    </svg>
+                  </button>
                 </div>
               </div>
               <div id="composerAttachmentTray" class="composer-attachment-tray" hidden></div>

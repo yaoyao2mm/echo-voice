@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -50,6 +51,9 @@ after(() => new Promise((resolve) => relayServer.close(resolve)));
 fs.mkdirSync(tempHome, { recursive: true });
 fs.mkdirSync(workspacePath, { recursive: true });
 fs.writeFileSync(path.join(workspacePath, "README.md"), "# workspace\n", "utf8");
+execGit(workspacePath, ["init"]);
+execGit(workspacePath, ["add", "README.md"]);
+execGit(workspacePath, ["-c", "user.name=Echo Test", "-c", "user.email=echo@example.test", "commit", "-m", "init"]);
 fs.writeFileSync(
   fakeCodexPath,
   `#!/usr/bin/env node
@@ -179,6 +183,7 @@ test("mobile relay flow runs an interactive Codex session end to end", async () 
     assert.equal(completed.finalMessage, "Fake interactive Codex finished: 请修复移动端发送任务链路 [images:1]");
     assert.equal(completed.events.some((event) => event.type === "thread.started"), true);
     assert.equal(completed.events.some((event) => event.type === "turn/completed"), true);
+    assert.equal(completed.events.some((event) => event.type === "git.summary"), true);
     assert.equal(completed.messages.length >= 1, true);
     assert.equal(completed.messages[0].attachments.length, 1);
     assert.equal(completed.messages[0].attachments[0].name, "mobile.png");
@@ -289,4 +294,8 @@ async function waitForSessionState(read, timeoutMs = 2000) {
 function resetFakeCodexArtifacts() {
   fs.rmSync(capturePath, { force: true });
   fs.rmSync(threadCounterPath, { force: true });
+}
+
+function execGit(cwd, args) {
+  execFileSync("git", args, { cwd, stdio: "ignore" });
 }

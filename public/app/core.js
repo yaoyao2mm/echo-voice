@@ -1,6 +1,6 @@
 const MAX_COMPOSER_ATTACHMENTS = 3;
 const MAX_COMPOSER_ATTACHMENT_BYTES = 6 * 1024 * 1024;
-const DEFAULT_CODEX_MODEL = "";
+const DEFAULT_CODEX_MODEL = "gpt-5.5";
 const DEFAULT_CONTEXT_TOKEN_LIMIT = 128000;
 const ATTACHMENT_CONTEXT_TOKEN_ESTIMATE = 1200;
 const AUTO_COMPACT_CONTEXT_PERCENT = 85;
@@ -63,6 +63,9 @@ export function createAppContext(windowRef = window, documentRef = document) {
       pairingScanBusy: false,
       selectedCodexJobId: "",
       selectedCodexSession: null,
+      sessionEventSource: null,
+      sessionEventSourceId: "",
+      sessionListRefreshTimer: null,
       composingNewSession: false,
       codexWorkspaces: [],
       codexAgentOnline: false,
@@ -833,6 +836,7 @@ function queryElements(documentRef) {
     codexQueueMeta: documentRef.querySelector("#codexQueueMeta"),
     activeSessionTitle: documentRef.querySelector("#activeSessionTitle"),
     activeSessionMeta: documentRef.querySelector("#activeSessionMeta"),
+    stopCodexTurnButton: documentRef.querySelector("#stopCodexTurnButton"),
     composerStatusText: documentRef.querySelector("#composerStatusText"),
     composerActionsMeta: documentRef.querySelector("#composerActionsMeta"),
     contextUsageIndicator: documentRef.querySelector("#contextUsageIndicator"),

@@ -455,20 +455,19 @@ Progress:
 - Done: persist desktop agent heartbeats and runtime/workspace snapshots.
 - Done: add stable desktop agent identity.
 - Done: lease running Codex jobs and return expired leases to the queue.
+- Done: add mobile cancellation for active turns.
+- Done: add SSE session events with polling fallback.
+- Done: add desktop-side Git change summaries after turns complete.
+- Done: add desktop-controlled worktree creation behind `ECHO_CODEX_WORKTREE_MODE=always`.
 
 Next build order:
 
-1. Add cancellation.
-2. Add SSE job events.
-3. Add Codex doctor.
-4. Add permission presets.
-5. Add isolated worktree metadata to jobs.
-6. Add desktop-side worktree creation behind a feature flag.
-7. Improve mobile job detail and timeline.
-8. Add post-run `git status` and `git diff --stat`.
-9. Add apply/discard/follow-up flows for worktree jobs.
-10. Add log masking and retention.
-11. Add templates and follow-up tasks.
+1. Add Codex doctor.
+2. Add desktop settings UI for worktree mode and allowed permission modes.
+3. Improve mobile job detail and timeline for worktree metadata.
+4. Add apply/discard/follow-up flows for worktree jobs.
+5. Add log masking and retention.
+6. Add templates and follow-up tasks.
 
 ## References
 

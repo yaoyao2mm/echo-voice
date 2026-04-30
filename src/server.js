@@ -1,4 +1,5 @@
 import express from "express";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import https from "node:https";
@@ -18,6 +19,7 @@ import {
 import {
   appendCodexSessionEvents,
   archiveCodexSession,
+  cancelCodexSession,
   codexStatus,
   compactCodexSession,
   completeCodexSessionCommand,
@@ -31,12 +33,14 @@ import {
   getCodexSession,
   getCodexWorkspaceCommand,
   listCodexSessions,
+  subscribeCodexSession,
   waitForCodexSessionApproval,
   waitForCodexSessionCommand,
   waitForCodexWorkspaceCommand
 } from "./lib/codexQueue.js";
 
 const app = express();
+const sseTickets = new Map();
 
 await loadHistory();
 
@@ -49,6 +53,14 @@ app.use(express.static("public", {
     res.setHeader("Cache-Control", "no-store, max-age=0");
   }
 }));
+
+app.use("/api/codex/sessions/:id/events", (req, res, next) => {
+  if (req.method !== "GET") return next();
+  if (validateSseTicket(req.params.id, req.query.ticket)) {
+    req.sseTicketAuthenticated = true;
+  }
+  next();
+});
 
 app.get("/api/auth/config", (req, res) => {
   res.json({ enabled: config.auth.enabled });
@@ -99,6 +111,8 @@ app.get("/api/auth/me", (req, res) => {
 });
 
 app.use("/api", (req, res, next) => {
+  if (req.sseTicketAuthenticated) return next();
+
   const provided = req.get("x-echo-token") || req.query.token || req.body?.token;
   if (provided !== config.token) {
     return res.status(401).json({
@@ -265,6 +279,58 @@ app.get("/api/codex/sessions/:id", (req, res) => {
   res.json({ session });
 });
 
+app.post("/api/codex/sessions/:id/events-ticket", (req, res) => {
+  if (config.mode !== "relay") {
+    return res.status(400).json({ error: "Codex interactive session events are only available in relay mode." });
+  }
+
+  const session = getCodexSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Codex session not found." });
+
+  const ticket = createSseTicket(req.params.id);
+  res.json({
+    ticket: ticket.id,
+    expiresAt: ticket.expiresAt
+  });
+});
+
+app.get("/api/codex/sessions/:id/events", (req, res) => {
+  if (config.mode !== "relay") {
+    return res.status(400).json({ error: "Codex interactive session events are only available in relay mode." });
+  }
+  if (!req.sseTicketAuthenticated) {
+    return res.status(401).json({
+      code: "SSE_TICKET_REQUIRED",
+      error: "Session event stream ticket is invalid or expired."
+    });
+  }
+
+  const session = getCodexSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Codex session not found." });
+
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no"
+  });
+  res.write(": connected\n\n");
+  writeSse(res, "session", { session });
+
+  const unsubscribe = subscribeCodexSession(req.params.id, () => {
+    const updated = getCodexSession(req.params.id);
+    if (updated) writeSse(res, "session", { session: updated });
+  });
+  const heartbeat = setInterval(() => {
+    res.write(": keep-alive\n\n");
+  }, 25000);
+
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+  });
+});
+
 app.get("/api/codex/attachments/:id", (req, res) => {
   if (config.mode !== "relay") {
     return res.status(400).json({ error: "Codex attachments are only available in relay mode." });
@@ -307,6 +373,21 @@ app.post("/api/codex/sessions/:id/compact", (req, res) => {
 
     const session = compactCodexSession(req.params.id, {
       automatic: req.body.automatic,
+      reason: req.body.reason
+    });
+    res.json({ session });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.post("/api/codex/sessions/:id/cancel", (req, res) => {
+  try {
+    if (config.mode !== "relay") {
+      return res.status(400).json({ error: "Codex interactive sessions are only available in relay mode." });
+    }
+
+    const session = cancelCodexSession(req.params.id, {
       reason: req.body.reason
     });
     res.json({ session });
@@ -521,6 +602,44 @@ function handleError(res, error) {
   res.status(status).json({
     error: error.message || "Unexpected error"
   });
+}
+
+function writeSse(res, event, data) {
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
+}
+
+function createSseTicket(sessionId) {
+  pruneSseTickets();
+  const id = crypto.randomBytes(24).toString("base64url");
+  const expiresAtMs = Date.now() + 2 * 60 * 1000;
+  const ticket = {
+    id,
+    sessionId: String(sessionId || ""),
+    expiresAtMs,
+    expiresAt: new Date(expiresAtMs).toISOString()
+  };
+  sseTickets.set(id, ticket);
+  return ticket;
+}
+
+function validateSseTicket(sessionId, ticketId) {
+  pruneSseTickets();
+  const ticket = sseTickets.get(String(ticketId || ""));
+  if (!ticket) return false;
+  if (ticket.sessionId !== String(sessionId || "")) return false;
+  if (ticket.expiresAtMs < Date.now()) {
+    sseTickets.delete(ticket.id);
+    return false;
+  }
+  return true;
+}
+
+function pruneSseTickets() {
+  const now = Date.now();
+  for (const ticket of sseTickets.values()) {
+    if (ticket.expiresAtMs < now) sseTickets.delete(ticket.id);
+  }
 }
 
 function sendCodexAttachment(req, res) {

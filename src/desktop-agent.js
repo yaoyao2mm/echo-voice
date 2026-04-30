@@ -3,6 +3,7 @@ import { loadDesktopAgentId } from "./lib/agentIdentity.js";
 import { CodexInteractiveRuntime } from "./lib/codexInteractiveRunner.js";
 import { probeCodexModels } from "./lib/codexModelProbe.js";
 import { publicCodexRuntime, publicWorkspaces } from "./lib/codexRunner.js";
+import { prepareCodexSessionWorktree } from "./lib/codexWorktree.js";
 import { createManagedWorkspace, workspaceCreationRoot } from "./lib/codexWorkspaceManager.js";
 import { describeHttpNetwork, formatFetchError, httpFetch } from "./lib/http.js";
 
@@ -108,7 +109,10 @@ async function runCodexSessionLoop() {
 
       console.log(`[${new Date().toLocaleTimeString()}] codex session ${command.sessionId} ${command.type}`);
       const heartbeat = startCodexSessionHeartbeat(command.sessionId);
-      const result = await runtime.handleCommand(command).finally(() => clearInterval(heartbeat));
+      const preparedCommand = await prepareCodexSessionWorktree(command);
+      const result = await runtime.handleCommand(preparedCommand).finally(() => clearInterval(heartbeat));
+      if (preparedCommand.execution && !result.execution) result.execution = preparedCommand.execution;
+      result.sessionId = preparedCommand.sessionId || command.sessionId;
       await postJson("/api/agent/codex/sessions/commands/complete", { id: command.id, agentId, result });
       console.log(`  session ${command.type} ${result.ok ? "accepted" : "failed"}`);
     } catch (error) {
@@ -119,6 +123,7 @@ async function runCodexSessionLoop() {
           agentId,
           result: {
             ok: false,
+            sessionId: command.sessionId,
             error: error.message
           }
         }).catch(() => {});

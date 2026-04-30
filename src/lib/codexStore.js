@@ -142,7 +142,8 @@ const summarizeSessionColumns = `
   leased_by AS leasedBy,
   lease_expires_at AS leaseExpiresAt,
   archived_at AS archivedAt,
-  runtime_json AS runtimeJson
+  runtime_json AS runtimeJson,
+  execution_json AS executionJson
 `;
 
 const summarizeSessionCommandColumns = `
@@ -620,7 +621,7 @@ export function enqueueSessionMessage(sessionId, input = {}) {
   if (!session) return notFound("Codex session not found.");
   if (session.archivedAt) return conflict("Restore this Codex session before continuing it.");
   const recoverableFailure = session.status === "failed" && sessionCanRecoverFailure(session);
-  if (["closed", "stale"].includes(session.status) || (session.status === "failed" && !recoverableFailure)) {
+  if (["cancelled", "closed", "stale"].includes(session.status) || (session.status === "failed" && !recoverableFailure)) {
     return conflict("This Codex session is no longer active.");
   }
 
@@ -728,6 +729,98 @@ export function compactSession(sessionId, input = {}) {
   });
 
   enqueue();
+  return getSession(sessionId);
+}
+
+export function cancelSession(sessionId, input = {}) {
+  refreshInteractiveSessionState();
+  const session = getSessionSummary(sessionId);
+  if (!session) return notFound("Codex session not found.");
+  if (session.archivedAt) return conflict("Restore this Codex session before cancelling it.");
+  if (["closed", "cancelled", "stale"].includes(session.status)) return session;
+
+  const now = nowIso();
+  const reason = String(input.reason || "Cancelled from mobile.").trim().slice(0, 240) || "Cancelled from mobile.";
+
+  if (session.status === "queued" && !session.leasedBy && !session.appThreadId) {
+    const cancelQueued = db.transaction(() => {
+      db.prepare(`
+        UPDATE codex_session_commands
+        SET status = 'failed',
+            error = @reason,
+            updated_at = @now
+        WHERE session_id = @sessionId
+          AND status = 'queued'
+      `).run({ sessionId, reason, now });
+
+      db.prepare(`
+        UPDATE codex_sessions
+        SET status = 'cancelled',
+            active_turn_id = NULL,
+            leased_by = NULL,
+            lease_expires_at = NULL,
+            last_error = '',
+            updated_at = @now
+        WHERE id = @sessionId
+      `).run({ sessionId, now });
+
+      denyPendingSessionApprovals(sessionId, now, "cancelled");
+
+      insertSessionEvent.run(
+        normalizeSessionEvent(sessionId, {
+          type: "session.cancelled",
+          text: reason,
+          raw: { source: "mobile", reason }
+        }, now)
+      );
+    });
+    cancelQueued();
+    return getSession(sessionId);
+  }
+
+  if (!session.activeTurnId && session.status !== "starting" && session.status !== "running" && session.pendingCommandCount === 0) {
+    return conflict("This Codex session does not have an active turn to cancel.");
+  }
+
+  const enqueueStop = db.transaction(() => {
+    db.prepare(`
+      UPDATE codex_session_commands
+      SET status = 'failed',
+          error = @reason,
+          updated_at = @now
+      WHERE session_id = @sessionId
+        AND status = 'queued'
+        AND type <> 'stop'
+    `).run({ sessionId, reason, now });
+
+    if (!sessionHasQueuedStopCommand(sessionId)) {
+      insertSessionCommand.run({
+        id: crypto.randomUUID(),
+        sessionId,
+        type: "stop",
+        payloadJson: JSON.stringify({ reason }),
+        now
+      });
+    }
+
+    db.prepare(`
+      UPDATE codex_sessions
+      SET updated_at = @now
+      WHERE id = @sessionId
+    `).run({ sessionId, now });
+
+    denyPendingSessionApprovals(sessionId, now, "cancelled");
+
+    insertSessionEvent.run(
+      normalizeSessionEvent(sessionId, {
+        type: "turn.cancel.requested",
+        text: reason,
+        raw: { source: "mobile", type: "stop", reason }
+      }, now)
+    );
+  });
+
+  enqueueStop();
   return getSession(sessionId);
 }
 
@@ -861,13 +954,14 @@ export function acquireNextSessionCommand({ agentId, workspaces = [] } = {}) {
         s.project_id AS projectId,
         s.app_thread_id AS appThreadId,
         s.active_turn_id AS activeTurnId,
-        s.runtime_json AS runtimeJson
+        s.runtime_json AS runtimeJson,
+        s.execution_json AS executionJson
       FROM codex_session_commands c
       JOIN codex_sessions s ON s.id = c.session_id
       WHERE c.status = 'queued'
-        AND s.status NOT IN ('closed', 'failed', 'stale')
+        AND s.status NOT IN ('closed', 'failed', 'cancelled', 'stale')
         AND s.project_id IN (${placeholders})
-      ORDER BY c.created_at ASC
+      ORDER BY CASE WHEN c.type = 'stop' THEN 0 ELSE 1 END, c.created_at ASC
       LIMIT 1
     `).get(...workspaceIds);
 
@@ -1000,6 +1094,7 @@ export function completeSessionCommand(commandId, result = {}, options = {}) {
   const activeTurnId = turnAlreadyCompleted ? null : result.activeTurnId || null;
   const clearActiveTurnId = sessionStatus !== "running";
   const releaseLease = sessionStatus !== "running";
+  const executionJson = result.execution && typeof result.execution === "object" ? JSON.stringify(result.execution) : null;
 
   const complete = db.transaction(() => {
     db.prepare(`
@@ -1027,6 +1122,7 @@ export function completeSessionCommand(commandId, result = {}, options = {}) {
           active_turn_id = CASE WHEN @clearActiveTurnId = 1 THEN NULL ELSE COALESCE(@activeTurnId, active_turn_id) END,
           last_error = @lastError,
           final_message = COALESCE(@finalMessage, final_message),
+          execution_json = COALESCE(@executionJson, execution_json),
           leased_by = CASE WHEN @releaseLease = 1 THEN NULL ELSE leased_by END,
           lease_expires_at = CASE WHEN @releaseLease = 1 THEN NULL ELSE lease_expires_at END,
           updated_at = @now
@@ -1041,6 +1137,7 @@ export function completeSessionCommand(commandId, result = {}, options = {}) {
       releaseLease: releaseLease ? 1 : 0,
       lastError: error,
       finalMessage: result.finalMessage || null,
+      executionJson,
       now,
       leasedBy: providedAgentId
     });
@@ -1221,7 +1318,7 @@ function migrate() {
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
       title TEXT NOT NULL DEFAULT '',
-      status TEXT NOT NULL CHECK (status IN ('queued', 'starting', 'active', 'running', 'failed', 'closed', 'stale')),
+      status TEXT NOT NULL CHECK (status IN ('queued', 'starting', 'active', 'running', 'failed', 'cancelled', 'closed', 'stale')),
       app_thread_id TEXT,
       active_turn_id TEXT,
       created_at TEXT NOT NULL,
@@ -1230,7 +1327,9 @@ function migrate() {
       final_message TEXT NOT NULL DEFAULT '',
       leased_by TEXT,
       lease_expires_at TEXT,
-      runtime_json TEXT NOT NULL DEFAULT '{}'
+      archived_at TEXT,
+      runtime_json TEXT NOT NULL DEFAULT '{}',
+      execution_json TEXT NOT NULL DEFAULT '{}'
     );
 
     CREATE INDEX IF NOT EXISTS idx_codex_sessions_status_updated
@@ -1344,8 +1443,16 @@ function migrate() {
 
   ensureColumn("codex_sessions", "archived_at", "TEXT");
   ensureColumn("codex_sessions", "runtime_json", "TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn("codex_sessions", "execution_json", "TEXT NOT NULL DEFAULT '{}'");
+  ensureSessionStatuses();
   ensureSessionCommandTypes();
   db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_codex_sessions_status_updated
+      ON codex_sessions(status, updated_at);
+
+    CREATE INDEX IF NOT EXISTS idx_codex_sessions_thread
+      ON codex_sessions(app_thread_id);
+
     CREATE INDEX IF NOT EXISTS idx_codex_sessions_archived_updated
       ON codex_sessions(archived_at, updated_at);
   `);
@@ -1354,6 +1461,71 @@ function migrate() {
 function ensureColumn(table, column, definition) {
   const exists = db.prepare(`PRAGMA table_info(${table})`).all().some((info) => info.name === column);
   if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
+function ensureSessionStatuses() {
+  const schema = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'codex_sessions'").get()?.sql || "";
+  if (schema.includes("'cancelled'")) return;
+
+  db.exec(`
+    PRAGMA foreign_keys = OFF;
+    BEGIN TRANSACTION;
+    ALTER TABLE codex_sessions RENAME TO codex_sessions_old;
+    CREATE TABLE codex_sessions (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      title TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL CHECK (status IN ('queued', 'starting', 'active', 'running', 'failed', 'cancelled', 'closed', 'stale')),
+      app_thread_id TEXT,
+      active_turn_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_error TEXT NOT NULL DEFAULT '',
+      final_message TEXT NOT NULL DEFAULT '',
+      leased_by TEXT,
+      lease_expires_at TEXT,
+      archived_at TEXT,
+      runtime_json TEXT NOT NULL DEFAULT '{}',
+      execution_json TEXT NOT NULL DEFAULT '{}'
+    );
+    INSERT INTO codex_sessions (
+      id,
+      project_id,
+      title,
+      status,
+      app_thread_id,
+      active_turn_id,
+      created_at,
+      updated_at,
+      last_error,
+      final_message,
+      leased_by,
+      lease_expires_at,
+      archived_at,
+      runtime_json,
+      execution_json
+    )
+    SELECT
+      id,
+      project_id,
+      title,
+      status,
+      app_thread_id,
+      active_turn_id,
+      created_at,
+      updated_at,
+      last_error,
+      final_message,
+      leased_by,
+      lease_expires_at,
+      archived_at,
+      runtime_json,
+      execution_json
+    FROM codex_sessions_old;
+    DROP TABLE codex_sessions_old;
+    COMMIT;
+    PRAGMA foreign_keys = ON;
+  `);
 }
 
 function ensureSessionCommandTypes() {
@@ -1576,6 +1748,7 @@ function summarizeSession(row) {
   return {
     ...row,
     runtime: parseJson(row.runtimeJson, {}),
+    execution: parseJson(row.executionJson, {}),
     eventCount,
     pendingCommandCount,
     pendingApprovalCount,
@@ -1735,6 +1908,54 @@ function sessionHasLeasedCommand(sessionId) {
   );
 }
 
+function sessionHasQueuedStopCommand(sessionId) {
+  return (
+    db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM codex_session_commands
+      WHERE session_id = ?
+        AND type = 'stop'
+        AND status IN ('queued', 'leased')
+    `).get(sessionId).count > 0
+  );
+}
+
+function denyPendingSessionApprovals(sessionId, now, decidedBy) {
+  const approvals = db.prepare(`
+    SELECT ${summarizeSessionApprovalColumns}
+    FROM codex_session_approvals
+    WHERE session_id = ?
+      AND status = 'pending'
+  `).all(sessionId).map(summarizeSessionApproval);
+
+  for (const approval of approvals) {
+    const response = buildApprovalResponse(approval.method, "denied");
+    db.prepare(`
+      UPDATE codex_session_approvals
+      SET status = 'denied',
+          response_json = @responseJson,
+          decided_at = @now,
+          decided_by = @decidedBy,
+          updated_at = @now
+      WHERE id = @id
+        AND status = 'pending'
+    `).run({
+      id: approval.id,
+      responseJson: JSON.stringify(response),
+      now,
+      decidedBy
+    });
+
+    insertSessionEvent.run(
+      normalizeSessionEvent(approval.sessionId, {
+        type: "approval.denied",
+        text: `${approval.method} denied by cancellation.`,
+        raw: { approvalId: approval.id, response }
+      }, now)
+    );
+  }
+}
+
 function insertInternalEvents(jobId, events) {
   const at = nowIso();
   for (const event of events) insertEvent.run(normalizeEvent(jobId, event, at));
@@ -1797,6 +2018,7 @@ function buildAgentSessionCommand(command) {
     appThreadId: command.appThreadId || "",
     activeTurnId: command.activeTurnId || "",
     runtime: parseJson(command.runtimeJson, {}),
+    execution: parseJson(command.executionJson, {}),
     payload,
     createdAt: parsed.createdAt
   };
@@ -2010,6 +2232,7 @@ function normalizeRuntime(runtime = {}) {
         reasoningEffort: normalizeReasoningEffort(runtime.reasoningEffort || runtime.effort),
         profile: String(runtime.profile || permissionMode || "").trim(),
         permissionMode,
+        worktreeMode: String(runtime.worktreeMode || "").trim(),
         modelCapabilitySource: String(runtime.modelCapabilitySource || "").trim(),
         modelCapabilityCheckedAt: String(runtime.modelCapabilityCheckedAt || "").trim(),
         modelCapabilityError: String(runtime.modelCapabilityError || "").trim(),

@@ -41,7 +41,8 @@ export function publicCodexRuntime() {
     allowedPermissionModes: normalizeAllowedPermissionModes(),
     reasoningEffort: config.codex.reasoningEffort,
     profile: config.codex.profile,
-    timeoutMs: config.codex.timeoutMs
+    timeoutMs: config.codex.timeoutMs,
+    worktreeMode: config.codex.worktreeMode
   };
 }
 
