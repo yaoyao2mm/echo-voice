@@ -1,7 +1,7 @@
-import { installAuth } from "./auth.js?v=58";
-import { installCodex } from "./codex.js?v=58";
-import { createAppContext, installCore } from "./core.js?v=58";
-import { installSessions } from "./sessions.js?v=58";
+import { installAuth } from "./auth.js?v=59";
+import { installCodex } from "./codex.js?v=59";
+import { createAppContext, installCore } from "./core.js?v=59";
+import { installSessions } from "./sessions.js?v=59";
 
 export function createApp(windowRef = window, documentRef = document) {
   const app = createAppContext(windowRef, documentRef);
@@ -18,6 +18,7 @@ export function createApp(windowRef = window, documentRef = document) {
     elements.logoutButton.addEventListener("click", app.logout);
     elements.openPairingButton.addEventListener("click", () => app.showPairingPanel({ focus: true }));
     elements.refreshStatus.addEventListener("click", app.refreshStatus);
+    elements.themeModeToggle?.addEventListener("change", app.toggleThemeMode);
     elements.scanPairingButton.addEventListener("click", app.startPairingScanner);
     elements.stopScanButton.addEventListener("click", app.stopPairingScanner);
     elements.savePairingButton.addEventListener("click", app.pairFromInput);
@@ -50,6 +51,7 @@ export function createApp(windowRef = window, documentRef = document) {
   };
 
   app.init = async function init() {
+    app.applyThemeMode(app.state.themeMode, { persist: false });
     app.bindViewportMetrics();
     app.bindTopbarScrollState();
     app.initRuntimeControls();

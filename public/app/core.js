@@ -55,6 +55,7 @@ export function createAppContext(windowRef = window, documentRef = document) {
       sessionToken: windowRef.localStorage.getItem("echoSession") || "",
       currentUser: readStoredUser(windowRef.localStorage),
       authEnabled: true,
+      themeMode: windowRef.localStorage.getItem("echoTheme") === "dark" ? "dark" : "light",
       codexTimer: null,
       pairingStream: null,
       pairingScanActive: false,
@@ -111,6 +112,35 @@ export function installCore(app) {
     window.requestAnimationFrame(() => {
       app.syncViewportMetrics();
     });
+  };
+
+  app.applyThemeMode = function applyThemeMode(themeMode, options = {}) {
+    const mode = themeMode === "dark" ? "dark" : "light";
+    const isDark = mode === "dark";
+    state.themeMode = mode;
+    if (isDark) {
+      document.documentElement.dataset.theme = "dark";
+    } else {
+      delete document.documentElement.dataset.theme;
+    }
+    document.body.classList.toggle("theme-dark", isDark);
+    if (elements.themeModeToggle) {
+      elements.themeModeToggle.checked = isDark;
+      elements.themeModeToggle.setAttribute("aria-checked", isDark ? "true" : "false");
+    }
+    if (elements.themeColorMeta) {
+      elements.themeColorMeta.setAttribute("content", isDark ? "#0d1014" : "#f5f6f8");
+    }
+    if (elements.appleStatusBarMeta) {
+      elements.appleStatusBarMeta.setAttribute("content", isDark ? "black-translucent" : "default");
+    }
+    if (options.persist !== false) {
+      localStorage.setItem("echoTheme", mode);
+    }
+  };
+
+  app.toggleThemeMode = function toggleThemeMode() {
+    app.applyThemeMode(elements.themeModeToggle?.checked ? "dark" : "light");
   };
 
   app.bindTopbarScrollState = function bindTopbarScrollState() {
@@ -740,12 +770,15 @@ function readStoredRuntimePreferences(localStorageRef) {
 function queryElements(documentRef) {
   return {
     topbar: documentRef.querySelector(".topbar"),
+    themeColorMeta: documentRef.querySelector("#themeColorMeta"),
+    appleStatusBarMeta: documentRef.querySelector("#appleStatusBarMeta"),
     statusText: documentRef.querySelector("#statusText"),
     mobileStatusIndicator: documentRef.querySelector("#mobileStatusIndicator"),
     userBadge: documentRef.querySelector("#userBadge"),
     logoutButton: documentRef.querySelector("#logoutButton"),
     openPairingButton: documentRef.querySelector("#openPairingButton"),
     refreshStatus: documentRef.querySelector("#refreshStatus"),
+    themeModeToggle: documentRef.querySelector("#themeModeToggle"),
     loginPanel: documentRef.querySelector("#loginPanel"),
     loginForm: documentRef.querySelector("#loginForm"),
     loginStatus: documentRef.querySelector("#loginStatus"),

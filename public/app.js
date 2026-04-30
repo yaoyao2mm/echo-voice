@@ -1,4 +1,4 @@
-import { createApp } from "./app/index.js?v=58";
+import { createApp } from "./app/index.js?v=59";
 
 const app = createApp();
 

@@ -310,6 +310,36 @@ test("mobile composer stays pinned while the conversation surface scrolls", asyn
   }
 });
 
+test("mobile sidebar toggles and persists dark mode", async ({ page, request }) => {
+  await touchMockAgent(request);
+  const keepAlive = setInterval(() => {
+    touchMockAgent(request).catch(() => {});
+  }, 10000);
+
+  try {
+    await loginToWorkbench(page);
+    await page.locator("#toggleSessionsButton").click();
+    await expect(page.locator("#themeModeToggle")).toBeVisible();
+    await expect(page.locator("#themeModeToggle")).not.toBeChecked();
+
+    await page.locator(".theme-switch").click();
+
+    await expect(page.locator("#themeModeToggle")).toBeChecked();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page.locator("body")).toHaveClass(/theme-dark/);
+    await expect(page.locator("#themeColorMeta")).toHaveAttribute("content", "#0d1014");
+    await expect.poll(() => page.evaluate(() => localStorage.getItem("echoTheme"))).toBe("dark");
+
+    await page.reload();
+    await expect(page.locator("#codexView")).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    await expect(page.locator("body")).toHaveClass(/theme-dark/);
+    await expect(page.locator("#themeModeToggle")).toBeChecked();
+  } finally {
+    clearInterval(keepAlive);
+  }
+});
+
 test("mobile codex polling keeps the conversation viewport stable", async ({ page, request }) => {
   await touchMockAgent(request);
   const keepAlive = setInterval(() => {

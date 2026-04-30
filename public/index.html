@@ -6,12 +6,17 @@
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover, shrink-to-fit=no"
     />
-    <meta name="theme-color" content="#f5f6f8" />
+    <meta id="themeColorMeta" name="theme-color" content="#f5f6f8" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta id="appleStatusBarMeta" name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Echo Codex</title>
-    <link rel="manifest" href="/manifest.webmanifest?v=58" />
-    <link rel="stylesheet" href="/styles.css?v=58" />
+    <script>
+      try {
+        if (localStorage.getItem("echoTheme") === "dark") document.documentElement.dataset.theme = "dark";
+      } catch {}
+    </script>
+    <link rel="manifest" href="/manifest.webmanifest?v=59" />
+    <link rel="stylesheet" href="/styles.css?v=59" />
   </head>
   <body>
     <main class="shell">
@@ -127,6 +132,26 @@
             <select id="codexProject" class="sr-only" tabindex="-1" aria-hidden="true"></select>
           </section>
 
+          <section class="sidebar-panel sidebar-panel-appearance">
+            <div class="sidebar-panel-head">
+              <strong>外观</strong>
+            </div>
+            <label class="theme-switch" for="themeModeToggle">
+              <span class="theme-switch-copy">
+                <span class="theme-switch-title">暗黑模式</span>
+                <span class="theme-switch-subtitle">夜间低亮度显示</span>
+              </span>
+              <input id="themeModeToggle" type="checkbox" role="switch" aria-label="暗黑模式" />
+              <span class="theme-switch-track" aria-hidden="true">
+                <span class="theme-switch-thumb">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M20 14.2A7.5 7.5 0 0 1 9.8 4a8.5 8.5 0 1 0 10.2 10.2Z" />
+                  </svg>
+                </span>
+              </span>
+            </label>
+          </section>
+
           <section class="sidebar-panel sidebar-panel-user">
             <div class="sidebar-panel-head">
               <strong>用户中心</strong>
@@ -237,6 +262,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=58" type="module"></script>
+    <script src="/app.js?v=59" type="module"></script>
   </body>
 </html>
