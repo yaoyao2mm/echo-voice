@@ -240,7 +240,13 @@ export function installCodex(app) {
 
   app.sessionCanAcceptFollowUp = function sessionCanAcceptFollowUp(session) {
     if (!session || session.archivedAt) return false;
-    return !["closed", "failed", "stale"].includes(session.status);
+    if (session.status === "failed") return app.sessionCanRecoverFailure(session);
+    return !["closed", "stale"].includes(session.status);
+  };
+
+  app.sessionCanRecoverFailure = function sessionCanRecoverFailure(session) {
+    const error = String(session?.lastError || session?.error || "");
+    return /thread not found|requires a newer version of Codex|Please upgrade to the latest app or CLI/i.test(error);
   };
 
   app.canStartNewSessionFromComposer = function canStartNewSessionFromComposer() {

@@ -588,7 +588,8 @@ export function enqueueSessionMessage(sessionId, input = {}) {
   const session = getSessionSummary(sessionId);
   if (!session) return notFound("Codex session not found.");
   if (session.archivedAt) return conflict("Restore this Codex session before continuing it.");
-  if (["closed", "failed", "stale"].includes(session.status)) {
+  const recoverableFailure = session.status === "failed" && sessionCanRecoverFailure(session);
+  if (["closed", "stale"].includes(session.status) || (session.status === "failed" && !recoverableFailure)) {
     return conflict("This Codex session is no longer active.");
   }
 
@@ -616,9 +617,10 @@ export function enqueueSessionMessage(sessionId, input = {}) {
       UPDATE codex_sessions
       SET updated_at = @now,
           runtime_json = @runtimeJson,
-          status = CASE WHEN status = 'queued' THEN 'queued' ELSE status END
+          status = CASE WHEN @recoverableFailure = 1 THEN 'active' WHEN status = 'queued' THEN 'queued' ELSE status END,
+          last_error = CASE WHEN @recoverableFailure = 1 THEN '' ELSE last_error END
       WHERE id = @sessionId
-    `).run({ sessionId, now, runtimeJson: JSON.stringify(runtime) });
+    `).run({ sessionId, now, runtimeJson: JSON.stringify(runtime), recoverableFailure: recoverableFailure ? 1 : 0 });
 
     insertSessionMessage.run({
       id: messageId,
@@ -1625,6 +1627,11 @@ function canMutateSession(session, agentId) {
   const providedAgentId = String(agentId || "").trim();
   if (!session.leasedBy || !providedAgentId) return false;
   return session.leasedBy === normalizeAgentId(providedAgentId);
+}
+
+function sessionCanRecoverFailure(session = {}) {
+  const error = String(session.lastError || session.error || "");
+  return /thread not found|requires a newer version of Codex|Please upgrade to the latest app or CLI/i.test(error);
 }
 
 function canMutateRunningJob(job, agentId) {

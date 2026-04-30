@@ -324,6 +324,37 @@ test("interactive Codex sessions recover expired running leases instead of looki
   assert.equal(recovered.events.some((event) => event.type === "session.lease.expired"), true);
 });
 
+test("interactive Codex sessions can continue after recoverable app-server failures", async () => {
+  store.resetStoreForTest();
+
+  const agent = {
+    id: "recoverable-failure-agent",
+    workspaces: [{ id: "demo", path: process.cwd() }]
+  };
+
+  const session = queue.createCodexSession({ projectId: "demo", prompt: "第一条消息" });
+  const startCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  queue.appendCodexSessionEvents(session.id, [{ type: "thread.started", text: "started", appThreadId: "thr_lost" }], {
+    agentId: agent.id
+  });
+  queue.completeCodexSessionCommand(startCommand.id, { ok: false, error: "thread not found: thr_lost" }, { agentId: agent.id });
+
+  const failed = queue.getCodexSession(session.id);
+  assert.equal(failed.status, "failed");
+  assert.match(failed.lastError, /thread not found/);
+
+  const continued = queue.enqueueCodexSessionMessage(session.id, { text: "继续这条会话" });
+  assert.equal(continued.status, "active");
+  assert.equal(continued.lastError, "");
+  assert.equal(continued.pendingCommandCount, 1);
+
+  const messageCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  assert.equal(messageCommand.type, "message");
+  assert.equal(messageCommand.appThreadId, "thr_lost");
+  assert.equal(messageCommand.payload.text, "继续这条会话");
+  assert.equal(messageCommand.payload.history.some((message) => message.text === "第一条消息"), true);
+});
+
 test("interactive Codex approvals wait for mobile decisions", async () => {
   store.resetStoreForTest();
 

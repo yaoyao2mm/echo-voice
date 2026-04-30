@@ -225,6 +225,8 @@ export function installCore(app) {
       status = "Codex 正在回复";
     } else if (session?.pendingCommandCount > 0) {
       status = "消息已排队";
+    } else if (session?.status === "failed" && app.sessionCanRecoverFailure(session)) {
+      status = "上次中断，可继续";
     } else if (session && !app.sessionCanAcceptFollowUp(session)) {
       status = "当前会话不可继续";
     }
