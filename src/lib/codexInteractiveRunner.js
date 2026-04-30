@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { config } from "../config.js";
 import { CodexAppServerClient, buildUserInputs } from "./codexAppServerClient.js";
 
@@ -10,6 +13,7 @@ export class CodexInteractiveRuntime {
     this.sessions = new Map();
     this.threadToSession = new Map();
     this.activeTurns = new Map();
+    this.attachmentDirs = new Map();
   }
 
   async handleCommand(command) {
@@ -24,6 +28,9 @@ export class CodexInteractiveRuntime {
   }
 
   stop() {
+    this.#cleanupAllAttachmentDirs().catch((error) => {
+      console.error(`[codex attachment cleanup] ${error.message}`);
+    });
     this.client?.stop();
     this.client = null;
     this.sessions.clear();
@@ -91,52 +98,59 @@ export class CodexInteractiveRuntime {
     }
     await this.client.request("turn/interrupt", { threadId: appThreadId, turnId: activeTurnId }, 30000);
     this.activeTurns.delete(appThreadId);
+    await this.#cleanupAttachmentDir(appThreadId);
     return { ok: true, appThreadId, sessionStatus: "active" };
   }
 
   async #startOrSteerTurn({ sessionId, threadId, text, attachments, workspace, runtime }) {
-    const input = buildUserInputs(text, attachments);
+    const preparedAttachments = await this.#materializeAttachments({ sessionId, threadId, attachments, workspace });
+    const input = buildUserInputs(text, preparedAttachments);
     if (input.length === 0) throw new Error("Codex turn input is empty.");
     const activeTurnId = this.activeTurns.get(threadId);
-    if (activeTurnId) {
+    try {
+      if (activeTurnId) {
+        const result = await this.client.request(
+          "turn/steer",
+          {
+            threadId,
+            input,
+            expectedTurnId: activeTurnId
+          },
+          60000
+        );
+        await this.#emit(sessionId, [
+          {
+            type: "turn.steered",
+            text: "Message added to the active Codex turn.",
+            appThreadId: threadId,
+            activeTurnId,
+            sessionStatus: "running",
+            raw: { method: "turn/steer", result }
+          }
+        ]);
+        return { id: result?.turnId || activeTurnId };
+      }
+
       const result = await this.client.request(
-        "turn/steer",
+        "turn/start",
         {
           threadId,
           input,
-          expectedTurnId: activeTurnId
+          cwd: workspace.path,
+          approvalPolicy: runtime.approvalPolicy,
+          model: runtime.model,
+          effort: runtime.reasoningEffort
         },
         60000
       );
-      await this.#emit(sessionId, [
-        {
-          type: "turn.steered",
-          text: "Message added to the active Codex turn.",
-          appThreadId: threadId,
-          activeTurnId,
-          sessionStatus: "running",
-          raw: { method: "turn/steer", result }
-        }
-      ]);
-      return { id: result?.turnId || activeTurnId };
+      const turnId = result?.turn?.id;
+      if (!turnId) throw new Error("Codex app-server did not return a turn id.");
+      this.activeTurns.set(threadId, turnId);
+      return { id: turnId };
+    } catch (error) {
+      await this.#cleanupAttachmentDir(threadId);
+      throw error;
     }
-
-    const result = await this.client.request(
-      "turn/start",
-      {
-        threadId,
-        input,
-        cwd: workspace.path,
-        approvalPolicy: runtime.approvalPolicy,
-        model: runtime.model,
-        effort: runtime.reasoningEffort
-      },
-      60000
-    );
-    const turnId = result?.turn?.id;
-    if (!turnId) throw new Error("Codex app-server did not return a turn id.");
-    this.activeTurns.set(threadId, turnId);
-    return { id: turnId };
   }
 
   async #ensureThread(command, workspace, runtime) {
@@ -180,6 +194,9 @@ export class CodexInteractiveRuntime {
     this.client.on("serverRequest", (message) => this.#handleServerRequest(message));
     this.client.on("stderr", (line) => this.#handleStderr(line));
     this.client.on("close", () => {
+      this.#cleanupAllAttachmentDirs().catch((error) => {
+        console.error(`[codex attachment cleanup] ${error.message}`);
+      });
       this.sessions.clear();
       this.threadToSession.clear();
       this.activeTurns.clear();
@@ -256,6 +273,9 @@ export class CodexInteractiveRuntime {
     }
     if (message.method === "turn/completed") {
       this.activeTurns.delete(threadId);
+      this.#cleanupAttachmentDir(threadId).catch((error) => {
+        console.error(`[codex attachment cleanup] ${error.message}`);
+      });
     }
     this.#emit(sessionId, [event]).catch((error) => {
       console.error(`[codex app-server event] ${error.message}`);
@@ -301,6 +321,77 @@ export class CodexInteractiveRuntime {
   async #emit(sessionId, events) {
     await this.onEvents(sessionId, events);
   }
+
+  async #materializeAttachments({ sessionId, threadId, attachments, workspace }) {
+    const materialized = [];
+    const images = Array.isArray(attachments) ? attachments.filter((attachment) => attachment?.type === "image") : [];
+    if (images.length === 0) return materialized;
+
+    const attachmentDir = await this.#ensureAttachmentDir(workspace.path, sessionId, threadId);
+    for (const [index, attachment] of images.entries()) {
+      const image = parseImageDataUrl(String(attachment.url || ""));
+      if (!image) continue;
+      const filePath = path.join(attachmentDir, buildAttachmentFileName(attachment, index, image.extension));
+      await fs.writeFile(filePath, image.buffer, { mode: 0o600 });
+      materialized.push({ type: "localImage", path: filePath });
+    }
+    return materialized;
+  }
+
+  async #ensureAttachmentDir(workspacePath, sessionId, threadId) {
+    const dirPath =
+      this.attachmentDirs.get(threadId) ||
+      path.join(workspacePath, ".echo-codex-attachments", sanitizePathSegment(sessionId), sanitizePathSegment(threadId));
+    await fs.mkdir(dirPath, { recursive: true });
+    this.attachmentDirs.set(threadId, dirPath);
+    return dirPath;
+  }
+
+  async #cleanupAttachmentDir(threadId) {
+    const dirPath = this.attachmentDirs.get(threadId);
+    if (!dirPath) return;
+    this.attachmentDirs.delete(threadId);
+    await fs.rm(dirPath, { recursive: true, force: true });
+  }
+
+  async #cleanupAllAttachmentDirs() {
+    const threadIds = Array.from(this.attachmentDirs.keys());
+    await Promise.all(threadIds.map((threadId) => this.#cleanupAttachmentDir(threadId)));
+  }
+}
+
+function buildAttachmentFileName(attachment, index, extension) {
+  const originalName = String(attachment?.name || "").trim();
+  const parsed = originalName ? path.parse(originalName).name : `image-${index + 1}`;
+  const baseName = sanitizePathSegment(parsed || `image-${index + 1}`);
+  return `${baseName}-${randomUUID()}.${extension}`;
+}
+
+function sanitizePathSegment(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "attachment";
+}
+
+function parseImageDataUrl(url) {
+  const match = /^data:(image\/[a-z0-9.+_-]+);base64,([a-z0-9+/=\s]+)$/i.exec(String(url || "").trim());
+  if (!match) return null;
+  const mimeType = match[1].toLowerCase();
+  const base64 = match[2].replace(/\s+/g, "");
+  if (!base64) return null;
+  return {
+    mimeType,
+    extension: extensionFromMimeType(mimeType),
+    buffer: Buffer.from(base64, "base64")
+  };
+}
+
+function extensionFromMimeType(mimeType) {
+  if (mimeType === "image/jpeg") return "jpg";
+  if (mimeType === "image/svg+xml") return "svg";
+  return mimeType.split("/")[1]?.replace(/[^a-z0-9.+_-]+/gi, "") || "png";
 }
 
 function normalizeSandboxMode(value) {

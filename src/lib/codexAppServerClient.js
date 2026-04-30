@@ -184,12 +184,25 @@ export function buildUserImageInput(url) {
   };
 }
 
+export function buildUserLocalImageInput(filePath) {
+  return {
+    type: "localImage",
+    path: String(filePath || "")
+  };
+}
+
 export function buildUserInputs(text, attachments = []) {
   const inputs = [];
   const normalizedText = String(text || "").trim();
   if (normalizedText) inputs.push(buildUserTextInput(normalizedText));
 
   for (const attachment of Array.isArray(attachments) ? attachments : []) {
+    if (attachment?.type === "localImage") {
+      const filePath = String(attachment.path || "").trim();
+      if (!filePath) continue;
+      inputs.push(buildUserLocalImageInput(filePath));
+      continue;
+    }
     if (attachment?.type !== "image") continue;
     const url = String(attachment.url || "").trim();
     if (!url) continue;

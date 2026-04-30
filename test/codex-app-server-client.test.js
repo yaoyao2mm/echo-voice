@@ -69,3 +69,11 @@ rl.on("line", (line) => {
   assert.equal(notifications.some((message) => message.method === "item/agentMessage/delta"), true);
   assert.equal(notifications.some((message) => message.method === "turn/completed"), true);
 });
+
+test("buildUserInputs supports local image attachments", () => {
+  const inputs = buildUserInputs("hi", [{ type: "localImage", path: "/tmp/example.png" }]);
+  assert.deepEqual(inputs, [
+    { type: "text", text: "hi", text_elements: [] },
+    { type: "localImage", path: "/tmp/example.png" }
+  ]);
+});

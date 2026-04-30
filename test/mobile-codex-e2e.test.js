@@ -8,6 +8,8 @@ const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "echo-mobile-codex-e2e-")
 const tempHome = path.join(tempRoot, "home");
 const workspacePath = path.join(tempRoot, "workspace");
 const fakeCodexPath = path.join(tempRoot, "fake-codex-app-server");
+const capturePath = path.join(tempRoot, "turn-start-capture.json");
+const tinyPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4//8/AwAI/AL+KDvY8QAAAABJRU5ErkJggg==";
 
 fs.mkdirSync(tempHome, { recursive: true });
 fs.mkdirSync(workspacePath, { recursive: true });
@@ -15,6 +17,7 @@ fs.writeFileSync(path.join(workspacePath, "README.md"), "# workspace\n", "utf8")
 fs.writeFileSync(
   fakeCodexPath,
   `#!/usr/bin/env node
+import fs from "node:fs";
 import readline from "node:readline";
 
 const rl = readline.createInterface({ input: process.stdin });
@@ -35,7 +38,17 @@ rl.on("line", (line) => {
   }
   if (message.method === "turn/start") {
     const text = message.params.input?.find((item) => item.type === "text")?.text || "";
-    const imageCount = (message.params.input || []).filter((item) => item.type === "image").length;
+    const localImagePaths = (message.params.input || []).filter((item) => item.type === "localImage").map((item) => item.path);
+    const imageCount = localImagePaths.length;
+    fs.writeFileSync(
+      ${JSON.stringify(capturePath)},
+      JSON.stringify({
+        input: message.params.input,
+        localImagePaths,
+        localImageSizes: localImagePaths.map((filePath) => fs.statSync(filePath).size)
+      }, null, 2),
+      "utf8"
+    );
     const turn = { id: "turn_mobile_e2e", items: [], status: "inProgress", error: null, startedAt: 1, completedAt: null, durationMs: null };
     send({ id: message.id, result: { turn } });
     send({ method: "turn/started", params: { threadId: message.params.threadId, turn } });
@@ -89,7 +102,7 @@ test("mobile relay flow runs an interactive Codex session end to end", async () 
   const created = queue.createCodexSession({
     projectId: "e2e",
     prompt: "请修复移动端发送任务链路",
-    attachments: [{ type: "image", url: "data:image/png;base64,AAAA", name: "mobile.png", mimeType: "image/png", sizeBytes: 4 }]
+    attachments: [{ type: "image", url: `data:image/png;base64,${tinyPngBase64}`, name: "mobile.png", mimeType: "image/png", sizeBytes: 70 }]
   });
   assert.equal(created.status, "queued");
 
@@ -102,7 +115,10 @@ test("mobile relay flow runs an interactive Codex session end to end", async () 
   assert.equal(result.appThreadId, "thr_mobile_e2e");
   assert.equal(queue.completeCodexSessionCommand(command.id, result, { agentId: agent.id }), true);
 
-  const completed = queue.getCodexSession(created.id);
+  const completed = await waitForSessionState(() => {
+    const session = queue.getCodexSession(created.id);
+    return session?.events.some((event) => event.type === "turn/completed") ? session : null;
+  });
   assert.equal(completed.status, "active");
   assert.equal(completed.finalMessage, "Fake interactive Codex finished: 请修复移动端发送任务链路 [images:1]");
   assert.equal(completed.events.some((event) => event.type === "thread.started"), true);
@@ -111,5 +127,22 @@ test("mobile relay flow runs an interactive Codex session end to end", async () 
   assert.equal(userEvent.raw.attachments.length, 1);
   assert.equal(queue.listCodexSessions(5)[0].id, created.id);
 
+  const capture = JSON.parse(fs.readFileSync(capturePath, "utf8"));
+  assert.equal(capture.localImagePaths.length, 1);
+  assert.equal(capture.input.some((item) => item.type === "localImage"), true);
+  assert.equal(capture.localImageSizes[0] > 0, true);
+  assert.equal(capture.localImagePaths[0].startsWith(path.join(workspacePath, ".echo-codex-attachments")), true);
+  assert.equal(fs.existsSync(capture.localImagePaths[0]), false);
+
   runtime.stop();
 });
+
+async function waitForSessionState(read, timeoutMs = 2000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const value = read();
+    if (value) return value;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("Timed out waiting for Codex session to reach expected state.");
+}
