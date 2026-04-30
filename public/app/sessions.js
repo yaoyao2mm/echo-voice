@@ -240,31 +240,48 @@ export function installSessions(app) {
 
   app.buildConversationTimeline = function buildConversationTimeline(job, errorText = "") {
     const timeline = [];
-    const events = Array.isArray(job.events) ? job.events : [];
+    const messages = Array.isArray(job.messages) ? job.messages : [];
 
-    for (const event of events) {
-      const userText = event.type === "user.message" ? String(event.text || "").trim() : "";
-      const userAttachments = event.type === "user.message" ? app.userMessageAttachments(event) : [];
-      if (userText || userAttachments.length > 0) {
+    if (messages.length > 0) {
+      for (const message of messages) {
+        const text = String(message.text || "").trim();
+        const attachments = app.messageAttachments(message);
+        if (!text && attachments.length === 0) continue;
         timeline.push({
           kind: "message",
-          role: "user",
-          text: userText,
-          attachments: userAttachments,
-          at: event.at || job.createdAt || ""
+          role: message.role === "assistant" ? "assistant" : "user",
+          text,
+          attachments,
+          at: message.createdAt || job.updatedAt || job.createdAt || ""
         });
-        continue;
       }
+    } else {
+      const events = Array.isArray(job.events) ? job.events : [];
 
-      const assistantText = app.assistantMessageText(event);
-      if (!assistantText) continue;
-      if (app.lastTimelineMessageText(timeline, "assistant") === assistantText) continue;
-      timeline.push({
-        kind: "message",
-        role: "assistant",
-        text: assistantText,
-        at: event.at || job.updatedAt || ""
-      });
+      for (const event of events) {
+        const userText = event.type === "user.message" ? String(event.text || "").trim() : "";
+        const userAttachments = event.type === "user.message" ? app.userMessageAttachments(event) : [];
+        if (userText || userAttachments.length > 0) {
+          timeline.push({
+            kind: "message",
+            role: "user",
+            text: userText,
+            attachments: userAttachments,
+            at: event.at || job.createdAt || ""
+          });
+          continue;
+        }
+
+        const assistantText = app.assistantMessageText(event);
+        if (!assistantText) continue;
+        if (app.lastTimelineMessageText(timeline, "assistant") === assistantText) continue;
+        timeline.push({
+          kind: "message",
+          role: "assistant",
+          text: assistantText,
+          at: event.at || job.updatedAt || ""
+        });
+      }
     }
 
     const draftAssistantText = app.activeAssistantDraft(job, timeline);
@@ -357,7 +374,12 @@ export function installSessions(app) {
 
   app.userMessageAttachments = function userMessageAttachments(event) {
     const attachments = Array.isArray(event.raw?.attachments) ? event.raw.attachments : [];
-    return attachments.filter((attachment) => attachment?.type === "image" && typeof attachment.url === "string");
+    return attachments.filter((attachment) => attachment?.type === "image");
+  };
+
+  app.messageAttachments = function messageAttachments(message) {
+    const attachments = Array.isArray(message.attachments) ? message.attachments : [];
+    return attachments.filter((attachment) => attachment?.type === "image");
   };
 
   app.renderConversationAttachments = function renderConversationAttachments(attachments = []) {
@@ -395,6 +417,8 @@ export function installSessions(app) {
   };
 
   app.sessionPrompt = function sessionPrompt(session) {
+    const userMessage = (session.messages || []).find((message) => message.role === "user" && String(message.text || "").trim());
+    if (userMessage) return userMessage.text;
     const userEvent = (session.events || []).find((event) => event.type === "user.message");
     return userEvent?.text || session.title || "";
   };

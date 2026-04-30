@@ -8,6 +8,7 @@ import {
   createSession as createStoredSession,
   decideSessionApproval as decideStoredSessionApproval,
   enqueueSessionMessage as enqueueStoredSessionMessage,
+  getSessionAttachmentContent as getStoredSessionAttachmentContent,
   getSession as getStoredSession,
   listSessions as listStoredSessions,
   statusSnapshot,
@@ -62,6 +63,10 @@ export function listCodexSessions(limit = 20, options = {}) {
 
 export function getCodexSession(id) {
   return getStoredSession(id);
+}
+
+export function getCodexSessionAttachmentContent(id) {
+  return getStoredSessionAttachmentContent(id);
 }
 
 export function archiveCodexSession(id, input = {}) {

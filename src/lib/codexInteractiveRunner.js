@@ -323,7 +323,14 @@ export class CodexInteractiveRuntime {
   }
 
   async #materializeAttachments({ sessionId, threadId, attachments, workspace }) {
-    const materialized = [];
+    const materialized = Array.isArray(attachments)
+      ? attachments
+          .filter((attachment) => attachment?.type === "localImage" && String(attachment.path || "").trim())
+          .map((attachment) => ({
+            ...attachment,
+            path: String(attachment.path || "").trim()
+          }))
+      : [];
     const images = Array.isArray(attachments) ? attachments.filter((attachment) => attachment?.type === "image") : [];
     if (images.length === 0) return materialized;
 

@@ -5,7 +5,9 @@ import path from "node:path";
 import { config } from "../config.js";
 
 const dbPath = path.join(config.dataDir, "echo.sqlite");
+const attachmentStorageDir = path.join(config.dataDir, "codex-attachments");
 fs.mkdirSync(config.dataDir, { recursive: true });
+fs.mkdirSync(attachmentStorageDir, { recursive: true });
 
 const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");
@@ -29,6 +31,30 @@ const insertEvent = db.prepare(`
 const insertSessionEvent = db.prepare(`
   INSERT INTO codex_session_events (session_id, at, type, text, raw_json)
   VALUES (@sessionId, @at, @type, @text, @rawJson)
+`);
+
+const insertSessionMessage = db.prepare(`
+  INSERT INTO codex_session_messages (
+    id, session_id, role, text, command_id, external_key, created_at, updated_at
+  ) VALUES (
+    @id, @sessionId, @role, @text, @commandId, @externalKey, @createdAt, @updatedAt
+  )
+`);
+
+const insertSessionMessageIgnore = db.prepare(`
+  INSERT OR IGNORE INTO codex_session_messages (
+    id, session_id, role, text, command_id, external_key, created_at, updated_at
+  ) VALUES (
+    @id, @sessionId, @role, @text, @commandId, @externalKey, @createdAt, @updatedAt
+  )
+`);
+
+const insertSessionAttachment = db.prepare(`
+  INSERT INTO codex_session_attachments (
+    id, session_id, message_id, type, original_name, mime_type, size_bytes, sha256, storage_key, created_at
+  ) VALUES (
+    @id, @sessionId, @messageId, @type, @originalName, @mimeType, @sizeBytes, @sha256, @storageKey, @createdAt
+  )
 `);
 
 const insertSessionCommand = db.prepare(`
@@ -129,6 +155,30 @@ const summarizeSessionApprovalColumns = `
   decided_at AS decidedAt,
   decided_by AS decidedBy,
   requested_by AS requestedBy
+`;
+
+const summarizeSessionMessageColumns = `
+  id,
+  session_id AS sessionId,
+  role,
+  text,
+  command_id AS commandId,
+  external_key AS externalKey,
+  created_at AS createdAt,
+  updated_at AS updatedAt
+`;
+
+const summarizeSessionAttachmentColumns = `
+  id,
+  session_id AS sessionId,
+  message_id AS messageId,
+  type,
+  original_name AS originalName,
+  mime_type AS mimeType,
+  size_bytes AS sizeBytes,
+  sha256,
+  storage_key AS storageKey,
+  created_at AS createdAt
 `;
 
 export function createJob({ projectId, prompt }) {
@@ -392,14 +442,16 @@ export function createSession({ projectId, prompt, attachments, runtime }) {
   const now = nowIso();
   const sessionId = crypto.randomUUID();
   const commandId = crypto.randomUUID();
+  const messageId = crypto.randomUUID();
   const normalizedPrompt = String(prompt || "").trim();
   const normalizedProjectId = String(projectId || "").trim();
-  const normalizedAttachments = normalizeSessionAttachments(attachments);
+  const stagedAttachments = stageSessionAttachments({ sessionId, messageId, attachments, createdAt: now });
   const normalizedRuntime = normalizeRuntime(runtime);
-  if (!normalizedPrompt && normalizedAttachments.length === 0) {
+  if (!normalizedPrompt && stagedAttachments.length === 0) {
+    cleanupStagedAttachments(stagedAttachments);
     return badRequest("Codex session prompt or screenshot is required.");
   }
-  const title = sessionTitleFromInput(normalizedPrompt, normalizedAttachments);
+  const title = sessionTitleFromInput(normalizedPrompt, stagedAttachments);
 
   const create = db.transaction(() => {
     db.prepare(`
@@ -420,20 +472,40 @@ export function createSession({ projectId, prompt, attachments, runtime }) {
       id: commandId,
       sessionId,
       type: "start",
-      payloadJson: JSON.stringify({ prompt: normalizedPrompt, attachments: normalizedAttachments }),
+      payloadJson: JSON.stringify({ messageId }),
       now
     });
+
+    insertSessionMessage.run({
+      id: messageId,
+      sessionId,
+      role: "user",
+      text: normalizedPrompt,
+      commandId,
+      externalKey: `user:${commandId}`,
+      createdAt: now,
+      updatedAt: now
+    });
+
+    for (const attachment of stagedAttachments) {
+      insertSessionAttachment.run(attachment);
+    }
 
     insertSessionEvent.run(
       normalizeSessionEvent(sessionId, {
         type: "user.message",
         text: normalizedPrompt,
-        raw: { source: "mobile", commandId, type: "start", attachments: normalizedAttachments }
+        raw: { source: "mobile", commandId, type: "start", messageId, attachments: attachmentRefsFromRows(stagedAttachments) }
       }, now)
     );
   });
 
-  create();
+  try {
+    create();
+  } catch (error) {
+    cleanupStagedAttachments(stagedAttachments);
+    throw error;
+  }
   trimOldSessions();
   return getSessionSummary(sessionId);
 }
@@ -458,8 +530,18 @@ export function getSession(id) {
   if (!session) return null;
   return {
     ...session,
+    messages: listSessionMessages(id),
     events: listSessionEvents(id),
     approvals: listSessionApprovals(id)
+  };
+}
+
+export function getSessionAttachmentContent(id) {
+  const attachment = getSessionAttachment(id);
+  if (!attachment) return null;
+  return {
+    ...attachment,
+    filePath: attachmentAbsolutePath(attachment.storageKey)
   };
 }
 
@@ -511,17 +593,21 @@ export function enqueueSessionMessage(sessionId, input = {}) {
 
   const now = nowIso();
   const commandId = crypto.randomUUID();
+  const messageId = crypto.randomUUID();
   const message = String(input.text || input.prompt || "").trim();
-  const attachments = normalizeSessionAttachments(input.attachments);
+  const stagedAttachments = stageSessionAttachments({ sessionId, messageId, attachments: input.attachments, createdAt: now });
   const runtime = normalizeRuntime(Object.keys(input.runtime || {}).length > 0 ? input.runtime : session.runtime);
-  if (!message && attachments.length === 0) return badRequest("Codex message or screenshot is required.");
+  if (!message && stagedAttachments.length === 0) {
+    cleanupStagedAttachments(stagedAttachments);
+    return badRequest("Codex message or screenshot is required.");
+  }
 
   const enqueue = db.transaction(() => {
     insertSessionCommand.run({
       id: commandId,
       sessionId,
       type: "message",
-      payloadJson: JSON.stringify({ text: message, attachments }),
+      payloadJson: JSON.stringify({ messageId }),
       now
     });
 
@@ -533,16 +619,36 @@ export function enqueueSessionMessage(sessionId, input = {}) {
       WHERE id = @sessionId
     `).run({ sessionId, now, runtimeJson: JSON.stringify(runtime) });
 
+    insertSessionMessage.run({
+      id: messageId,
+      sessionId,
+      role: "user",
+      text: message,
+      commandId,
+      externalKey: `user:${commandId}`,
+      createdAt: now,
+      updatedAt: now
+    });
+
+    for (const attachment of stagedAttachments) {
+      insertSessionAttachment.run(attachment);
+    }
+
     insertSessionEvent.run(
       normalizeSessionEvent(sessionId, {
         type: "user.message",
         text: message,
-        raw: { source: "mobile", commandId, type: "message", attachments }
+        raw: { source: "mobile", commandId, type: "message", messageId, attachments: attachmentRefsFromRows(stagedAttachments) }
       }, now)
     );
   });
 
-  enqueue();
+  try {
+    enqueue();
+  } catch (error) {
+    cleanupStagedAttachments(stagedAttachments);
+    throw error;
+  }
   return getSession(sessionId);
 }
 
@@ -638,6 +744,7 @@ export function appendSessionEvents(sessionId, incomingEvents = [], options = {}
   const events = incomingEvents.slice(0, 80).map((event) => normalizeSessionEvent(sessionId, event, now));
   const update = deriveSessionUpdate(incomingEvents, session);
   const releaseLease = update.releaseLease && !sessionHasLeasedCommand(sessionId);
+  const assistantMessages = buildAssistantMessages(sessionId, incomingEvents, now);
 
   const write = db.transaction(() => {
     db.prepare(`
@@ -667,6 +774,9 @@ export function appendSessionEvents(sessionId, incomingEvents = [], options = {}
     });
 
     for (const event of events) insertSessionEvent.run(event);
+    for (const message of assistantMessages) {
+      insertSessionMessageIgnore.run(message);
+    }
     trimSessionEvents.run(sessionId, sessionId, config.codex.maxEvents);
     return true;
   });
@@ -853,6 +963,8 @@ export function waitForSessionApprovalDecision(id, options = {}) {
 }
 
 export function resetStoreForTest() {
+  db.prepare("DELETE FROM codex_session_attachments").run();
+  db.prepare("DELETE FROM codex_session_messages").run();
   db.prepare("DELETE FROM codex_session_approvals").run();
   db.prepare("DELETE FROM codex_session_events").run();
   db.prepare("DELETE FROM codex_session_commands").run();
@@ -860,6 +972,8 @@ export function resetStoreForTest() {
   db.prepare("DELETE FROM codex_events").run();
   db.prepare("DELETE FROM codex_jobs").run();
   db.prepare("DELETE FROM codex_agents").run();
+  fs.rmSync(attachmentStorageDir, { recursive: true, force: true });
+  fs.mkdirSync(attachmentStorageDir, { recursive: true });
 }
 
 function migrate() {
@@ -957,6 +1071,38 @@ function migrate() {
 
     CREATE INDEX IF NOT EXISTS idx_codex_session_events_session_id
       ON codex_session_events(session_id, id);
+
+    CREATE TABLE IF NOT EXISTS codex_session_messages (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES codex_sessions(id) ON DELETE CASCADE,
+      role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+      text TEXT NOT NULL DEFAULT '',
+      command_id TEXT,
+      external_key TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(session_id, external_key)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_codex_session_messages_session
+      ON codex_session_messages(session_id, created_at, id);
+
+    CREATE TABLE IF NOT EXISTS codex_session_attachments (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES codex_sessions(id) ON DELETE CASCADE,
+      message_id TEXT NOT NULL REFERENCES codex_session_messages(id) ON DELETE CASCADE,
+      type TEXT NOT NULL CHECK (type IN ('image')),
+      original_name TEXT NOT NULL DEFAULT '',
+      mime_type TEXT NOT NULL DEFAULT '',
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      sha256 TEXT NOT NULL DEFAULT '',
+      storage_key TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(storage_key)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_codex_session_attachments_message
+      ON codex_session_attachments(message_id, created_at, id);
 
     CREATE TABLE IF NOT EXISTS codex_session_approvals (
       id TEXT PRIMARY KEY,
@@ -1177,6 +1323,21 @@ function summarizeSessionCommand(row) {
   };
 }
 
+function summarizeSessionMessage(row, attachments = []) {
+  return {
+    ...row,
+    attachments
+  };
+}
+
+function summarizeSessionAttachment(row) {
+  return {
+    ...row,
+    name: row.originalName,
+    downloadPath: `/api/codex/attachments/${encodeURIComponent(row.id)}`
+  };
+}
+
 function getSessionApprovalSummary(id) {
   const row = db.prepare(`
     SELECT ${summarizeSessionApprovalColumns}
@@ -1210,6 +1371,62 @@ function listSessionEvents(sessionId) {
     WHERE session_id = ?
     ORDER BY id ASC
   `).all(sessionId).map(parseEvent);
+}
+
+function listSessionMessages(sessionId) {
+  const rows = db.prepare(`
+    SELECT ${summarizeSessionMessageColumns}
+    FROM codex_session_messages
+    WHERE session_id = ?
+    ORDER BY created_at ASC, id ASC
+  `).all(sessionId);
+  const attachmentsByMessageId = listSessionAttachmentsBySession(sessionId);
+  return rows.map((row) => summarizeSessionMessage(row, attachmentsByMessageId.get(row.id) || []));
+}
+
+function getSessionMessage(id) {
+  const row = db.prepare(`
+    SELECT ${summarizeSessionMessageColumns}
+    FROM codex_session_messages
+    WHERE id = ?
+  `).get(id);
+  if (!row) return null;
+  return summarizeSessionMessage(row, listMessageAttachments(id));
+}
+
+function getSessionAttachment(id) {
+  const row = db.prepare(`
+    SELECT ${summarizeSessionAttachmentColumns}
+    FROM codex_session_attachments
+    WHERE id = ?
+  `).get(id);
+  return row ? summarizeSessionAttachment(row) : null;
+}
+
+function listMessageAttachments(messageId) {
+  return db.prepare(`
+    SELECT ${summarizeSessionAttachmentColumns}
+    FROM codex_session_attachments
+    WHERE message_id = ?
+    ORDER BY created_at ASC, id ASC
+  `).all(messageId).map(summarizeSessionAttachment);
+}
+
+function listSessionAttachmentsBySession(sessionId) {
+  const rows = db.prepare(`
+    SELECT ${summarizeSessionAttachmentColumns}
+    FROM codex_session_attachments
+    WHERE session_id = ?
+    ORDER BY created_at ASC, id ASC
+  `).all(sessionId);
+  const byMessageId = new Map();
+  for (const row of rows) {
+    const attachment = summarizeSessionAttachment(row);
+    const existing = byMessageId.get(attachment.messageId) || [];
+    existing.push(attachment);
+    byMessageId.set(attachment.messageId, existing);
+  }
+  return byMessageId;
 }
 
 function listSessionApprovals(sessionId) {
@@ -1282,6 +1499,16 @@ function parseEvent(row, options = {}) {
 
 function buildAgentSessionCommand(command) {
   const parsed = summarizeSessionCommand(command);
+  const messageId = String(parsed.payload?.messageId || "").trim();
+  const message = messageId ? getSessionMessage(messageId) : null;
+  const payload = {
+    ...parsed.payload,
+    ...(message
+      ? parsed.type === "start"
+        ? { prompt: message.text, attachments: commandAttachmentsFromMessage(message) }
+        : { text: message.text, attachments: commandAttachmentsFromMessage(message) }
+      : {})
+  };
   return {
     id: parsed.id,
     sessionId: parsed.sessionId,
@@ -1290,7 +1517,7 @@ function buildAgentSessionCommand(command) {
     appThreadId: command.appThreadId || "",
     activeTurnId: command.activeTurnId || "",
     runtime: parseJson(command.runtimeJson, {}),
-    payload: parsed.payload,
+    payload,
     createdAt: parsed.createdAt
   };
 }
@@ -1413,6 +1640,138 @@ function normalizeRuntime(runtime = {}) {
         timeoutMs: Number(runtime.timeoutMs || 0) || null
       }
     : {};
+}
+
+function stageSessionAttachments({ sessionId, messageId, attachments = [], createdAt }) {
+  const normalized = normalizeSessionAttachments(attachments);
+  const staged = [];
+
+  for (const attachment of normalized) {
+    const image = parseAttachmentDataUrl(attachment.url, attachment.mimeType);
+    if (!image) continue;
+    const attachmentId = crypto.randomUUID();
+    const storageKey = attachmentStorageKey(sessionId, attachmentId, image.extension);
+    const absolutePath = attachmentAbsolutePath(storageKey);
+    fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+    fs.writeFileSync(absolutePath, image.buffer, { mode: 0o600 });
+    staged.push({
+      id: attachmentId,
+      sessionId,
+      messageId,
+      type: "image",
+      originalName: String(attachment.name || "").trim(),
+      mimeType: image.mimeType,
+      sizeBytes: clampAttachmentSizeBytes(attachment.sizeBytes || image.buffer.length),
+      sha256: crypto.createHash("sha256").update(image.buffer).digest("hex"),
+      storageKey,
+      createdAt,
+      absolutePath
+    });
+  }
+
+  return staged;
+}
+
+function cleanupStagedAttachments(attachments = []) {
+  for (const attachment of attachments) {
+    if (!attachment?.absolutePath) continue;
+    try {
+      fs.rmSync(attachment.absolutePath, { force: true });
+    } catch {
+      // Ignore best-effort cleanup errors for staged attachment files.
+    }
+  }
+}
+
+function cleanupAttachmentStorageKeys(storageKeys = []) {
+  for (const storageKey of storageKeys) {
+    if (!storageKey) continue;
+    try {
+      fs.rmSync(attachmentAbsolutePath(storageKey), { force: true });
+    } catch {
+      // Ignore best-effort cleanup errors for persisted attachment files.
+    }
+  }
+}
+
+function attachmentRefsFromRows(rows = []) {
+  return rows.map((row) => {
+    const attachment = summarizeSessionAttachment(row);
+    return {
+      id: attachment.id,
+      type: attachment.type,
+      name: attachment.name,
+      mimeType: attachment.mimeType,
+      sizeBytes: attachment.sizeBytes,
+      downloadPath: attachment.downloadPath
+    };
+  });
+}
+
+function commandAttachmentsFromMessage(message) {
+  return (message.attachments || []).map((attachment) => ({
+    type: "localImage",
+    path: attachmentAbsolutePath(attachment.storageKey),
+    attachmentId: attachment.id,
+    name: attachment.name,
+    mimeType: attachment.mimeType,
+    sizeBytes: attachment.sizeBytes
+  }));
+}
+
+function attachmentStorageKey(sessionId, attachmentId, extension) {
+  const safeSessionId = String(sessionId || "session").replace(/[^a-zA-Z0-9._-]+/g, "-");
+  const safeAttachmentId = String(attachmentId || "attachment").replace(/[^a-zA-Z0-9._-]+/g, "-");
+  const safeExtension = String(extension || "bin").replace(/[^a-z0-9]+/gi, "").toLowerCase() || "bin";
+  return `${safeSessionId}/${safeAttachmentId}.${safeExtension}`;
+}
+
+function attachmentAbsolutePath(storageKey) {
+  return path.join(attachmentStorageDir, ...String(storageKey || "").split("/"));
+}
+
+function parseAttachmentDataUrl(url, fallbackMimeType = "") {
+  const match = /^data:(image\/[a-z0-9.+_-]+);base64,([a-z0-9+/=\s]+)$/i.exec(String(url || "").trim());
+  if (!match) return null;
+  const mimeType = String(fallbackMimeType || match[1]).trim().toLowerCase() || match[1].toLowerCase();
+  const base64 = match[2].replace(/\s+/g, "");
+  if (!base64) return null;
+  return {
+    mimeType,
+    extension: attachmentExtensionFromMimeType(mimeType),
+    buffer: Buffer.from(base64, "base64")
+  };
+}
+
+function attachmentExtensionFromMimeType(mimeType) {
+  if (mimeType === "image/jpeg") return "jpg";
+  if (mimeType === "image/svg+xml") return "svg";
+  return mimeType.split("/")[1]?.replace(/[^a-z0-9]+/gi, "").toLowerCase() || "png";
+}
+
+function buildAssistantMessages(sessionId, incomingEvents = [], fallbackAt) {
+  const messages = [];
+  for (const event of incomingEvents || []) {
+    const raw = event.raw && typeof event.raw === "object" ? event.raw : {};
+    const item = raw.params?.item;
+    if ((raw.method || event.type) !== "item/completed" || item?.type !== "agentMessage") continue;
+    const text = String(item.text || event.finalMessage || event.text || "").trim();
+    if (!text) continue;
+    const turnId = String(raw.params?.turnId || raw.params?.turn?.id || "").trim();
+    const itemId = String(item.id || "").trim();
+    const keySeed = itemId || crypto.createHash("sha1").update(`${turnId}\n${text}`).digest("hex").slice(0, 16);
+    messages.push({
+      id: crypto.randomUUID(),
+      sessionId,
+      role: "assistant",
+      text,
+      commandId: null,
+      externalKey: `assistant:${turnId || "turn"}:${keySeed}`,
+      createdAt: String(event.at || fallbackAt || nowIso()),
+      updatedAt: String(fallbackAt || nowIso())
+    });
+  }
+  return messages;
 }
 
 function normalizeSessionAttachments(attachments = []) {
@@ -1615,11 +1974,22 @@ function trimOldSessions() {
 
   if (ids.length === 0) return;
 
+  const attachmentStorageKeys = db.prepare(`
+    SELECT storage_key AS storageKey
+    FROM codex_session_attachments
+    WHERE session_id = ?
+  `);
   const remove = db.prepare("DELETE FROM codex_sessions WHERE id = ?");
   const removeMany = db.transaction((sessionIds) => {
-    for (const id of sessionIds) remove.run(id);
+    const keys = [];
+    for (const id of sessionIds) {
+      keys.push(...attachmentStorageKeys.all(id).map((row) => row.storageKey));
+      remove.run(id);
+    }
+    return keys;
   });
-  removeMany(ids);
+  const keys = removeMany(ids);
+  cleanupAttachmentStorageKeys(keys);
 }
 
 function expireOldApprovals() {

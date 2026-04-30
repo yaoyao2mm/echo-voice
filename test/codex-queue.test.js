@@ -88,7 +88,8 @@ test("interactive Codex sessions lease commands and keep thread state", async ()
   assert.equal(startCommand.type, "start");
   assert.equal(startCommand.payload.prompt, "先看一下这个项目");
   assert.equal(startCommand.payload.attachments.length, 1);
-  assert.equal(startCommand.payload.attachments[0].url, "data:image/png;base64,AAAA");
+  assert.equal(startCommand.payload.attachments[0].type, "localImage");
+  assert.equal(fs.existsSync(startCommand.payload.attachments[0].path), true);
   assert.equal(startCommand.runtime.model, "gpt-5.4");
   assert.equal(startCommand.runtime.reasoningEffort, "high");
   assert.equal(startCommand.runtime.profile, "approve");
@@ -214,7 +215,8 @@ test("interactive Codex sessions lease commands and keep thread state", async ()
   assert.equal(messageCommand.appThreadId, "thr_1");
   assert.equal(messageCommand.payload.text, "继续修复 UI");
   assert.equal(messageCommand.payload.attachments.length, 1);
-  assert.equal(messageCommand.payload.attachments[0].url, "data:image/png;base64,BBBB");
+  assert.equal(messageCommand.payload.attachments[0].type, "localImage");
+  assert.equal(fs.existsSync(messageCommand.payload.attachments[0].path), true);
   assert.equal(messageCommand.runtime.model, "gpt-5.3-codex");
   assert.equal(messageCommand.runtime.reasoningEffort, "xhigh");
   assert.equal(messageCommand.runtime.profile, "strict");
@@ -240,11 +242,13 @@ test("interactive Codex sessions can start from screenshots only", async () => {
   assert.equal(startCommand.type, "start");
   assert.equal(startCommand.payload.prompt, "");
   assert.equal(startCommand.payload.attachments.length, 1);
+  assert.equal(startCommand.payload.attachments[0].type, "localImage");
 
   const session = queue.getCodexSession(created.id);
-  const userEvent = session.events.find((event) => event.type === "user.message");
-  assert.equal(userEvent.text, "");
-  assert.equal(userEvent.raw.attachments.length, 1);
+  assert.equal(session.messages.length >= 1, true);
+  assert.equal(session.messages[0].text, "");
+  assert.equal(session.messages[0].attachments.length, 1);
+  assert.equal(session.messages[0].attachments[0].name, "mobile.png");
 });
 
 test("interactive Codex sessions recover expired running leases instead of looking stuck forever", async () => {

@@ -135,11 +135,14 @@ test("mobile composer sends text and screenshot in the same session message", as
     const sessionResponse = await request.get(`/api/codex/sessions/${createdSession.id}`, { headers });
     expect(sessionResponse.ok()).toBeTruthy();
     const sessionData = await sessionResponse.json();
-    const userEvent = sessionData.session.events.find((event) => event.type === "user.message" && event.text === prompt);
-    expect(userEvent).toBeTruthy();
-    expect(userEvent.raw.attachments).toHaveLength(1);
-    expect(userEvent.raw.attachments[0].name).toBe("mobile-layout.png");
-    expect(userEvent.raw.attachments[0].url.startsWith("data:image/png;base64,")).toBeTruthy();
+    const userMessage = sessionData.session.messages.find((message) => message.role === "user" && message.text === prompt);
+    expect(userMessage).toBeTruthy();
+    expect(userMessage.attachments).toHaveLength(1);
+    expect(userMessage.attachments[0].name).toBe("mobile-layout.png");
+    expect(userMessage.attachments[0].downloadPath).toContain("/api/codex/attachments/");
+    const attachmentResponse = await request.get(userMessage.attachments[0].downloadPath, { headers });
+    expect(attachmentResponse.ok()).toBeTruthy();
+    expect((await attachmentResponse.body()).length).toBeGreaterThan(0);
   } finally {
     clearInterval(keepAlive);
   }

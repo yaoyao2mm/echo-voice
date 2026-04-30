@@ -123,16 +123,17 @@ test("mobile relay flow runs an interactive Codex session end to end", async () 
   assert.equal(completed.finalMessage, "Fake interactive Codex finished: 请修复移动端发送任务链路 [images:1]");
   assert.equal(completed.events.some((event) => event.type === "thread.started"), true);
   assert.equal(completed.events.some((event) => event.type === "turn/completed"), true);
-  const userEvent = completed.events.find((event) => event.type === "user.message");
-  assert.equal(userEvent.raw.attachments.length, 1);
+  assert.equal(completed.messages.length >= 1, true);
+  assert.equal(completed.messages[0].attachments.length, 1);
+  assert.equal(completed.messages[0].attachments[0].name, "mobile.png");
   assert.equal(queue.listCodexSessions(5)[0].id, created.id);
 
   const capture = JSON.parse(fs.readFileSync(capturePath, "utf8"));
   assert.equal(capture.localImagePaths.length, 1);
   assert.equal(capture.input.some((item) => item.type === "localImage"), true);
   assert.equal(capture.localImageSizes[0] > 0, true);
-  assert.equal(capture.localImagePaths[0].startsWith(path.join(workspacePath, ".echo-codex-attachments")), true);
-  assert.equal(fs.existsSync(capture.localImagePaths[0]), false);
+  assert.equal(capture.localImagePaths[0].startsWith(path.join(tempHome, ".echo-voice", "codex-attachments")), true);
+  assert.equal(fs.existsSync(capture.localImagePaths[0]), true);
 
   runtime.stop();
 });
