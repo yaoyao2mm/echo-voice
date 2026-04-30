@@ -35,6 +35,8 @@ export function installCodex(app) {
       state.codexWorkspaces = [];
       state.codexAgentOnline = false;
       state.codexUnsupportedModels = [];
+      state.codexSupportedModels = [];
+      state.codexAllowedPermissionModes = [];
       state.codexAgentRuntime = {};
       app.refreshRuntimeDefaultOptions();
       elements.codexProject.innerHTML = "";
@@ -50,6 +52,17 @@ export function installCodex(app) {
     state.codexAgentOnline = Boolean(codex.agentOnline);
     state.codexUnsupportedModels = Array.isArray(codex.runtime?.unsupportedModels)
       ? codex.runtime.unsupportedModels.map((model) => String(model || "").trim()).filter(Boolean)
+      : [];
+    state.codexSupportedModels = Array.isArray(codex.runtime?.supportedModels)
+      ? codex.runtime.supportedModels
+          .map((model) => ({
+            id: String(model?.id || model?.model || "").trim(),
+            displayName: String(model?.displayName || model?.display_name || model?.id || model?.model || "").trim()
+          }))
+          .filter((model) => model.id)
+      : [];
+    state.codexAllowedPermissionModes = Array.isArray(codex.runtime?.allowedPermissionModes)
+      ? codex.runtime.allowedPermissionModes.map((mode) => app.normalizePermissionMode(mode)).filter(Boolean)
       : [];
     state.codexAgentRuntime = app.normalizeRuntimeChoice(codex.runtime || {});
     app.applyRuntimeDraft(app.runtimeChoiceWithFallback(app.currentRuntimeDraft(), state.runtimePreferences), {

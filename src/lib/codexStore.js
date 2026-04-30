@@ -3,7 +3,15 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { config } from "../config.js";
-import { codexCompatibleModel } from "./codexRuntime.js";
+import {
+  codexCompatibleModel,
+  normalizeAllowedPermissionModes,
+  normalizePermissionMode,
+  normalizeReasoningEffort,
+  normalizeSupportedModels,
+  permissionModeFromRuntime,
+  sanitizeRuntimeForAgent
+} from "./codexRuntime.js";
 
 const dbPath = path.join(config.dataDir, "echo.sqlite");
 const attachmentStorageDir = path.join(config.dataDir, "codex-attachments");
@@ -288,7 +296,7 @@ export function statusSnapshot() {
     lastAgentSeenAt: latestAgent?.lastSeenAt || "",
     agents,
     workspaces: mergeAgentWorkspaces(onlineAgents),
-    runtime: primaryAgent?.runtime || {},
+    runtime: mergeAgentRuntimes(onlineAgents, primaryAgent?.runtime || {}),
     queued,
     running,
     active: runningJobs[0] || null,
@@ -469,7 +477,7 @@ export function createSession({ projectId, prompt, attachments, runtime }) {
   const normalizedPrompt = String(prompt || "").trim();
   const normalizedProjectId = String(projectId || "").trim();
   const stagedAttachments = stageSessionAttachments({ sessionId, messageId, attachments, createdAt: now });
-  const normalizedRuntime = normalizeRuntime(runtime);
+  const normalizedRuntime = sanitizeSessionRuntimeForProject(runtime, normalizedProjectId);
   if (!normalizedPrompt && stagedAttachments.length === 0) {
     cleanupStagedAttachments(stagedAttachments);
     return badRequest("Codex session prompt or screenshot is required.");
@@ -620,7 +628,10 @@ export function enqueueSessionMessage(sessionId, input = {}) {
   const messageId = crypto.randomUUID();
   const message = String(input.text || input.prompt || "").trim();
   const stagedAttachments = stageSessionAttachments({ sessionId, messageId, attachments: input.attachments, createdAt: now });
-  const runtime = normalizeRuntime(Object.keys(input.runtime || {}).length > 0 ? input.runtime : session.runtime);
+  const runtime = sanitizeSessionRuntimeForProject(
+    Object.keys(input.runtime || {}).length > 0 ? input.runtime : session.runtime,
+    session.projectId
+  );
   if (!message && stagedAttachments.length === 0) {
     cleanupStagedAttachments(stagedAttachments);
     return badRequest("Codex message or screenshot is required.");
@@ -818,6 +829,21 @@ export function acquireNextSessionCommand({ agentId, workspaces = [] } = {}) {
     `).get(...workspaceIds);
 
     if (!command) return null;
+
+    const agentRuntime = runtimeForAgentAndProject(leaseHolder, command.projectId);
+    const runtime = sanitizeRuntimeForAgent(parseJson(command.runtimeJson, {}), agentRuntime);
+    const runtimeJson = JSON.stringify(runtime);
+
+    db.prepare(`
+      UPDATE codex_sessions
+      SET runtime_json = @runtimeJson
+      WHERE id = @sessionId
+    `).run({
+      sessionId: command.sessionId,
+      runtimeJson
+    });
+
+    command.runtimeJson = runtimeJson;
 
     db.prepare(`
       UPDATE codex_session_commands
@@ -1352,6 +1378,20 @@ function mergeAgentWorkspaces(agents) {
   return Array.from(byId.values());
 }
 
+function mergeAgentRuntimes(agents, primaryRuntime = {}) {
+  const unsupportedModels = new Set();
+  for (const agent of agents || []) {
+    for (const model of agent.runtime?.unsupportedModels || []) {
+      const normalized = String(model || "").trim();
+      if (normalized) unsupportedModels.add(normalized);
+    }
+  }
+  return {
+    ...primaryRuntime,
+    unsupportedModels: [...unsupportedModels]
+  };
+}
+
 function getJobSummary(id) {
   const row = db.prepare(`
     SELECT ${summarizeJobColumns}
@@ -1760,6 +1800,40 @@ function parseAgent(row) {
   };
 }
 
+function sanitizeSessionRuntimeForProject(runtime, projectId) {
+  return sanitizeRuntimeForAgent(runtime, runtimeForProject(projectId));
+}
+
+function runtimeForProject(projectId) {
+  const normalizedProjectId = String(projectId || "").trim();
+  const nowMs = Date.now();
+  const agent = listAgents()
+    .filter((item) => isAgentOnline(item, nowMs))
+    .find((item) => (item.workspaces || []).some((workspace) => workspace.id === normalizedProjectId));
+  return agent?.runtime || fallbackRuntimeForSanitization();
+}
+
+function runtimeForAgentAndProject(agentId, projectId) {
+  const normalizedAgentId = normalizeAgentId(agentId);
+  const normalizedProjectId = String(projectId || "").trim();
+  const agent = listAgents().find((item) => item.id === normalizedAgentId);
+  if (!agent || !(agent.workspaces || []).some((workspace) => workspace.id === normalizedProjectId)) {
+    return fallbackRuntimeForSanitization();
+  }
+  return agent.runtime || fallbackRuntimeForSanitization();
+}
+
+function fallbackRuntimeForSanitization() {
+  return {
+    sandbox: config.codex.sandbox,
+    approvalPolicy: config.codex.approvalPolicy,
+    model: config.codex.model,
+    unsupportedModels: [],
+    supportedModels: [],
+    allowedPermissionModes: normalizeAllowedPermissionModes()
+  };
+}
+
 function parseJson(value, fallback = undefined) {
   if (!value) return fallback;
   try {
@@ -1810,6 +1884,13 @@ function normalizeRuntime(runtime = {}) {
   const unsupportedModels = Array.isArray(runtime.unsupportedModels)
     ? runtime.unsupportedModels.map((model) => String(model || "").trim()).filter(Boolean)
     : [];
+  const supportedModels = normalizeSupportedModels(runtime.supportedModels);
+  const allowedPermissionModes = Array.isArray(runtime.allowedPermissionModes)
+    ? normalizeAllowedPermissionModes(runtime.allowedPermissionModes)
+    : [];
+  const permissionMode = normalizePermissionMode(
+    runtime.permissionMode || runtime.permissionsMode || runtime.profile || permissionModeFromRuntime(runtime)
+  );
   return runtime && typeof runtime === "object"
     ? {
         command: String(runtime.command || "").trim(),
@@ -1817,8 +1898,14 @@ function normalizeRuntime(runtime = {}) {
         approvalPolicy: String(runtime.approvalPolicy || "").trim(),
         model: codexCompatibleModel(runtime.model),
         unsupportedModels,
-        reasoningEffort: String(runtime.reasoningEffort || runtime.effort || "").trim().toLowerCase(),
-        profile: String(runtime.profile || "").trim(),
+        supportedModels,
+        allowedPermissionModes,
+        reasoningEffort: normalizeReasoningEffort(runtime.reasoningEffort || runtime.effort),
+        profile: String(runtime.profile || permissionMode || "").trim(),
+        permissionMode,
+        modelCapabilitySource: String(runtime.modelCapabilitySource || "").trim(),
+        modelCapabilityCheckedAt: String(runtime.modelCapabilityCheckedAt || "").trim(),
+        modelCapabilityError: String(runtime.modelCapabilityError || "").trim(),
         timeoutMs: Number(runtime.timeoutMs || 0) || null
       }
     : {};

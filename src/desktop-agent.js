@@ -1,6 +1,7 @@
 import { config } from "./config.js";
 import { loadDesktopAgentId } from "./lib/agentIdentity.js";
 import { CodexInteractiveRuntime } from "./lib/codexInteractiveRunner.js";
+import { probeCodexModels } from "./lib/codexModelProbe.js";
 import { publicCodexRuntime, publicWorkspaces } from "./lib/codexRunner.js";
 import { createManagedWorkspace, workspaceCreationRoot } from "./lib/codexWorkspaceManager.js";
 import { describeHttpNetwork, formatFetchError, httpFetch } from "./lib/http.js";
@@ -16,6 +17,7 @@ if (!config.token) {
 }
 
 const agentId = await loadDesktopAgentId();
+let codexRuntimeStatus = publicCodexRuntime();
 
 console.log("Echo Codex desktop agent is running.");
 console.log(`Relay: ${config.relayUrl}`);
@@ -23,12 +25,15 @@ console.log(`Agent ID: ${agentId}`);
 console.log(`Network: ${formatNetworkStatus(describeHttpNetwork(config.relayUrl))}`);
 console.log(`Codex remote: ${config.codex.enabled ? "enabled" : "disabled"}`);
 if (config.codex.enabled) {
-  const runtime = publicCodexRuntime();
+  await refreshCodexRuntimeStatus();
+  const runtime = currentCodexRuntime();
   console.log(`  command: ${runtime.command || "unavailable"}`);
   if (runtime.commandDetail) {
     console.log(`  app: ${runtime.commandDetail}`);
   }
   console.log(`  model: ${runtime.model || "Codex default"}`);
+  console.log(`  supported models: ${runtime.supportedModels?.length || 0}`);
+  console.log(`  permissions: ${(runtime.allowedPermissionModes || []).join(", ") || "none"}`);
   console.log(`  reasoning: ${runtime.reasoningEffort || "Codex default"}`);
   console.log(`  sandbox: ${runtime.sandbox}`);
   for (const workspace of publicWorkspaces()) {
@@ -43,6 +48,11 @@ if (config.codex.enabled) {
 console.log("Waiting for mobile Codex tasks.\n");
 
 if (config.codex.enabled) {
+  setInterval(() => {
+    refreshCodexRuntimeStatus().catch((error) => {
+      console.error(`[codex runtime refresh] ${error.message}`);
+    });
+  }, 10 * 60 * 1000).unref?.();
   runCodexWorkspaceLoop();
   runCodexSessionLoop();
 }
@@ -61,7 +71,7 @@ async function runCodexWorkspaceLoop() {
         agentId,
         result,
         workspaces: publicWorkspaces(),
-        runtime: publicCodexRuntime()
+        runtime: currentCodexRuntime()
       });
       console.log(`  workspace ${command.type} ${result.ok ? "completed" : "failed"}`);
     } catch (error) {
@@ -75,7 +85,7 @@ async function runCodexWorkspaceLoop() {
             error: error.message
           },
           workspaces: publicWorkspaces(),
-          runtime: publicCodexRuntime()
+          runtime: currentCodexRuntime()
         }).catch(() => {});
       }
       await sleep(2500);
@@ -163,7 +173,7 @@ async function pollNextCodexWorkspaceCommand() {
     body: JSON.stringify({
       agentId,
       workspaces: publicWorkspaces(),
-      runtime: publicCodexRuntime()
+      runtime: currentCodexRuntime()
     }),
     timeoutMs: 35000
   });
@@ -181,7 +191,7 @@ async function pollNextCodexSessionCommand() {
     body: JSON.stringify({
       agentId,
       workspaces: publicWorkspaces(),
-      runtime: publicCodexRuntime()
+      runtime: currentCodexRuntime()
     }),
     timeoutMs: 35000
   });
@@ -221,6 +231,38 @@ function authHeaders() {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function currentCodexRuntime() {
+  return codexRuntimeStatus;
+}
+
+async function refreshCodexRuntimeStatus() {
+  const runtime = publicCodexRuntime();
+  if (!runtime.command) {
+    codexRuntimeStatus = runtime;
+    return runtime;
+  }
+
+  try {
+    const supportedModels = await probeCodexModels({ timeoutMs: 30000 });
+    codexRuntimeStatus = {
+      ...runtime,
+      supportedModels,
+      modelCapabilitySource: "codex-app-server",
+      modelCapabilityCheckedAt: new Date().toISOString(),
+      modelCapabilityError: ""
+    };
+  } catch (error) {
+    codexRuntimeStatus = {
+      ...runtime,
+      supportedModels: [],
+      modelCapabilitySource: "unavailable",
+      modelCapabilityCheckedAt: new Date().toISOString(),
+      modelCapabilityError: error.message
+    };
+  }
+  return codexRuntimeStatus;
 }
 
 function formatNetworkStatus(status) {

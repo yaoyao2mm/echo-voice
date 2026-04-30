@@ -239,9 +239,7 @@ export class CodexInteractiveRuntime {
   async #ensureClient() {
     if (this.client?.initialized) return;
 
-    this.client = new CodexAppServerClient({
-      command: config.codex.command
-    });
+    this.client = new CodexAppServerClient();
     this.client.on("notification", (message) => this.#handleNotification(message));
     this.client.on("serverRequest", (message) => this.#handleServerRequest(message));
     this.client.on("stderr", (line) => this.#handleStderr(line));

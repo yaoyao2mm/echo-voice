@@ -2,7 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { config } from "../config.js";
 import { resolveDesktopCodexCommand } from "./codexCommand.js";
-import { codexCompatibleModel, listUnsupportedCodexModels } from "./codexRuntime.js";
+import { codexCompatibleModel, listUnsupportedCodexModels, normalizeAllowedPermissionModes } from "./codexRuntime.js";
 import { managedWorkspaces } from "./codexWorkspaceManager.js";
 import { buildProxyEnv } from "./http.js";
 
@@ -37,6 +37,8 @@ export function publicCodexRuntime() {
     approvalTimeoutMs: config.codex.approvalTimeoutMs,
     model: codexCompatibleModel(config.codex.model),
     unsupportedModels: listUnsupportedCodexModels(),
+    supportedModels: [],
+    allowedPermissionModes: normalizeAllowedPermissionModes(),
     reasoningEffort: config.codex.reasoningEffort,
     profile: config.codex.profile,
     timeoutMs: config.codex.timeoutMs

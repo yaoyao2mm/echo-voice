@@ -70,6 +70,8 @@ export function createAppContext(windowRef = window, documentRef = document) {
       composerBusy: false,
       codexAgentRuntime: {},
       codexUnsupportedModels: [],
+      codexSupportedModels: [],
+      codexAllowedPermissionModes: [],
       runtimePreferences: readStoredRuntimePreferences(windowRef.localStorage),
       runtimeDirty: false,
       lastTopbarScrollY: 0,
@@ -375,6 +377,10 @@ export function installCore(app) {
   };
 
   app.handleRuntimeControlChange = function handleRuntimeControlChange() {
+    if (app.permissionModeUnavailable(elements.codexPermissionMode.value)) {
+      elements.codexPermissionMode.value = "";
+      app.toast("当前桌面端策略不支持这个权限模式，已切回桌面默认。");
+    }
     if (app.modelRequiresNewerCodex(elements.codexModel.value)) {
       elements.codexModel.value = "";
       app.toast("当前桌面端 Codex 版本不支持这个模型，已切回桌面默认。");
@@ -461,15 +467,29 @@ export function installCore(app) {
         : "默认";
     }
     app.refreshModelOptionAvailability();
+    app.refreshPermissionModeAvailability();
   };
 
   app.refreshModelOptionAvailability = function refreshModelOptionAvailability() {
+    for (const model of state.codexSupportedModels || []) {
+      app.ensureRuntimeOption(elements.codexModel, modelOptions, model.id, model.displayName || model.id);
+    }
     for (const option of Array.from(elements.codexModel.options || [])) {
       const value = String(option.value || "").trim();
       if (!value) continue;
       const unsupported = app.modelRequiresNewerCodex(value);
       option.disabled = unsupported;
       option.textContent = unsupported ? `${option.dataset.baseLabel || option.textContent} · 需升级桌面 Codex` : option.dataset.baseLabel || option.textContent;
+    }
+  };
+
+  app.refreshPermissionModeAvailability = function refreshPermissionModeAvailability() {
+    for (const option of Array.from(elements.codexPermissionMode.options || [])) {
+      const value = String(option.value || "").trim();
+      if (!value) continue;
+      const unavailable = app.permissionModeUnavailable(value);
+      option.disabled = unavailable;
+      option.textContent = unavailable ? `${option.dataset.baseLabel || option.textContent} · 桌面未开放` : option.dataset.baseLabel || option.textContent;
     }
   };
 
@@ -494,7 +514,7 @@ export function installCore(app) {
     const model = app.modelRequiresNewerCodex(rawModel) ? "" : rawModel;
     const reasoningEffort = String(runtime.reasoningEffort || runtime.effort || "").trim().toLowerCase();
     return {
-      permissionMode,
+      permissionMode: app.permissionModeUnavailable(permissionMode) ? "" : permissionMode,
       sandbox: app.normalizeSandboxModeValue(runtime.sandbox),
       approvalPolicy: app.normalizeApprovalPolicyValue(runtime.approvalPolicy),
       model: knownModelValues.has(model) || model ? model : "",
@@ -630,7 +650,15 @@ export function installCore(app) {
 
   app.modelRequiresNewerCodex = function modelRequiresNewerCodex(value) {
     const model = String(value || "").trim();
-    return Boolean(model) && state.codexUnsupportedModels.includes(model);
+    if (!model) return false;
+    if (state.codexUnsupportedModels.includes(model)) return true;
+    const supportedModelIds = (state.codexSupportedModels || []).map((item) => item.id);
+    return supportedModelIds.length > 0 && !supportedModelIds.includes(model);
+  };
+
+  app.permissionModeUnavailable = function permissionModeUnavailable(value) {
+    const mode = app.normalizePermissionMode(value);
+    return Boolean(mode && state.codexAllowedPermissionModes.length > 0 && !state.codexAllowedPermissionModes.includes(mode));
   };
 
   app.modelSupportsImages = function modelSupportsImages(value) {

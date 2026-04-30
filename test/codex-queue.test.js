@@ -324,6 +324,78 @@ test("interactive Codex sessions keep GPT-5.5 when the desktop CLI supports it",
   assert.equal(command.payload.prompt, "使用新模型");
 });
 
+test("interactive Codex full access can be enabled from mobile without extra Echo approval", async () => {
+  store.resetStoreForTest();
+
+  queue.updateCodexAgent({
+    id: "full-access-agent",
+    workspaces: [{ id: "demo", path: process.cwd() }],
+    runtime: {
+      sandbox: "workspace-write",
+      approvalPolicy: "on-request",
+      allowedPermissionModes: ["strict", "approve", "full"],
+      supportedModels: [{ id: "gpt-5.5", displayName: "GPT-5.5", supportedReasoningEfforts: [{ reasoningEffort: "xhigh" }] }]
+    }
+  });
+
+  const created = queue.createCodexSession({
+    projectId: "demo",
+    prompt: "全权限执行",
+    runtime: { model: "gpt-5.5", sandbox: "danger-full-access", approvalPolicy: "never", reasoningEffort: "xhigh", profile: "full" }
+  });
+
+  assert.equal(created.runtime.profile, "full");
+  assert.equal(created.runtime.sandbox, "danger-full-access");
+  assert.equal(created.runtime.approvalPolicy, "never");
+
+  const command = await queue.waitForCodexSessionCommand({
+    waitMs: 1000,
+    agent: {
+      id: "full-access-agent",
+      workspaces: [{ id: "demo", path: process.cwd() }],
+      runtime: {
+        allowedPermissionModes: ["strict", "approve", "full"],
+        supportedModels: [{ id: "gpt-5.5", displayName: "GPT-5.5", supportedReasoningEfforts: [{ reasoningEffort: "xhigh" }] }]
+      }
+    }
+  });
+  assert.equal(command.runtime.profile, "full");
+  assert.equal(command.runtime.sandbox, "danger-full-access");
+  assert.equal(command.runtime.approvalPolicy, "never");
+});
+
+test("interactive Codex sessions drop models not advertised by the desktop app-server", async () => {
+  store.resetStoreForTest();
+
+  const agentRuntime = {
+    model: "gpt-5.4",
+    sandbox: "workspace-write",
+    approvalPolicy: "on-request",
+    allowedPermissionModes: ["strict", "approve", "full"],
+    supportedModels: [{ id: "gpt-5.4", displayName: "GPT-5.4", supportedReasoningEfforts: [{ reasoningEffort: "high" }] }]
+  };
+  const agent = {
+    id: "supported-model-list-agent",
+    workspaces: [{ id: "demo", path: process.cwd() }],
+    runtime: agentRuntime
+  };
+  queue.updateCodexAgent(agent);
+
+  const created = queue.createCodexSession({
+    projectId: "demo",
+    prompt: "请求不存在的模型",
+    runtime: { model: "gpt-5.5", sandbox: "workspace-write", approvalPolicy: "on-request", reasoningEffort: "xhigh", profile: "approve" }
+  });
+  assert.equal(created.runtime.model, "");
+  assert.equal(created.runtime.reasoningEffort, "");
+  assert.equal(created.runtime.profile, "approve");
+
+  const command = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  assert.equal(command.runtime.model, "");
+  assert.equal(command.runtime.reasoningEffort, "");
+  assert.equal(command.runtime.sandbox, "workspace-write");
+});
+
 test("interactive Codex sessions recover expired running leases instead of looking stuck forever", async () => {
   store.resetStoreForTest();
 
