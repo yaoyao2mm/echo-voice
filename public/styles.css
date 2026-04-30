@@ -3874,12 +3874,20 @@ body.topbar-collapsed .topbar {
 }
 
 @media (max-width: 760px) {
+  .codex-main {
+    transition:
+      transform 180ms ease,
+      opacity 160ms ease;
+    transform-origin: top center;
+    will-change: transform, opacity;
+  }
+
   .session-sidebar {
     position: fixed;
     top: var(--topbar-height, 72px);
     bottom: 0;
     left: 0;
-    z-index: 18;
+    z-index: 30;
     width: min(320px, calc(100vw - 56px));
     min-height: 0;
     max-height: none;
@@ -3898,9 +3906,29 @@ body.topbar-collapsed .topbar {
   }
 
   .session-backdrop {
+    z-index: 29;
     inset: var(--topbar-height, 72px) 0 0 0;
     background: rgba(20, 18, 16, 0.24);
     backdrop-filter: none;
+  }
+
+  .composer {
+    transition:
+      transform 180ms ease,
+      opacity 140ms ease;
+    will-change: transform, opacity;
+  }
+
+  .codex-section.sessions-open .codex-main {
+    transform: translateY(18px) scale(0.985);
+    opacity: 0.24;
+    pointer-events: none;
+  }
+
+  .codex-section.sessions-open .composer {
+    transform: translateY(calc(100% + var(--safe-bottom) + 12px));
+    opacity: 0;
+    pointer-events: none;
   }
 
   .sidebar-head,
