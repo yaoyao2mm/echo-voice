@@ -380,12 +380,8 @@ body.topbar-collapsed .topbar {
   }
 
   .topbar-project-switcher {
-    flex-basis: 120px;
-    max-width: 120px;
-  }
-
-  .topbar-project-kicker {
-    display: none;
+    flex-basis: 118px;
+    max-width: 128px;
   }
 
   .composer {
@@ -404,9 +400,9 @@ body.topbar-collapsed .topbar {
   }
 
   .topbar-project-switcher {
-    flex-basis: 104px;
+    flex-basis: 108px;
     min-width: 78px;
-    max-width: 104px;
+    max-width: 112px;
   }
 
   .composer-statusbar {
@@ -446,9 +442,9 @@ body.topbar-collapsed .topbar {
   }
 
   .topbar-project-chip {
-    gap: 0;
-    padding-left: 10px;
-    padding-right: 10px;
+    gap: 6px;
+    padding-left: 9px;
+    padding-right: 9px;
   }
 
   .topbar-project-chip strong {

@@ -156,25 +156,26 @@ button:disabled {
 
 .topbar-project-switcher {
   position: relative;
-  flex: 0 1 156px;
-  min-width: 92px;
-  max-width: 168px;
-  margin-left: 2px;
+  flex: 0 1 136px;
+  min-width: 88px;
+  max-width: 150px;
+  margin-left: 0;
 }
 
 .topbar-project-chip {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
+  justify-content: flex-start;
+  gap: 7px;
   width: 100%;
   min-width: 0;
+  height: 34px;
   min-height: 34px;
   border: 1px solid rgba(126, 106, 84, 0.12);
   border-radius: 999px;
   background: rgba(255, 252, 247, 0.78);
   color: var(--ink);
-  padding: 0 10px;
+  padding: 0 11px;
   overflow: hidden;
 }
 
@@ -184,13 +185,11 @@ button:disabled {
   background: rgba(23, 20, 17, 0.06);
 }
 
-.topbar-project-kicker {
+.topbar-project-icon {
   flex: 0 0 auto;
-  color: var(--muted-2);
-  font-size: 9px;
-  font-weight: 780;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  width: 15px;
+  height: 15px;
+  color: var(--muted);
 }
 
 .topbar-project-chip strong {

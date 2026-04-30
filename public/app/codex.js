@@ -1,15 +1,15 @@
 export function installCodex(app) {
   const { constants, elements, state } = app;
   const quickDeployPrompt = [
-    "请把当前对话中已经完成的代码改动做最终验证、提交、推送并等待部署完成。",
+    "请把当前对话中已经完成且适合发布的代码改动提交、推送，并在有部署流程时等待部署完成。",
     "",
     "要求：",
     "- 先检查 git status，只提交与本次对话需求相关的文件，不要提交未跟踪的本地预览或附件文件。",
-    "- 运行必要检查，至少包含 JS 检查、相关移动端 e2e 和单元测试。",
-    "- 提交到当前分支并推送到 origin/main。",
-    "- 等待 Deploy Relay 部署成功，并确认远端服务更新到新提交且 active (running)。",
+    "- 根据当前仓库和改动类型选择必要且可运行的验证，例如现有测试、语法检查、格式检查或轻量 smoke test；不要强行运行与项目技术栈无关的检查。",
+    "- 提交到当前分支并推送到默认远端；如果当前任务明确要求目标分支，则按任务要求执行。",
+    "- 如果仓库配置了部署流程，等待部署完成并尽量确认远端服务已更新到新提交；如果没有可识别的部署流程，说明已完成提交和推送。",
     "- 如果没有可提交改动，不要空提交，直接说明当前状态。",
-    "- 最后简短汇报测试、commit、部署链接和服务状态。"
+    "- 最后简短汇报已运行的验证、commit、推送目标，以及部署或服务状态。"
   ].join("\n");
 
   app.hasPendingComposerAttachments = function hasPendingComposerAttachments() {

@@ -515,7 +515,7 @@ test("mobile quick deploy sends the fixed deployment prompt", async ({ page, req
     await page.locator("#quickDeployButton").click();
 
     await expect(page.locator(".toast")).toContainText("已发送部署指令");
-    await expect(page.locator("#codexRunSummary")).toContainText("请把当前对话中已经完成的代码改动做最终验证、提交、推送并等待部署完成。");
+    await expect(page.locator("#codexRunSummary")).toContainText("请把当前对话中已经完成且适合发布的代码改动提交、推送");
     await expect(page.locator("#quickDeployButton")).toBeDisabled();
 
     const sessionResponse = await request.get(`/api/codex/sessions/${created.session.id}`, { headers });
@@ -523,7 +523,7 @@ test("mobile quick deploy sends the fixed deployment prompt", async ({ page, req
     const sessionData = await sessionResponse.json();
     expect(
       sessionData.session.messages.some(
-        (message) => message.role === "user" && String(message.text || "").includes("等待 Deploy Relay 部署成功")
+        (message) => message.role === "user" && String(message.text || "").includes("不要强行运行与项目技术栈无关的检查")
       )
     ).toBeTruthy();
   } finally {

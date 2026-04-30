@@ -15,8 +15,8 @@
         if (localStorage.getItem("echoTheme") === "dark") document.documentElement.dataset.theme = "dark";
       } catch {}
     </script>
-    <link rel="manifest" href="/manifest.webmanifest?v=65" />
-    <link rel="stylesheet" href="/styles.css?v=65" />
+    <link rel="manifest" href="/manifest.webmanifest?v=66" />
+    <link rel="stylesheet" href="/styles.css?v=66" />
   </head>
   <body>
     <main class="shell">
@@ -51,7 +51,16 @@
               aria-expanded="false"
               aria-controls="projectSwitcherPanel"
             >
-              <span class="topbar-project-kicker">工程</span>
+              <svg class="topbar-project-icon" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M3.5 7.8c0-1.1.9-2 2-2h4.1c.6 0 1.1.2 1.5.7l1 1.1h6.4c1.1 0 2 .9 2 2v7.6c0 1.1-.9 2-2 2h-13c-1.1 0-2-.9-2-2V7.8Z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.8"
+                />
+              </svg>
               <strong id="composerProjectLabel">等待</strong>
             </button>
             <div id="projectSwitcherPanel" class="project-switcher-panel" role="dialog" aria-label="切换工程" hidden>
@@ -305,6 +314,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=65" type="module"></script>
+    <script src="/app.js?v=66" type="module"></script>
   </body>
 </html>
