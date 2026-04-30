@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 import dotenv from "dotenv";
 import QRCode from "qrcode";
+import { resolveDesktopCodexCommand } from "../src/lib/codexCommand.js";
 import { httpFetch } from "../src/lib/http.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -53,7 +54,6 @@ const fields = [
 
   { key: "ECHO_CODEX_ENABLED", section: "codex", type: "boolean" },
   { key: "ECHO_CODEX_WORKSPACES", section: "codex", type: "textarea" },
-  { key: "ECHO_CODEX_COMMAND", section: "codex", type: "text" },
   {
     key: "ECHO_CODEX_SANDBOX",
     section: "codex",
@@ -67,6 +67,7 @@ const fields = [
 
 const fieldByKey = new Map(fields.map((field) => [field.key, field]));
 const secretKeys = new Set(fields.filter((field) => field.type === "secret").map((field) => field.key));
+const deprecatedEnvKeys = new Set(["ECHO_CODEX_COMMAND"]);
 
 const app = express();
 app.use(express.json({ limit: "256kb" }));
@@ -292,6 +293,8 @@ function normalizePayload(body, currentEnv) {
     updates[key] = normalizeValue(field, rawValue);
   }
 
+  for (const key of deprecatedEnvKeys) updates[key] = null;
+
   return updates;
 }
 
@@ -339,18 +342,25 @@ async function writeEnvUpdates(updates) {
   const content = await readEnvContent();
   const lines = content ? content.split(/\r?\n/) : [];
   const seen = new Set();
-  const nextLines = lines.map((line) => {
-    const match = line.match(/^([A-Z0-9_]+)\s*=/);
-    if (!match) return line;
+  const nextLines = lines
+    .map((line) => {
+      const match = line.match(/^([A-Z0-9_]+)\s*=/);
+      if (!match) return line;
 
-    const key = match[1];
-    if (!Object.prototype.hasOwnProperty.call(updates, key)) return line;
+      const key = match[1];
+      if (deprecatedEnvKeys.has(key)) {
+        seen.add(key);
+        return null;
+      }
+      if (!Object.prototype.hasOwnProperty.call(updates, key)) return line;
 
-    seen.add(key);
-    return formatEnvLine(key, updates[key]);
-  });
+      seen.add(key);
+      if (updates[key] === null) return null;
+      return formatEnvLine(key, updates[key]);
+    })
+    .filter((line) => line !== null);
 
-  const missing = Object.keys(updates).filter((key) => !seen.has(key));
+  const missing = Object.keys(updates).filter((key) => !seen.has(key) && updates[key] !== null);
   if (missing.length) {
     if (nextLines.length && nextLines[nextLines.length - 1] !== "") nextLines.push("");
     nextLines.push("# Managed by Echo desktop settings");
@@ -543,8 +553,27 @@ async function findDesktopAgentProcess() {
 }
 
 async function checkCodex(env) {
-  const command = env.ECHO_CODEX_COMMAND || "codex";
-  const result = await runCommand("zsh", ["-lc", `command -v ${shellQuote(command)} && ${shellQuote(command)} --version`], 8000);
+  const commandInfo = resolveDesktopCodexCommand({
+    configuredCommand: env.ECHO_CODEX_COMMAND,
+    bundledPath: env.ECHO_CODEX_APP_PATH
+  });
+  if (!commandInfo.ok || !commandInfo.command) {
+    return {
+      ok: false,
+      status: "missing",
+      command: "",
+      path: "",
+      version: "",
+      detail: commandInfo.detail
+    };
+  }
+
+  const command = commandInfo.command;
+  const result = await runCommand(
+    "zsh",
+    ["-lc", `command -v ${shellQuote(command)} >/dev/null 2>&1 && ${shellQuote(command)} --version`],
+    8000
+  );
   const lines = result.stdout.split(/\r?\n/).filter(Boolean);
   return {
     ok: result.code === 0,
@@ -552,7 +581,10 @@ async function checkCodex(env) {
     command,
     path: lines[0] || "",
     version: lines[1] || "",
-    detail: result.code === 0 ? "" : result.stderr || result.stdout || `${command} was not found in PATH.`
+    detail:
+      result.code === 0
+        ? commandInfo.detail
+        : [commandInfo.detail, result.stderr || result.stdout || `${command} was not found in PATH.`].filter(Boolean).join(" ")
   };
 }
 

@@ -1,6 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import { config } from "../config.js";
+import { resolveDesktopCodexCommand } from "./codexCommand.js";
 import { codexCompatibleModel, listUnsupportedCodexModels } from "./codexRuntime.js";
 import { buildProxyEnv } from "./http.js";
 
@@ -13,8 +14,14 @@ export function publicWorkspaces() {
 }
 
 export function publicCodexRuntime() {
+  const commandInfo = resolveDesktopCodexCommand({
+    configuredCommand: config.codex.command,
+    bundledPath: config.codex.appPath
+  });
   return {
-    command: config.codex.command,
+    command: commandInfo.command,
+    commandSource: commandInfo.source,
+    commandDetail: commandInfo.detail,
     sandbox: config.codex.sandbox || "workspace-write",
     approvalPolicy: config.codex.approvalPolicy,
     approvalTimeoutMs: config.codex.approvalTimeoutMs,

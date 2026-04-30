@@ -60,6 +60,8 @@ Run the desktop agent on the computer where Codex should execute:
 ECHO_RELAY_URL=https://voice.example.com ECHO_TOKEN=a-long-random-secret pnpm run desktop
 ```
 
+On macOS, install and sign in to the official `Codex.app` first. Echo now uses the app-bundled `codex app-server` instead of a Homebrew `codex` binary. If your app lives outside `/Applications`, set `ECHO_CODEX_APP_PATH` to `Codex.app/Contents/Resources/codex`.
+
 To enable local Codex control, expose only the project directories you trust:
 
 ```bash
@@ -104,7 +106,7 @@ pnpm run desktop:mac:dmg
 
 The native window also installs a menu bar item. Closing the settings window hides it instead of quitting, and the menu bar item can reopen settings, start/stop/restart the app-managed agent, switch off the legacy LaunchAgent, run the network doctor, and open logs.
 
-The Overview tab checks the relay config, app-managed or launchd agent, Codex CLI, and allowlisted workspaces.
+The Overview tab checks the relay config, app-managed or launchd agent, Codex App, and allowlisted workspaces.
 
 The Codex tab has an engineering directory manager. Use "发现工程" to scan common local project folders, or "浏览目录" to pick a folder manually. After saving and restarting the desktop agent, those project names appear in the phone UI as the selectable Codex working directories.
 

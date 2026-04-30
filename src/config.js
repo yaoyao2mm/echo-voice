@@ -69,6 +69,7 @@ export const config = {
 
   codex: {
     enabled: process.env.ECHO_CODEX_ENABLED !== "false",
+    appPath: process.env.ECHO_CODEX_APP_PATH || "",
     command: process.env.ECHO_CODEX_COMMAND || "codex",
     workspaces: parseWorkspaces(process.env.ECHO_CODEX_WORKSPACES || process.cwd()),
     sandbox: process.env.ECHO_CODEX_SANDBOX || "workspace-write",

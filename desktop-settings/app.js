@@ -136,7 +136,7 @@ function renderHealth(health) {
       ]
     },
     {
-      title: "Codex CLI",
+      title: "Codex App",
       ok: health.codex?.ok,
       status: health.codex?.status || "unknown",
       detail: [health.codex?.path, health.codex?.version, health.codex?.detail].filter(Boolean).join("\n")

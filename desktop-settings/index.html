@@ -32,7 +32,7 @@
           <div class="sectionHeader">
             <div>
               <h2>概览</h2>
-              <p>检查桌面端、Codex CLI、项目白名单和手机配对。</p>
+              <p>检查桌面端、Codex App、项目白名单和手机配对。</p>
             </div>
             <button type="button" id="refreshHealth">刷新状态</button>
           </div>
@@ -116,7 +116,7 @@
             <button type="submit">保存配置</button>
           </div>
           <div class="notice">
-            这些是桌面端真正使用的模型配置：它们控制本机 Codex CLI 在你的项目目录里用哪个模型、profile 和 sandbox 执行任务。
+            这些是桌面端真正使用的模型配置：它们控制官方 Codex.app 提供的本机 app-server 在你的项目目录里用哪个模型、profile 和 sandbox 执行任务。
           </div>
           <div class="grid">
             <label class="switch">
@@ -149,8 +149,8 @@
               <textarea data-key="ECHO_CODEX_WORKSPACES" class="workspaceRaw" rows="4" aria-hidden="true" tabindex="-1"></textarea>
             </div>
             <label>
-              Command
-              <input data-key="ECHO_CODEX_COMMAND" autocomplete="off" />
+              Codex App
+              <input value="macOS 桌面端固定使用官方 Codex.app" readonly />
             </label>
             <label>
               Sandbox

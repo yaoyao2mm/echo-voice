@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import readline from "node:readline";
 import { config } from "../config.js";
+import { resolveDesktopCodexCommand } from "./codexCommand.js";
 import { buildCodexEnv } from "./codexRunner.js";
 
 const defaultRequestTimeoutMs = 60000;
@@ -9,7 +10,14 @@ const defaultRequestTimeoutMs = 60000;
 export class CodexAppServerClient extends EventEmitter {
   constructor(options = {}) {
     super();
-    this.command = options.command || config.codex.command;
+    const commandInfo = options.command
+      ? { ok: true, command: options.command, source: "explicit-command", detail: `Using explicit command ${options.command}.` }
+      : resolveDesktopCodexCommand({
+          configuredCommand: config.codex.command,
+          bundledPath: config.codex.appPath
+        });
+    this.command = commandInfo.command;
+    this.commandInfo = commandInfo;
     this.cwd = options.cwd || process.cwd();
     this.requestTimeoutMs = options.requestTimeoutMs || defaultRequestTimeoutMs;
     this.child = null;
@@ -33,6 +41,10 @@ export class CodexAppServerClient extends EventEmitter {
   }
 
   async _start() {
+    if (!this.command) {
+      throw new Error(this.commandInfo?.detail || "Codex app-server command is not available.");
+    }
+
     this.child = spawn(this.command, ["app-server", "--listen", "stdio://"], {
       cwd: this.cwd,
       stdio: ["pipe", "pipe", "pipe"],

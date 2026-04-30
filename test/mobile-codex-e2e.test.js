@@ -110,6 +110,7 @@ process.env.ECHO_MODE = "relay";
 process.env.ECHO_TOKEN = "mobile-e2e-token";
 process.env.ECHO_RELAY_URL = `http://127.0.0.1:${relayServer.address().port}`;
 process.env.ECHO_AUTH_ENABLED = "false";
+process.env.ECHO_CODEX_APP_PATH = fakeCodexPath;
 process.env.ECHO_CODEX_COMMAND = fakeCodexPath;
 process.env.ECHO_CODEX_WORKSPACES = `e2e=${workspacePath}`;
 process.env.ECHO_CODEX_TIMEOUT_MS = "5000";

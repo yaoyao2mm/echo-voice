@@ -23,12 +23,19 @@ console.log(`Network: ${formatNetworkStatus(describeHttpNetwork(config.relayUrl)
 console.log(`Codex remote: ${config.codex.enabled ? "enabled" : "disabled"}`);
 if (config.codex.enabled) {
   const runtime = publicCodexRuntime();
-  console.log(`  command: ${runtime.command}`);
+  console.log(`  command: ${runtime.command || "unavailable"}`);
+  if (runtime.commandDetail) {
+    console.log(`  app: ${runtime.commandDetail}`);
+  }
   console.log(`  model: ${runtime.model || "Codex default"}`);
   console.log(`  reasoning: ${runtime.reasoningEffort || "Codex default"}`);
   console.log(`  sandbox: ${runtime.sandbox}`);
   for (const workspace of publicWorkspaces()) {
     console.log(`  ${workspace.id}: ${workspace.path}`);
+  }
+  if (!runtime.command) {
+    console.error("Codex remote cannot start because the official Codex app is not available.");
+    process.exit(1);
   }
 }
 console.log("Waiting for mobile Codex tasks.\n");
