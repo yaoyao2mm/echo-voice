@@ -419,14 +419,12 @@ export function installSessions(app) {
             <path d="M8 7.5A2.5 2.5 0 0 1 10.5 5h6A2.5 2.5 0 0 1 19 7.5v6A2.5 2.5 0 0 1 16.5 16h-6A2.5 2.5 0 0 1 8 13.5v-6Z" />
             <path d="M6 8.5v7A2.5 2.5 0 0 0 8.5 18h7" />
           </svg>
-          <span>复制</span>
         </button>
         <button class="thread-message-action" type="button" data-thread-action="edit" aria-label="重新编辑消息" title="重新编辑">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M5 18.5 6.1 14l8.8-8.8a2.1 2.1 0 0 1 3 3L9.1 17 5 18.5Z" />
             <path d="m13.5 6.6 3 3" />
           </svg>
-          <span>编辑</span>
         </button>
       </div>
     `;

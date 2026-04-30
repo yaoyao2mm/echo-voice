@@ -110,11 +110,15 @@ test("mobile login, pairing, sidebar, and session creation", async ({ page, requ
     await expect(page.locator("#sendCodexButton")).toBeDisabled();
 
     const message = page.locator(".thread-message-user", { hasText: "E2E mobile workbench smoke test" }).first();
-    await expect(message.getByRole("button", { name: "复制消息" })).toBeVisible();
-    await expect(message.getByRole("button", { name: "重新编辑消息" })).toBeVisible();
-    await message.getByRole("button", { name: "复制消息" }).click();
+    const copyAction = message.getByRole("button", { name: "复制消息" });
+    const editAction = message.getByRole("button", { name: "重新编辑消息" });
+    await expect(copyAction).toBeVisible();
+    await expect(editAction).toBeVisible();
+    await expect(copyAction).toHaveText("");
+    await expect(editAction).toHaveText("");
+    await copyAction.click();
     await expect.poll(() => page.evaluate(() => window.__echoCopiedText)).toBe("E2E mobile workbench smoke test");
-    await message.getByRole("button", { name: "重新编辑消息" }).click();
+    await editAction.click();
     await expect(page.locator("#codexPrompt")).toHaveValue("E2E mobile workbench smoke test");
     await expect(page.locator("#sendCodexButton")).toBeEnabled();
   } finally {

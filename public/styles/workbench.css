@@ -761,7 +761,7 @@
 
 .thread-message-actions {
   display: flex;
-  gap: 6px;
+  gap: 10px;
   max-width: min(100%, 44rem);
   opacity: 0;
   pointer-events: none;
@@ -785,33 +785,32 @@
 .thread-message-action {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
   min-height: 28px;
-  border: 1px solid rgba(126, 106, 84, 0.14);
+  border: 0;
   border-radius: 999px;
-  padding: 4px 9px;
-  background: rgba(255, 252, 247, 0.92);
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 760;
+  padding: 0;
+  background: transparent;
+  color: rgba(91, 88, 84, 0.46);
   line-height: 1;
 }
 
 .thread-message-action:hover,
 .thread-message-action:focus-visible {
-  border-color: rgba(23, 20, 17, 0.18);
-  background: #ffffff;
-  color: var(--ink);
+  background: transparent;
+  color: rgba(23, 20, 17, 0.72);
 }
 
 .thread-message-action svg {
-  width: 13px;
-  height: 13px;
+  width: 15px;
+  height: 15px;
   fill: none;
   stroke: currentColor;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 1.9;
+  stroke-width: 1.85;
 }
 
 @media (hover: none), (pointer: coarse) {
