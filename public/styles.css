@@ -4112,7 +4112,7 @@ body.topbar-collapsed .topbar {
     height: auto;
     min-height: 0;
     overflow-y: auto;
-    padding: 0 0 8px;
+    padding: 0 0 calc(var(--composer-height, 0px) + 2px);
   }
 
   body.mobile-ui .codex-run-summary {
@@ -4153,7 +4153,9 @@ body.topbar-collapsed .topbar {
   }
 
   body.mobile-ui .composer {
-    position: sticky;
+    position: fixed;
+    left: 0;
+    right: 0;
     bottom: 0;
     width: 100%;
     margin: 0;
@@ -4166,5 +4168,9 @@ body.topbar-collapsed .topbar {
   body.mobile-ui .composer-dock {
     padding-left: var(--mobile-chat-rail);
     padding-right: var(--mobile-chat-rail);
+  }
+
+  body.mobile-ui .composer-dock {
+    padding-bottom: 0;
   }
 }
