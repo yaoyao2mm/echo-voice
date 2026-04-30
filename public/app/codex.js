@@ -183,7 +183,7 @@ export function installCodex(app) {
     localStorage.setItem("echoCodexProject", projectId);
     if (attachments.length > 0 && runtime.model !== runtimeDraft.model) {
       app.applyRuntimeDraft(runtime, { persist: true, dirty: true });
-      app.toast(`当前模型不支持图片，已自动切换到 ${app.modelDisplayName(runtime.model)}`);
+      app.toast("图片消息会自动使用桌面默认模型");
     }
     app.setComposerBusy(true, "发送中");
     try {

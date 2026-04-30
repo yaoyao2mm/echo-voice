@@ -6,8 +6,6 @@ import { config } from "../config.js";
 
 const dbPath = path.join(config.dataDir, "echo.sqlite");
 const attachmentStorageDir = path.join(config.dataDir, "codex-attachments");
-const IMAGE_FALLBACK_MODEL = "gpt-5.4";
-const IMAGE_UNSUPPORTED_MODELS = new Set(["gpt-5.5"]);
 fs.mkdirSync(config.dataDir, { recursive: true });
 fs.mkdirSync(attachmentStorageDir, { recursive: true });
 
@@ -1647,10 +1645,10 @@ function normalizeRuntime(runtime = {}) {
 function runtimeForAttachments(runtime = {}, attachments = []) {
   if (!Array.isArray(attachments) || attachments.length === 0) return runtime;
   const normalized = normalizeRuntime(runtime);
-  if (!IMAGE_UNSUPPORTED_MODELS.has(normalized.model)) return runtime;
+  if (!normalized.model) return runtime;
   return {
     ...runtime,
-    model: IMAGE_FALLBACK_MODEL
+    model: ""
   };
 }
 
