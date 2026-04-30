@@ -36,7 +36,7 @@ test("status advertises only online agent workspaces", () => {
       { id: "echo", label: "Echo", path: "/workspace/echo" },
       { id: "metio", label: "Metio", path: "/workspace/metio" }
     ],
-    runtime: { command: "codex", model: "gpt-5.4" }
+    runtime: { command: "codex", model: "gpt-5.4", unsupportedModels: ["gpt-5.5"] }
   });
   queue.updateCodexAgent({
     id: "real-agent-b",
@@ -53,6 +53,7 @@ test("status advertises only online agent workspaces", () => {
   assert.deepEqual(workspaceIds, ["echo", "metio", "side"]);
   assert.equal(onlineStatus.workspaces.filter((workspace) => workspace.id === "e2e").length, 0);
   assert.equal(onlineStatus.runtime.command, "codex");
+  assert.deepEqual(onlineStatus.runtime.unsupportedModels, ["gpt-5.5"]);
   assert.equal(onlineStatus.agents.filter((agent) => agent.online).length, 2);
 });
 

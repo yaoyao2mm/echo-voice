@@ -6,7 +6,7 @@ const credentials = {
   password: "MobileE2EPass20260430"
 };
 
-async function touchMockAgent(request) {
+async function touchMockAgent(request, runtimeOverrides = {}) {
   const response = await request.post("/api/agent/codex/sessions/next?wait=1", {
     headers: {
       "X-Echo-Token": pairingToken
@@ -25,7 +25,8 @@ async function touchMockAgent(request) {
         sandbox: "workspace-write",
         approvalPolicy: "on-request",
         model: "gpt-5.4-mini",
-        reasoningEffort: "medium"
+        reasoningEffort: "medium",
+        ...runtimeOverrides
       }
     }
   });
@@ -117,6 +118,21 @@ test("mobile composer defaults to GPT-5.5 and remembers the last chosen model", 
     await page.locator("#toggleSessionsButton").click();
     await page.locator("#newCodexSessionButton").click();
     await expect(page.locator("#codexModel")).toHaveValue("gpt-5.4");
+  } finally {
+    clearInterval(keepAlive);
+  }
+});
+
+test("mobile composer disables models unsupported by the desktop Codex", async ({ page, request }) => {
+  await touchMockAgent(request, { unsupportedModels: ["gpt-5.5"] });
+  const keepAlive = setInterval(() => {
+    touchMockAgent(request, { unsupportedModels: ["gpt-5.5"] }).catch(() => {});
+  }, 10000);
+
+  try {
+    await loginToWorkbench(page);
+    await expect(page.locator("#codexModel")).toHaveValue("");
+    await expect(page.locator('#codexModel option[value="gpt-5.5"]')).toHaveAttribute("disabled", "");
   } finally {
     clearInterval(keepAlive);
   }

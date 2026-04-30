@@ -64,6 +64,7 @@ export function createAppContext(windowRef = window, documentRef = document) {
       showArchivedSessions: false,
       composerBusy: false,
       codexAgentRuntime: {},
+      codexUnsupportedModels: [],
       runtimePreferences: readStoredRuntimePreferences(windowRef.localStorage),
       runtimeDirty: false,
       lastTopbarScrollY: 0,
@@ -262,11 +263,16 @@ export function installCore(app) {
       const node = document.createElement("option");
       node.value = option.value;
       node.textContent = option.label;
+      node.dataset.baseLabel = option.label;
       select.append(node);
     }
   };
 
   app.handleRuntimeControlChange = function handleRuntimeControlChange() {
+    if (app.modelRequiresNewerCodex(elements.codexModel.value)) {
+      elements.codexModel.value = "";
+      app.toast("当前桌面端 Codex 版本不支持这个模型，已切回桌面默认。");
+    }
     state.runtimeDirty = true;
     state.runtimePreferences = app.currentRuntimeDraft();
     app.writeStoredRuntimePreferences(state.runtimePreferences);
@@ -347,6 +353,17 @@ export function installCore(app) {
       reasoningOption.textContent = state.codexAgentRuntime.reasoningEffort
         ? `默认 · ${app.reasoningDisplayName(state.codexAgentRuntime.reasoningEffort)}`
         : "默认";
+    }
+    app.refreshModelOptionAvailability();
+  };
+
+  app.refreshModelOptionAvailability = function refreshModelOptionAvailability() {
+    for (const option of Array.from(elements.codexModel.options || [])) {
+      const value = String(option.value || "").trim();
+      if (!value) continue;
+      const unsupported = app.modelRequiresNewerCodex(value);
+      option.disabled = unsupported;
+      option.textContent = unsupported ? `${option.dataset.baseLabel || option.textContent} · 需升级桌面 Codex` : option.dataset.baseLabel || option.textContent;
     }
   };
 
@@ -506,7 +523,8 @@ export function installCore(app) {
   };
 
   app.modelRequiresNewerCodex = function modelRequiresNewerCodex(value) {
-    return false;
+    const model = String(value || "").trim();
+    return Boolean(model) && state.codexUnsupportedModels.includes(model);
   };
 
   app.modelSupportsImages = function modelSupportsImages(value) {

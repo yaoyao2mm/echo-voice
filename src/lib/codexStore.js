@@ -1653,12 +1653,16 @@ function normalizeWorkspaces(workspaces = []) {
 }
 
 function normalizeRuntime(runtime = {}) {
+  const unsupportedModels = Array.isArray(runtime.unsupportedModels)
+    ? runtime.unsupportedModels.map((model) => String(model || "").trim()).filter(Boolean)
+    : [];
   return runtime && typeof runtime === "object"
     ? {
         command: String(runtime.command || "").trim(),
         sandbox: String(runtime.sandbox || "").trim(),
         approvalPolicy: String(runtime.approvalPolicy || "").trim(),
         model: codexCompatibleModel(runtime.model),
+        unsupportedModels,
         reasoningEffort: String(runtime.reasoningEffort || runtime.effort || "").trim().toLowerCase(),
         profile: String(runtime.profile || "").trim(),
         timeoutMs: Number(runtime.timeoutMs || 0) || null

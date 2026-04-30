@@ -1,7 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import { config } from "../config.js";
-import { codexCompatibleModel } from "./codexRuntime.js";
+import { codexCompatibleModel, listUnsupportedCodexModels } from "./codexRuntime.js";
 import { buildProxyEnv } from "./http.js";
 
 export function publicWorkspaces() {
@@ -19,6 +19,7 @@ export function publicCodexRuntime() {
     approvalPolicy: config.codex.approvalPolicy,
     approvalTimeoutMs: config.codex.approvalTimeoutMs,
     model: codexCompatibleModel(config.codex.model),
+    unsupportedModels: listUnsupportedCodexModels(),
     reasoningEffort: config.codex.reasoningEffort,
     profile: config.codex.profile,
     timeoutMs: config.codex.timeoutMs

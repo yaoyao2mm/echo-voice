@@ -22,6 +22,7 @@ export function installCodex(app) {
       elements.codexStatusText.textContent = "Codex 未连接";
       elements.codexQueueMeta.textContent = "";
       state.codexWorkspaces = [];
+      state.codexUnsupportedModels = [];
       state.codexAgentRuntime = {};
       app.refreshRuntimeDefaultOptions();
       elements.codexProject.innerHTML = "";
@@ -34,7 +35,14 @@ export function installCodex(app) {
   app.renderCodexStatus = function renderCodexStatus(codex) {
     const workspaces = codex.workspaces || [];
     state.codexWorkspaces = workspaces;
+    state.codexUnsupportedModels = Array.isArray(codex.runtime?.unsupportedModels)
+      ? codex.runtime.unsupportedModels.map((model) => String(model || "").trim()).filter(Boolean)
+      : [];
     state.codexAgentRuntime = app.normalizeRuntimeChoice(codex.runtime || {});
+    app.applyRuntimeDraft(app.runtimeChoiceWithFallback(app.currentRuntimeDraft(), state.runtimePreferences), {
+      persist: false,
+      dirty: state.runtimeDirty
+    });
     app.refreshRuntimeDefaultOptions();
     elements.codexStatusText.textContent = codex.agentOnline ? "本机 Codex 在线" : "等待桌面 agent";
     elements.codexQueueMeta.textContent = codex.agentOnline
