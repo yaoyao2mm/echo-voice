@@ -679,14 +679,22 @@
 
   body.mobile-ui .thread-message-assistant .thread-bubble,
   body.mobile-ui .thread-message-assistant .thread-attachments,
+  body.mobile-ui .thread-message-assistant .thread-message-actions,
   body.mobile-ui .thread-message-system .thread-bubble {
     width: fit-content;
     max-width: min(92%, 32rem);
   }
 
   body.mobile-ui .thread-message-user .thread-bubble,
-  body.mobile-ui .thread-message-user .thread-attachments {
+  body.mobile-ui .thread-message-user .thread-attachments,
+  body.mobile-ui .thread-message-user .thread-message-actions {
     max-width: min(94%, 30rem);
+  }
+
+  body.mobile-ui .thread-message-actions {
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
   }
 
   body.mobile-ui .composer {

@@ -73,6 +73,17 @@ async function authHeadersForSessionRequests(request) {
 }
 
 test("mobile login, pairing, sidebar, and session creation", async ({ page, request }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text) => {
+          window.__echoCopiedText = String(text);
+        }
+      }
+    });
+  });
+
   await touchMockAgent(request);
   const keepAlive = setInterval(() => {
     touchMockAgent(request).catch(() => {});
@@ -97,6 +108,15 @@ test("mobile login, pairing, sidebar, and session creation", async ({ page, requ
     await expect(page.locator("#activeSessionMeta")).toContainText(/排队中|启动中|运行中/);
     await expect(page.locator("#codexRunSummary")).toContainText("E2E mobile workbench smoke test");
     await expect(page.locator("#sendCodexButton")).toBeDisabled();
+
+    const message = page.locator(".thread-message-user", { hasText: "E2E mobile workbench smoke test" }).first();
+    await expect(message.getByRole("button", { name: "复制消息" })).toBeVisible();
+    await expect(message.getByRole("button", { name: "重新编辑消息" })).toBeVisible();
+    await message.getByRole("button", { name: "复制消息" }).click();
+    await expect.poll(() => page.evaluate(() => window.__echoCopiedText)).toBe("E2E mobile workbench smoke test");
+    await message.getByRole("button", { name: "重新编辑消息" }).click();
+    await expect(page.locator("#codexPrompt")).toHaveValue("E2E mobile workbench smoke test");
+    await expect(page.locator("#sendCodexButton")).toBeEnabled();
   } finally {
     clearInterval(keepAlive);
   }

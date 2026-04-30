@@ -1,5 +1,5 @@
 export function installSessions(app) {
-  const { elements, state, window: windowRef } = app;
+  const { document, elements, navigator, state, window: windowRef } = app;
 
   app.loadCodexJobs = async function loadCodexJobs() {
     const data = await app.apiGet(`/api/codex/sessions?archived=${state.showArchivedSessions ? "true" : "false"}`);
@@ -395,6 +395,7 @@ export function installSessions(app) {
     const draftBadge = entry.draft ? '<span class="thread-draft-badge">回复中</span>' : "";
     const timeLabel = entry.at ? app.formatMessageTime(entry.at) : "";
     const attachmentsHtml = app.renderConversationAttachments(entry.attachments || []);
+    const actionsHtml = entry.text ? app.renderConversationActions() : "";
 
     return `
       <article class="thread-message ${roleClass}">
@@ -405,8 +406,102 @@ export function installSessions(app) {
         </div>
         ${entry.text ? `<div class="thread-bubble ${bubbleClass}">${app.escapeHtml(entry.text)}</div>` : ""}
         ${attachmentsHtml}
+        ${actionsHtml}
       </article>
     `;
+  };
+
+  app.renderConversationActions = function renderConversationActions() {
+    return `
+      <div class="thread-message-actions" aria-label="消息操作">
+        <button class="thread-message-action" type="button" data-thread-action="copy" aria-label="复制消息" title="复制">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M8 7.5A2.5 2.5 0 0 1 10.5 5h6A2.5 2.5 0 0 1 19 7.5v6A2.5 2.5 0 0 1 16.5 16h-6A2.5 2.5 0 0 1 8 13.5v-6Z" />
+            <path d="M6 8.5v7A2.5 2.5 0 0 0 8.5 18h7" />
+          </svg>
+          <span>复制</span>
+        </button>
+        <button class="thread-message-action" type="button" data-thread-action="edit" aria-label="重新编辑消息" title="重新编辑">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 18.5 6.1 14l8.8-8.8a2.1 2.1 0 0 1 3 3L9.1 17 5 18.5Z" />
+            <path d="m13.5 6.6 3 3" />
+          </svg>
+          <span>编辑</span>
+        </button>
+      </div>
+    `;
+  };
+
+  app.handleConversationAction = function handleConversationAction(event) {
+    const target = event.target instanceof Element ? event.target : null;
+    const button = target?.closest("[data-thread-action]");
+    if (!button || !elements.codexRunSummary.contains(button)) return;
+
+    const message = button.closest(".thread-message");
+    const text = message?.querySelector(".thread-bubble")?.textContent || "";
+    if (!text) return;
+
+    event.preventDefault();
+    const action = button.dataset.threadAction;
+    if (action === "copy") {
+      app
+        .copyTextToClipboard(text)
+        .then(() => app.toast("已复制"))
+        .catch(() => app.toast("复制失败，请长按选择文本"));
+      return;
+    }
+    if (action === "edit") {
+      app.editConversationText(text);
+    }
+  };
+
+  app.copyTextToClipboard = async function copyTextToClipboard(text) {
+    const value = String(text || "");
+    if (!value) return;
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+        return;
+      }
+    } catch {}
+    if (!app.fallbackCopyText(value)) {
+      throw new Error("Clipboard write failed.");
+    }
+  };
+
+  app.fallbackCopyText = function fallbackCopyText(text) {
+    const activeElement = document.activeElement;
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.top = "0";
+    textarea.style.left = "-9999px";
+    textarea.style.opacity = "0";
+    document.body.append(textarea);
+    textarea.focus();
+    textarea.select();
+    let copied = false;
+    try {
+      copied = document.execCommand("copy");
+    } catch {
+      copied = false;
+    }
+    textarea.remove();
+    activeElement?.focus?.({ preventScroll: true });
+    return copied;
+  };
+
+  app.editConversationText = function editConversationText(text) {
+    const value = String(text || "");
+    elements.codexPrompt.value = value;
+    app.syncComposerInputHeight();
+    app.updateComposerAvailability();
+    elements.codexPrompt.focus({ preventScroll: true });
+    try {
+      elements.codexPrompt.setSelectionRange(value.length, value.length);
+    } catch {}
+    app.toast("已放入输入框，可继续编辑");
   };
 
   app.assistantMessageText = function assistantMessageText(event) {

@@ -736,6 +736,8 @@
   line-height: 1.58;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .thread-bubble-user {
@@ -755,6 +757,69 @@
   border: 1px solid rgba(177, 70, 59, 0.2);
   background: var(--danger-soft);
   color: var(--danger);
+}
+
+.thread-message-actions {
+  display: flex;
+  gap: 6px;
+  max-width: min(100%, 44rem);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.thread-message:hover .thread-message-actions,
+.thread-message:focus-within .thread-message-actions {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.thread-message-user .thread-message-actions {
+  justify-content: flex-end;
+}
+
+.thread-message-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  border: 1px solid rgba(126, 106, 84, 0.14);
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: rgba(255, 252, 247, 0.92);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 760;
+  line-height: 1;
+}
+
+.thread-message-action:hover,
+.thread-message-action:focus-visible {
+  border-color: rgba(23, 20, 17, 0.18);
+  background: #ffffff;
+  color: var(--ink);
+}
+
+.thread-message-action svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.9;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .thread-message-actions {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+  }
 }
 
 .thread-status-row {
