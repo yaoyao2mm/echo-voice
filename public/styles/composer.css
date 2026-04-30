@@ -145,10 +145,20 @@ body.topbar-collapsed .topbar {
   flex: 0 1 auto;
 }
 
+.composer-status-right {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .composer-status-action {
   flex: 0 0 auto;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -160,8 +170,8 @@ body.topbar-collapsed .topbar {
 }
 
 .composer-status-action svg {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
 }
 
 .composer-status-action.active {
@@ -186,8 +196,8 @@ body.topbar-collapsed .topbar {
   --context-used: 0%;
   --context-color: #82ad8f;
   flex: 0 0 auto;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   border-radius: 999px;
   background:
     radial-gradient(circle at center, rgba(251, 249, 245, 0.98) 0 45%, transparent 47%),
@@ -204,10 +214,9 @@ body.topbar-collapsed .topbar {
 }
 
 .composer-status-text {
-  margin-left: auto;
   display: block;
   min-width: 0;
-  max-width: 56%;
+  max-width: 100%;
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;

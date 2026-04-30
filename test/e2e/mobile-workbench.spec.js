@@ -106,6 +106,15 @@ async function loginToWorkbench(page) {
   await expect(page.locator("#contextUsageIndicator")).toBeVisible();
   await expect(page.locator("#contextUsageIndicator")).toHaveAttribute("role", "meter");
   await expect(page.locator("#quickDeployButton")).toBeVisible();
+  await expect(page.locator("#composerAttachmentButton")).toHaveCSS("width", "24px");
+  await expect(page.locator("#quickDeployButton")).toHaveCSS("width", "24px");
+  await expect(page.locator("#contextUsageIndicator")).toHaveCSS("width", "16px");
+  const statusIconOrder = await page.evaluate(() => {
+    const context = document.querySelector("#contextUsageIndicator")?.getBoundingClientRect();
+    const deploy = document.querySelector("#quickDeployButton")?.getBoundingClientRect();
+    return context && deploy ? deploy.left > context.right : false;
+  });
+  expect(statusIconOrder).toBeTruthy();
   await expect(page.locator(".composer-status-scope")).toHaveCount(0);
   await expect(page.locator("#codexStatusText")).toContainText("本机 Codex 在线");
   await expect(page.locator("#projectPickerLabel")).toContainText("echo");
