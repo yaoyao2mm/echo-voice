@@ -48,6 +48,7 @@ async function loginToWorkbench(page) {
   await expect(page.locator("#mobileStatusIndicator")).toHaveCSS("margin-right", "12px");
   await expect(page.locator("#contextUsageIndicator")).toBeVisible();
   await expect(page.locator("#contextUsageIndicator")).toHaveAttribute("role", "meter");
+  await expect(page.locator(".composer-status-scope")).toHaveCount(0);
   await expect(page.locator("#codexStatusText")).toContainText("本机 Codex 在线");
   await expect(page.locator("#projectPickerLabel")).toContainText("echo");
 }
