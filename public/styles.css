@@ -4112,7 +4112,7 @@ body.topbar-collapsed .topbar {
     height: auto;
     min-height: 0;
     overflow-y: auto;
-    padding: 0 0 calc(var(--composer-height, 0px) + 2px);
+    padding: 0 0 8px;
   }
 
   body.mobile-ui .codex-run-summary {
@@ -4153,10 +4153,7 @@ body.topbar-collapsed .topbar {
   }
 
   body.mobile-ui .composer {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    position: relative;
     width: 100%;
     margin: 0;
     z-index: 24;
@@ -4171,6 +4168,6 @@ body.topbar-collapsed .topbar {
   }
 
   body.mobile-ui .composer-dock {
-    padding-bottom: 0;
+    padding-bottom: max(5px, var(--safe-bottom));
   }
 }
