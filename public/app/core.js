@@ -156,6 +156,10 @@ export function installCore(app) {
       app.setTopbarCollapsed(false);
       return;
     }
+    if (app.isConversationScrolledToBottom()) {
+      state.topbarScrollAccumulator = 0;
+      return;
+    }
     if (Math.abs(delta) < 1) return;
     if (state.topbarScrollAccumulator && Math.sign(state.topbarScrollAccumulator) !== Math.sign(delta)) {
       state.topbarScrollAccumulator = delta;
@@ -176,6 +180,14 @@ export function installCore(app) {
       return Math.max(window.scrollY || 0, elements.codexScrollSurface?.scrollTop || 0, 0);
     }
     return Math.max(window.scrollY || 0, 0);
+  };
+
+  app.isConversationScrolledToBottom = function isConversationScrolledToBottom() {
+    if (!app.usesCompactTopbarMode()) return false;
+    const surface = elements.codexScrollSurface;
+    if (!surface || surface.hidden) return false;
+    const distanceToBottom = surface.scrollHeight - surface.clientHeight - surface.scrollTop;
+    return distanceToBottom <= 32;
   };
 
   app.usesCompactTopbarMode = function usesCompactTopbarMode() {

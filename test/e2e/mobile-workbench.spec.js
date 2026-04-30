@@ -116,6 +116,7 @@ test("mobile login, pairing, sidebar, and session creation", async ({ page, requ
     await expect(editAction).toBeVisible();
     await expect(copyAction).toHaveText("");
     await expect(editAction).toHaveText("");
+    await expect(message.locator(".thread-message-actions")).toHaveCSS("gap", "5px");
     await copyAction.click();
     await expect.poll(() => page.evaluate(() => window.__echoCopiedText)).toBe("E2E mobile workbench smoke test");
     await editAction.click();
@@ -252,11 +253,13 @@ test("mobile composer stays pinned while the conversation surface scrolls", asyn
       filler.style.height = "1600px";
       thread.append(filler);
       surface.scrollTop = surface.scrollHeight;
+      surface.dispatchEvent(new Event("scroll"));
     });
 
     await expect
       .poll(() => page.locator("#codexJobDetail").evaluate((node) => node.scrollTop))
       .toBeGreaterThan(0);
+    await expect(page.locator("body")).not.toHaveClass(/topbar-collapsed/);
 
     const documentScrollTop = await page.evaluate(() => document.scrollingElement?.scrollTop || 0);
     expect(documentScrollTop).toBe(0);

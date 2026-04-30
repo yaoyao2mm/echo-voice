@@ -761,7 +761,7 @@
 
 .thread-message-actions {
   display: flex;
-  gap: 10px;
+  gap: 5px;
   max-width: min(100%, 44rem);
   opacity: 0;
   pointer-events: none;
