@@ -1,5 +1,6 @@
 const MAX_COMPOSER_ATTACHMENTS = 3;
 const MAX_COMPOSER_ATTACHMENT_BYTES = 6 * 1024 * 1024;
+const DEFAULT_CODEX_MODEL = "gpt-5.5";
 
 const MODEL_OPTIONS = [
   { value: "", label: "桌面默认" },
@@ -89,9 +90,13 @@ export function installCore(app) {
   app.syncViewportMetrics = function syncViewportMetrics() {
     const viewport = window.visualViewport;
     const nextHeight = Math.round(viewport?.height || window.innerHeight || 0);
+    const layoutHeight = Math.round(window.innerHeight || nextHeight || 0);
+    const viewportOffsetTop = Math.max(0, Math.round(viewport?.offsetTop || 0));
+    const viewportBottomInset = Math.max(0, layoutHeight - (nextHeight + viewportOffsetTop));
     if (nextHeight > 0) {
       document.documentElement.style.setProperty("--app-height", `${nextHeight}px`);
     }
+    document.documentElement.style.setProperty("--viewport-bottom-inset", `${viewportBottomInset}px`);
     document.body.classList.toggle("mobile-ui", app.usesCompactTopbarMode());
     document.body.classList.toggle("desktop-ui", !app.usesCompactTopbarMode());
     if (elements.topbar) {
@@ -285,6 +290,20 @@ export function installCore(app) {
       profile: next.permissionMode || "",
       sandbox: next.permissionMode ? preset.sandbox : "",
       approvalPolicy: next.permissionMode ? preset.approvalPolicy : ""
+    };
+  };
+
+  app.runtimeChoiceWithFallback = function runtimeChoiceWithFallback(runtime = {}, fallback = state.runtimePreferences) {
+    const next = app.normalizeRuntimeChoice(runtime);
+    const base = app.normalizeRuntimeChoice(fallback);
+    const permissionMode = next.permissionMode || base.permissionMode;
+    const preset = app.permissionRuntimeForMode(permissionMode);
+    return {
+      permissionMode,
+      sandbox: permissionMode ? preset.sandbox : next.sandbox || base.sandbox,
+      approvalPolicy: permissionMode ? preset.approvalPolicy : next.approvalPolicy || base.approvalPolicy,
+      model: next.model || base.model,
+      reasoningEffort: next.reasoningEffort || base.reasoningEffort
     };
   };
 
@@ -625,7 +644,7 @@ function readStoredUser(localStorageRef) {
 function readStoredRuntimePreferences(localStorageRef) {
   return {
     permissionMode: localStorageRef.getItem("echoCodexPermissionMode") || "",
-    model: localStorageRef.getItem("echoCodexModel") || "",
+    model: localStorageRef.getItem("echoCodexModel") || DEFAULT_CODEX_MODEL,
     reasoningEffort: localStorageRef.getItem("echoCodexReasoningEffort") || ""
   };
 }

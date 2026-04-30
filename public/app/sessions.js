@@ -131,7 +131,10 @@ export function installSessions(app) {
     const job = data.session;
     state.selectedCodexSession = job;
     if (!(options.keepSelection && state.runtimeDirty)) {
-      app.applyRuntimeDraft(job.runtime || state.runtimePreferences, { persist: false, dirty: false });
+      app.applyRuntimeDraft(app.runtimeChoiceWithFallback(job.runtime, state.runtimePreferences), {
+        persist: false,
+        dirty: false
+      });
     }
     const errorText = app.humanizeCodexError(job.error || job.lastError);
     elements.codexJobDetail.hidden = false;
@@ -464,7 +467,7 @@ export function installSessions(app) {
 
   app.refreshActiveSessionHeader = function refreshActiveSessionHeader() {
     const session = state.composingNewSession ? null : state.selectedCodexSession;
-    const runtime = state.runtimeDirty ? app.currentRuntimeDraft() : session?.runtime || state.runtimePreferences;
+    const runtime = app.currentRuntimeDraft();
     const parts = [];
     const runtimeLabel = app.sessionRuntimeLabel(runtime);
     if (runtimeLabel) parts.push(runtimeLabel);
@@ -488,7 +491,7 @@ export function installSessions(app) {
       return;
     }
     const session = state.composingNewSession ? null : state.selectedCodexSession;
-    const runtime = state.runtimeDirty ? app.currentRuntimeDraft() : session?.runtime || state.runtimePreferences;
+    const runtime = app.currentRuntimeDraft();
     const runtimeLabel = app.sessionRuntimeLabel(runtime) || "桌面默认";
     if (session && !app.sessionCanAcceptFollowUp(session)) {
       elements.composerActionsMeta.textContent = `当前会话不可继续，请先从左上角新建会话 · ${runtimeLabel}`;

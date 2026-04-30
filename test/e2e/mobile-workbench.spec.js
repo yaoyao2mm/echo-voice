@@ -48,6 +48,16 @@ async function loginToWorkbench(page) {
   await expect(page.locator("#projectPickerLabel")).toContainText("echo");
 }
 
+async function reopenWorkbench(page) {
+  await page.goto("/");
+  if (await page.locator("#loginPanel").isVisible()) {
+    await page.locator("#loginUsername").fill(credentials.username);
+    await page.locator("#loginPassword").fill(credentials.password);
+    await page.locator("#loginButton").click();
+  }
+  await expect(page.locator("#codexView")).toBeVisible();
+}
+
 async function authHeadersForSessionRequests(request) {
   const response = await request.post("/api/auth/login", {
     data: credentials
@@ -85,6 +95,26 @@ test("mobile login, pairing, sidebar, and session creation", async ({ page, requ
     await expect(page.locator("#activeSessionMeta")).toContainText(/排队中|启动中|运行中/);
     await expect(page.locator("#codexRunSummary")).toContainText("E2E mobile workbench smoke test");
     await expect(page.locator("#sendCodexButton")).toBeDisabled();
+  } finally {
+    clearInterval(keepAlive);
+  }
+});
+
+test("mobile composer defaults to GPT-5.5 and remembers the last chosen model", async ({ page, request }) => {
+  await touchMockAgent(request);
+  const keepAlive = setInterval(() => {
+    touchMockAgent(request).catch(() => {});
+  }, 10000);
+
+  try {
+    await loginToWorkbench(page);
+    await expect(page.locator("#codexModel")).toHaveValue("gpt-5.5");
+
+    await page.locator("#codexModel").selectOption("gpt-5.4");
+    await expect(page.locator("#codexModel")).toHaveValue("gpt-5.4");
+
+    await reopenWorkbench(page);
+    await expect(page.locator("#codexModel")).toHaveValue("gpt-5.4");
   } finally {
     clearInterval(keepAlive);
   }
@@ -143,6 +173,60 @@ test("mobile composer sends text and screenshot in the same session message", as
     const attachmentResponse = await request.get(userMessage.attachments[0].downloadPath, { headers });
     expect(attachmentResponse.ok()).toBeTruthy();
     expect((await attachmentResponse.body()).length).toBeGreaterThan(0);
+  } finally {
+    clearInterval(keepAlive);
+  }
+});
+
+test("mobile composer stays pinned while the conversation surface scrolls", async ({ page, request }) => {
+  await touchMockAgent(request);
+  const keepAlive = setInterval(() => {
+    touchMockAgent(request).catch(() => {});
+  }, 10000);
+
+  try {
+    await loginToWorkbench(page);
+
+    const initialComposer = await page.locator(".composer").evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      return {
+        position: window.getComputedStyle(node).position,
+        top: rect.top,
+        bottomGap: window.innerHeight - rect.bottom
+      };
+    });
+
+    expect(initialComposer.position).toBe("fixed");
+    expect(initialComposer.bottomGap).toBeLessThanOrEqual(1);
+
+    await page.evaluate(() => {
+      const surface = document.querySelector("#codexJobDetail");
+      const thread = document.querySelector(".conversation-thread");
+      if (!surface || !thread) return;
+      const filler = document.createElement("div");
+      filler.setAttribute("data-test-filler", "true");
+      filler.style.height = "1600px";
+      thread.append(filler);
+      surface.scrollTop = surface.scrollHeight;
+    });
+
+    await expect
+      .poll(() => page.locator("#codexJobDetail").evaluate((node) => node.scrollTop))
+      .toBeGreaterThan(0);
+
+    const documentScrollTop = await page.evaluate(() => document.scrollingElement?.scrollTop || 0);
+    expect(documentScrollTop).toBe(0);
+
+    const scrolledComposer = await page.locator(".composer").evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      return {
+        top: rect.top,
+        bottomGap: window.innerHeight - rect.bottom
+      };
+    });
+
+    expect(Math.abs(scrolledComposer.top - initialComposer.top)).toBeLessThanOrEqual(2);
+    expect(scrolledComposer.bottomGap).toBeLessThanOrEqual(1);
   } finally {
     clearInterval(keepAlive);
   }

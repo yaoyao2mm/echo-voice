@@ -2,6 +2,7 @@
   color-scheme: light;
   --app-height: 100vh;
   --composer-height: 0px;
+  --viewport-bottom-inset: 0px;
   --page-gutter: 14px;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
