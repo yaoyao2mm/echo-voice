@@ -6,6 +6,8 @@ import { config } from "../config.js";
 
 const dbPath = path.join(config.dataDir, "echo.sqlite");
 const attachmentStorageDir = path.join(config.dataDir, "codex-attachments");
+const IMAGE_FALLBACK_MODEL = "gpt-5.4";
+const IMAGE_UNSUPPORTED_MODELS = new Set(["gpt-5.5"]);
 fs.mkdirSync(config.dataDir, { recursive: true });
 fs.mkdirSync(attachmentStorageDir, { recursive: true });
 
@@ -446,7 +448,7 @@ export function createSession({ projectId, prompt, attachments, runtime }) {
   const normalizedPrompt = String(prompt || "").trim();
   const normalizedProjectId = String(projectId || "").trim();
   const stagedAttachments = stageSessionAttachments({ sessionId, messageId, attachments, createdAt: now });
-  const normalizedRuntime = normalizeRuntime(runtime);
+  const normalizedRuntime = normalizeRuntime(runtimeForAttachments(runtime, stagedAttachments));
   if (!normalizedPrompt && stagedAttachments.length === 0) {
     cleanupStagedAttachments(stagedAttachments);
     return badRequest("Codex session prompt or screenshot is required.");
@@ -596,7 +598,7 @@ export function enqueueSessionMessage(sessionId, input = {}) {
   const messageId = crypto.randomUUID();
   const message = String(input.text || input.prompt || "").trim();
   const stagedAttachments = stageSessionAttachments({ sessionId, messageId, attachments: input.attachments, createdAt: now });
-  const runtime = normalizeRuntime(Object.keys(input.runtime || {}).length > 0 ? input.runtime : session.runtime);
+  const runtime = normalizeRuntime(runtimeForAttachments(Object.keys(input.runtime || {}).length > 0 ? input.runtime : session.runtime, stagedAttachments));
   if (!message && stagedAttachments.length === 0) {
     cleanupStagedAttachments(stagedAttachments);
     return badRequest("Codex message or screenshot is required.");
@@ -1640,6 +1642,16 @@ function normalizeRuntime(runtime = {}) {
         timeoutMs: Number(runtime.timeoutMs || 0) || null
       }
     : {};
+}
+
+function runtimeForAttachments(runtime = {}, attachments = []) {
+  if (!Array.isArray(attachments) || attachments.length === 0) return runtime;
+  const normalized = normalizeRuntime(runtime);
+  if (!IMAGE_UNSUPPORTED_MODELS.has(normalized.model)) return runtime;
+  return {
+    ...runtime,
+    model: IMAGE_FALLBACK_MODEL
+  };
 }
 
 function stageSessionAttachments({ sessionId, messageId, attachments = [], createdAt }) {

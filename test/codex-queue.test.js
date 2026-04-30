@@ -251,6 +251,27 @@ test("interactive Codex sessions can start from screenshots only", async () => {
   assert.equal(session.messages[0].attachments[0].name, "mobile.png");
 });
 
+test("interactive Codex image sessions fall back away from unsupported models", async () => {
+  store.resetStoreForTest();
+
+  const agent = {
+    id: "image-fallback-agent",
+    workspaces: [{ id: "demo", path: process.cwd() }]
+  };
+
+  const created = queue.createCodexSession({
+    projectId: "demo",
+    prompt: "看图说话",
+    attachments: [{ type: "image", url: "data:image/png;base64,AAAA", name: "vision.png", mimeType: "image/png", sizeBytes: 4 }],
+    runtime: { model: "gpt-5.5", sandbox: "danger-full-access", approvalPolicy: "never", reasoningEffort: "xhigh", profile: "full" }
+  });
+  assert.equal(created.runtime.model, "gpt-5.4");
+
+  const command = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  assert.equal(command.runtime.model, "gpt-5.4");
+  assert.equal(command.payload.attachments[0].type, "localImage");
+});
+
 test("interactive Codex sessions recover expired running leases instead of looking stuck forever", async () => {
   store.resetStoreForTest();
 

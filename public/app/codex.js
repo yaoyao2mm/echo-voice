@@ -169,7 +169,8 @@ export function installCodex(app) {
     const rawPrompt = elements.codexPrompt.value.trim();
     const attachments = app.currentComposerAttachmentsPayload();
     const projectId = elements.codexProject.value;
-    const runtime = app.currentRuntimeDraft();
+    const runtimeDraft = app.currentRuntimeDraft();
+    const runtime = app.runtimeForAttachments(runtimeDraft, attachments);
     if (!rawPrompt && attachments.length === 0) {
       app.toast("请先填写任务或附上截图");
       return;
@@ -180,6 +181,10 @@ export function installCodex(app) {
     }
 
     localStorage.setItem("echoCodexProject", projectId);
+    if (attachments.length > 0 && runtime.model !== runtimeDraft.model) {
+      app.applyRuntimeDraft(runtime, { persist: true, dirty: true });
+      app.toast(`当前模型不支持图片，已自动切换到 ${app.modelDisplayName(runtime.model)}`);
+    }
     app.setComposerBusy(true, "发送中");
     try {
       const data = await app.sendCodexPrompt({ projectId, prompt: rawPrompt, runtime, attachments });

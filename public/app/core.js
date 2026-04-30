@@ -1,5 +1,7 @@
 const MAX_COMPOSER_ATTACHMENTS = 3;
 const MAX_COMPOSER_ATTACHMENT_BYTES = 6 * 1024 * 1024;
+const IMAGE_FALLBACK_MODEL = "gpt-5.4";
+const IMAGE_UNSUPPORTED_MODELS = new Set(["gpt-5.5"]);
 
 const MODEL_OPTIONS = [
   { value: "", label: "桌面默认" },
@@ -42,6 +44,7 @@ export function createAppContext(windowRef = window, documentRef = document) {
     constants: {
       MAX_COMPOSER_ATTACHMENTS,
       MAX_COMPOSER_ATTACHMENT_BYTES,
+      IMAGE_FALLBACK_MODEL,
       MODEL_OPTIONS,
       REASONING_OPTIONS,
       PERMISSION_MODE_OPTIONS
@@ -485,6 +488,21 @@ export function installCore(app) {
   app.modelDisplayName = function modelDisplayName(value) {
     const normalized = String(value || "").trim();
     return modelOptions.find((option) => option.value === normalized)?.label || normalized;
+  };
+
+  app.modelSupportsImages = function modelSupportsImages(value) {
+    const normalized = String(value || "").trim();
+    return !IMAGE_UNSUPPORTED_MODELS.has(normalized);
+  };
+
+  app.runtimeForAttachments = function runtimeForAttachments(runtime = {}, attachments = []) {
+    if (!Array.isArray(attachments) || attachments.length === 0) return runtime;
+    const normalized = app.normalizeRuntimeChoice(runtime);
+    if (app.modelSupportsImages(normalized.model)) return runtime;
+    return {
+      ...runtime,
+      model: IMAGE_FALLBACK_MODEL
+    };
   };
 
   app.reasoningDisplayName = function reasoningDisplayName(value) {
