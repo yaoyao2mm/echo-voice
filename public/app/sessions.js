@@ -405,6 +405,9 @@ export function installSessions(app) {
       }
     }
 
+    app.appendOperationalTimelineEntries(timeline, job);
+    app.sortTimelineEntries(timeline);
+
     const draftAssistantText = app.activeAssistantDraft(job, timeline);
     if (draftAssistantText) {
       timeline.push({
@@ -435,6 +438,79 @@ export function installSessions(app) {
     return timeline;
   };
 
+  app.appendOperationalTimelineEntries = function appendOperationalTimelineEntries(timeline, job) {
+    const seenPlans = new Set(timeline.filter((entry) => entry.kind === "plan").map((entry) => entry.text));
+    const seenSystem = new Set();
+    const latestPlanByTurn = new Map();
+
+    for (const event of job.events || []) {
+      const plan = app.planEntryFromEvent(event);
+      if (plan?.text) latestPlanByTurn.set(plan.turnId || plan.text, plan);
+    }
+
+    for (const plan of latestPlanByTurn.values()) {
+      if (seenPlans.has(plan.text)) continue;
+      seenPlans.add(plan.text);
+      timeline.push({
+        kind: "plan",
+        text: plan.text,
+        at: plan.at
+      });
+    }
+
+    for (const event of job.events || []) {
+      const system = app.compactionEntryFromEvent(event);
+      if (!system?.text || seenSystem.has(system.text)) continue;
+      seenSystem.add(system.text);
+      timeline.push(system);
+    }
+  };
+
+  app.sortTimelineEntries = function sortTimelineEntries(timeline) {
+    timeline.sort((a, b) => {
+      const left = Date.parse(a.at || "");
+      const right = Date.parse(b.at || "");
+      if (!Number.isFinite(left) && !Number.isFinite(right)) return 0;
+      if (!Number.isFinite(left)) return 1;
+      if (!Number.isFinite(right)) return -1;
+      return left - right;
+    });
+  };
+
+  app.planEntryFromEvent = function planEntryFromEvent(event) {
+    const raw = event.raw || {};
+    const item = raw.params?.item;
+    if (event.type === "item/completed" && item?.type === "plan") {
+      return {
+        text: String(item.text || event.text || "").trim(),
+        turnId: String(raw.params?.turnId || raw.params?.turn?.id || item.id || "").trim(),
+        at: event.at || ""
+      };
+    }
+    if (event.type === "turn/plan/updated") {
+      return {
+        text: String(event.text || "").trim(),
+        turnId: String(raw.params?.turnId || raw.params?.turn?.id || "").trim(),
+        at: event.at || ""
+      };
+    }
+    return null;
+  };
+
+  app.compactionEntryFromEvent = function compactionEntryFromEvent(event) {
+    const itemType = event.raw?.params?.item?.type || "";
+    if (event.type === "context.compaction.queued") {
+      return { kind: "system", text: "上下文压缩已排队", at: event.at || "" };
+    }
+    if (event.type === "context.compaction.started") {
+      return { kind: "system", text: "上下文压缩中", at: event.at || "" };
+    }
+    if (itemType === "contextCompaction") {
+      return { kind: "system", text: "上下文已压缩", at: event.at || "" };
+    }
+    return null;
+  };
+
   app.renderConversationEntry = function renderConversationEntry(entry) {
     if (entry.kind === "error") {
       return `
@@ -450,6 +526,28 @@ export function installSessions(app) {
           <strong>${app.escapeHtml(entry.title)}</strong>
           <p>${app.escapeHtml(entry.body)}</p>
         </div>
+      `;
+    }
+
+    if (entry.kind === "system") {
+      return `
+        <div class="thread-status-row">
+          <span class="thread-status-pill">${app.escapeHtml(entry.text)}</span>
+        </div>
+      `;
+    }
+
+    if (entry.kind === "plan") {
+      return `
+        <article class="thread-message thread-message-system">
+          <div class="thread-plan-card">
+            <div class="thread-plan-card-head">
+              <span class="thread-status-pill">计划</span>
+              ${entry.at ? `<span class="thread-message-time">${app.escapeHtml(app.formatMessageTime(entry.at))}</span>` : ""}
+            </div>
+            <div class="thread-plan-card-body">${app.escapeHtml(entry.text)}</div>
+          </div>
+        </article>
       `;
     }
 

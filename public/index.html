@@ -15,8 +15,8 @@
         if (localStorage.getItem("echoTheme") === "dark") document.documentElement.dataset.theme = "dark";
       } catch {}
     </script>
-    <link rel="manifest" href="/manifest.webmanifest?v=66" />
-    <link rel="stylesheet" href="/styles.css?v=66" />
+    <link rel="manifest" href="/manifest.webmanifest?v=67" />
+    <link rel="stylesheet" href="/styles.css?v=67" />
   </head>
   <body>
     <main class="shell">
@@ -271,6 +271,25 @@
                       />
                     </svg>
                   </button>
+                  <button
+                    id="composerPlanModeButton"
+                    class="composer-status-action composer-mode-button"
+                    type="button"
+                    aria-label="计划模式"
+                    aria-pressed="false"
+                    title="计划模式"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path
+                        d="M8 6.5h10M8 12h10M8 17.5h10M4.8 6.5h.1M4.8 12h.1M4.8 17.5h.1"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                      />
+                    </svg>
+                  </button>
                   <span
                     id="contextUsageIndicator"
                     class="context-usage-ring"
@@ -281,6 +300,25 @@
                     aria-valuenow="0"
                     title="上下文使用 0%"
                   ></span>
+                  <button
+                    id="compactContextButton"
+                    class="composer-status-action"
+                    type="button"
+                    aria-label="压缩上下文"
+                    title="压缩上下文"
+                    disabled
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path
+                        d="M8 4v4H4M16 4v4h4M8 20v-4H4M16 20v-4h4M9 9l-5-5M15 9l5-5M9 15l-5 5M15 15l5 5"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="1.8"
+                      />
+                    </svg>
+                  </button>
                 </div>
                 <div class="composer-status-right">
                   <span id="composerStatusText" class="composer-status-text" aria-live="polite"></span>
@@ -314,6 +352,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=66" type="module"></script>
+    <script src="/app.js?v=67" type="module"></script>
   </body>
 </html>

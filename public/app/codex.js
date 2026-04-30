@@ -241,6 +241,7 @@ export function installCodex(app) {
     const projectId = elements.codexProject.value;
     const runtimeDraft = app.currentRuntimeDraft();
     const runtime = app.runtimeForAttachments(runtimeDraft, attachments);
+    const mode = state.composerPlanMode ? "plan" : "execute";
     if (!rawPrompt && attachments.length === 0) {
       app.toast("请先填写任务或附上截图");
       return;
@@ -257,7 +258,7 @@ export function installCodex(app) {
     }
     app.setComposerBusy(true, "发送中");
     try {
-      const data = await app.sendCodexPrompt({ projectId, prompt: rawPrompt, runtime, attachments });
+      const data = await app.sendCodexPrompt({ projectId, prompt: rawPrompt, runtime, attachments, mode });
       if (state.showArchivedSessions) {
         state.showArchivedSessions = false;
         elements.showActiveSessionsButton.classList.add("active");
@@ -313,7 +314,7 @@ export function installCodex(app) {
     app.setComposerBusy(true, "部署中");
     try {
       const runtime = app.currentRuntimeDraft();
-      const data = await app.sendCodexPrompt({ projectId, prompt: quickDeployPrompt, runtime, attachments: [] });
+      const data = await app.sendCodexPrompt({ projectId, prompt: quickDeployPrompt, runtime, attachments: [], mode: "execute" });
       state.selectedCodexJobId = data.session.id;
       state.selectedCodexSession = data.session;
       state.composingNewSession = false;
@@ -331,18 +332,19 @@ export function installCodex(app) {
     }
   };
 
-  app.sendCodexPrompt = async function sendCodexPrompt({ projectId, prompt, runtime, attachments }) {
+  app.sendCodexPrompt = async function sendCodexPrompt({ projectId, prompt, runtime, attachments, mode = "execute" }) {
     if (app.canContinueSelectedSession()) {
       return app.apiPost(`/api/codex/sessions/${encodeURIComponent(state.selectedCodexJobId)}/messages`, {
         text: prompt,
         runtime,
-        attachments
+        attachments,
+        mode
       });
     }
     if (!app.canStartNewSessionFromComposer()) {
       throw new Error("当前会话不能继续，请先从左上角新建会话。");
     }
-    return app.apiPost("/api/codex/sessions", { projectId, prompt, runtime, attachments });
+    return app.apiPost("/api/codex/sessions", { projectId, prompt, runtime, attachments, mode });
   };
 
   app.canContinueSelectedSession = function canContinueSelectedSession() {
@@ -358,6 +360,78 @@ export function installCodex(app) {
   app.canQuickDeploySelectedSession = function canQuickDeploySelectedSession() {
     const session = app.selectedSessionForComposer();
     return Boolean(session && app.sessionCanAcceptFollowUp(session) && !app.sessionHasPendingWork(session));
+  };
+
+  app.toggleComposerPlanMode = function toggleComposerPlanMode() {
+    app.setComposerPlanMode(!state.composerPlanMode);
+  };
+
+  app.setComposerPlanMode = function setComposerPlanMode(enabled) {
+    state.composerPlanMode = Boolean(enabled);
+    localStorage.setItem("echoComposerMode", state.composerPlanMode ? "plan" : "execute");
+    app.updateComposerModeControls();
+    app.updateComposerAvailability();
+  };
+
+  app.updateComposerModeControls = function updateComposerModeControls() {
+    if (!elements.composerPlanModeButton) return;
+    const enabled = Boolean(state.composerPlanMode);
+    elements.composerPlanModeButton.classList.toggle("active", enabled);
+    elements.composerPlanModeButton.setAttribute("aria-pressed", enabled ? "true" : "false");
+  };
+
+  app.requestContextCompaction = async function requestContextCompaction({ automatic = false } = {}) {
+    const session = app.selectedSessionForComposer();
+    if (!session || !app.canCompactSelectedSession(session)) {
+      if (!automatic) app.toast("当前会话暂时不能压缩");
+      return;
+    }
+
+    state.autoCompactedSessionIds.add(session.id);
+    if (!automatic) app.setComposerBusy(true, "压缩中");
+    try {
+      const data = await app.apiPost(`/api/codex/sessions/${encodeURIComponent(session.id)}/compact`, {
+        automatic,
+        reason: automatic ? "context-threshold" : "manual"
+      });
+      state.selectedCodexSession = data.session || session;
+      await app.loadCodexJobs();
+      await app.showCodexJob(session.id, { keepSelection: true, scrollToBottom: automatic });
+      if (!automatic) app.toast("已请求压缩上下文");
+    } catch (error) {
+      state.autoCompactedSessionIds.delete(session.id);
+      if (!app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。") && !automatic) {
+        app.toast(error.message);
+      }
+    } finally {
+      if (!automatic) app.setComposerBusy(false);
+    }
+  };
+
+  app.maybeAutoCompactContext = function maybeAutoCompactContext(_usage, percent) {
+    if (percent < 85) return;
+    const session = app.selectedSessionForComposer();
+    if (!session || state.autoCompactedSessionIds.has(session.id) || app.sessionHasCompactionEvent(session)) return;
+    if (elements.codexPrompt.value.trim() || state.composerAttachments.length > 0 || app.hasPendingComposerAttachments()) return;
+    if (!app.canCompactSelectedSession(session)) return;
+    app.requestContextCompaction({ automatic: true }).catch(() => {});
+  };
+
+  app.canCompactSelectedSession = function canCompactSelectedSession(session = app.selectedSessionForComposer()) {
+    return Boolean(
+      session &&
+        session.appThreadId &&
+        app.sessionCanAcceptFollowUp(session) &&
+        !app.sessionHasPendingWork(session) &&
+        Number(session.pendingApprovalCount || 0) === 0
+    );
+  };
+
+  app.sessionHasCompactionEvent = function sessionHasCompactionEvent(session) {
+    return (session?.events || []).some((event) => {
+      const itemType = event.raw?.params?.item?.type || "";
+      return String(event.type || "").includes("compaction") || itemType === "contextCompaction";
+    });
   };
 
   app.sessionCanAcceptFollowUp = function sessionCanAcceptFollowUp(session) {
@@ -389,6 +463,7 @@ export function installCodex(app) {
 
   app.composerActionLabel = function composerActionLabel() {
     if (app.selectedSessionNeedsExplicitNew()) return "先新建";
+    if (state.composerPlanMode) return "计划";
     if (!app.canContinueSelectedSession()) return "发送";
     return app.sessionHasPendingWork(state.selectedCodexSession) ? "继续排队" : "继续";
   };
@@ -556,6 +631,12 @@ export function installCodex(app) {
     elements.codexReasoningEffort.disabled = state.composerBusy;
     elements.codexPrompt.disabled = state.composerBusy;
     elements.composerAttachmentButton.disabled = state.composerBusy || attachmentsPending;
+    if (elements.composerPlanModeButton) {
+      elements.composerPlanModeButton.disabled = state.composerBusy;
+    }
+    if (elements.compactContextButton) {
+      elements.compactContextButton.disabled = state.composerBusy || attachmentsPending || hasDraft || !app.canCompactSelectedSession();
+    }
     app.updateProjectCreateControls();
     if (elements.quickDeployButton) {
       elements.quickDeployButton.disabled =
@@ -563,6 +644,7 @@ export function installCodex(app) {
     }
     app.refreshComposerMeta();
     app.refreshTopbarProjectChip();
+    app.updateComposerModeControls();
     app.syncComposerMetrics();
     app.refreshComposerStatusBar();
   };

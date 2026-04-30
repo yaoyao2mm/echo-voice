@@ -3,6 +3,7 @@ const MAX_COMPOSER_ATTACHMENT_BYTES = 6 * 1024 * 1024;
 const DEFAULT_CODEX_MODEL = "gpt-5.5";
 const DEFAULT_CONTEXT_TOKEN_LIMIT = 128000;
 const ATTACHMENT_CONTEXT_TOKEN_ESTIMATE = 1200;
+const AUTO_COMPACT_CONTEXT_PERCENT = 85;
 
 const MODEL_OPTIONS = [
   { value: "", label: "桌面默认" },
@@ -80,7 +81,9 @@ export function createAppContext(windowRef = window, documentRef = document) {
       renderedCodexSessionId: "",
       renderedCodexSessionSignature: "",
       composerAttachments: [],
-      composerAttachmentPendingCount: 0
+      composerAttachmentPendingCount: 0,
+      composerPlanMode: windowRef.localStorage.getItem("echoComposerMode") === "plan",
+      autoCompactedSessionIds: new Set()
     }
   };
 }
@@ -296,7 +299,7 @@ export function installCore(app) {
     const rawPercent = usage.limitTokens > 0 ? Math.round((usage.estimatedTokens / usage.limitTokens) * 100) : 0;
     const percent = Math.max(0, Math.min(100, rawPercent));
     const visiblePercent = usage.estimatedTokens > 0 ? Math.max(1, percent) : 0;
-    const stateName = percent >= 85 ? "full" : percent >= 65 ? "warn" : "normal";
+    const stateName = percent >= AUTO_COMPACT_CONTEXT_PERCENT ? "full" : percent >= 65 ? "warn" : "normal";
     const label = `上下文使用约 ${percent}% · 估算 ${usage.estimatedTokens.toLocaleString("zh-CN")} / ${usage.limitTokens.toLocaleString("zh-CN")} tokens`;
 
     indicator.style.setProperty("--context-used", `${visiblePercent}%`);
@@ -304,6 +307,7 @@ export function installCore(app) {
     indicator.title = label;
     indicator.setAttribute("aria-label", label);
     indicator.setAttribute("aria-valuenow", String(percent));
+    app.maybeAutoCompactContext?.(usage, percent);
   };
 
   app.estimateContextUsage = function estimateContextUsage() {
@@ -832,6 +836,8 @@ function queryElements(documentRef) {
     composerStatusText: documentRef.querySelector("#composerStatusText"),
     composerActionsMeta: documentRef.querySelector("#composerActionsMeta"),
     contextUsageIndicator: documentRef.querySelector("#contextUsageIndicator"),
+    compactContextButton: documentRef.querySelector("#compactContextButton"),
+    composerPlanModeButton: documentRef.querySelector("#composerPlanModeButton"),
     quickDeployButton: documentRef.querySelector("#quickDeployButton"),
     refreshCodex: documentRef.querySelector("#refreshCodex"),
     toggleSessionsButton: documentRef.querySelector("#toggleSessionsButton"),

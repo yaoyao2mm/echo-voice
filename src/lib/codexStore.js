@@ -469,13 +469,14 @@ export function completeJob(jobId, result = {}, options = {}) {
   return true;
 }
 
-export function createSession({ projectId, prompt, attachments, runtime }) {
+export function createSession({ projectId, prompt, attachments, runtime, mode }) {
   const now = nowIso();
   const sessionId = crypto.randomUUID();
   const commandId = crypto.randomUUID();
   const messageId = crypto.randomUUID();
   const normalizedPrompt = String(prompt || "").trim();
   const normalizedProjectId = String(projectId || "").trim();
+  const commandMode = normalizeSessionMode(mode);
   const stagedAttachments = stageSessionAttachments({ sessionId, messageId, attachments, createdAt: now });
   const normalizedRuntime = sanitizeSessionRuntimeForProject(runtime, normalizedProjectId);
   if (!normalizedPrompt && stagedAttachments.length === 0) {
@@ -503,7 +504,7 @@ export function createSession({ projectId, prompt, attachments, runtime }) {
       id: commandId,
       sessionId,
       type: "start",
-      payloadJson: JSON.stringify({ messageId }),
+      payloadJson: JSON.stringify({ messageId, mode: commandMode }),
       now
     });
 
@@ -526,7 +527,7 @@ export function createSession({ projectId, prompt, attachments, runtime }) {
       normalizeSessionEvent(sessionId, {
         type: "user.message",
         text: normalizedPrompt,
-        raw: { source: "mobile", commandId, type: "start", messageId, attachments: attachmentRefsFromRows(stagedAttachments) }
+        raw: { source: "mobile", commandId, type: "start", messageId, mode: commandMode, attachments: attachmentRefsFromRows(stagedAttachments) }
       }, now)
     );
   });
@@ -627,6 +628,7 @@ export function enqueueSessionMessage(sessionId, input = {}) {
   const commandId = crypto.randomUUID();
   const messageId = crypto.randomUUID();
   const message = String(input.text || input.prompt || "").trim();
+  const mode = normalizeSessionMode(input.mode);
   const stagedAttachments = stageSessionAttachments({ sessionId, messageId, attachments: input.attachments, createdAt: now });
   const runtime = sanitizeSessionRuntimeForProject(
     Object.keys(input.runtime || {}).length > 0 ? input.runtime : session.runtime,
@@ -642,7 +644,7 @@ export function enqueueSessionMessage(sessionId, input = {}) {
       id: commandId,
       sessionId,
       type: "message",
-      payloadJson: JSON.stringify({ messageId }),
+      payloadJson: JSON.stringify({ messageId, mode }),
       now
     });
 
@@ -674,7 +676,7 @@ export function enqueueSessionMessage(sessionId, input = {}) {
       normalizeSessionEvent(sessionId, {
         type: "user.message",
         text: message,
-        raw: { source: "mobile", commandId, type: "message", messageId, attachments: attachmentRefsFromRows(stagedAttachments) }
+        raw: { source: "mobile", commandId, type: "message", messageId, mode, attachments: attachmentRefsFromRows(stagedAttachments) }
       }, now)
     );
   });
@@ -685,6 +687,47 @@ export function enqueueSessionMessage(sessionId, input = {}) {
     cleanupStagedAttachments(stagedAttachments);
     throw error;
   }
+  return getSession(sessionId);
+}
+
+export function compactSession(sessionId, input = {}) {
+  refreshInteractiveSessionState();
+  const session = getSessionSummary(sessionId);
+  if (!session) return notFound("Codex session not found.");
+  if (session.archivedAt) return conflict("Restore this Codex session before compacting it.");
+  if (!session.appThreadId) return conflict("This Codex session has no app-server thread to compact yet.");
+  if (!sessionCanCompact(session)) return conflict("Wait for the current Codex turn to finish before compacting context.");
+
+  const now = nowIso();
+  const commandId = crypto.randomUUID();
+  const automatic = Boolean(input.automatic);
+  const reason = String(input.reason || "").trim().slice(0, 240);
+
+  const enqueue = db.transaction(() => {
+    insertSessionCommand.run({
+      id: commandId,
+      sessionId,
+      type: "compact",
+      payloadJson: JSON.stringify({ automatic, reason }),
+      now
+    });
+
+    db.prepare(`
+      UPDATE codex_sessions
+      SET updated_at = @now
+      WHERE id = @sessionId
+    `).run({ sessionId, now });
+
+    insertSessionEvent.run(
+      normalizeSessionEvent(sessionId, {
+        type: "context.compaction.queued",
+        text: automatic ? "Context compaction queued automatically." : "Context compaction requested from mobile.",
+        raw: { source: "mobile", commandId, type: "compact", automatic, reason }
+      }, now)
+    );
+  });
+
+  enqueue();
   return getSession(sessionId);
 }
 
@@ -1199,7 +1242,7 @@ function migrate() {
     CREATE TABLE IF NOT EXISTS codex_session_commands (
       id TEXT PRIMARY KEY,
       session_id TEXT NOT NULL REFERENCES codex_sessions(id) ON DELETE CASCADE,
-      type TEXT NOT NULL CHECK (type IN ('start', 'message', 'stop')),
+      type TEXT NOT NULL CHECK (type IN ('start', 'message', 'stop', 'compact')),
       payload_json TEXT NOT NULL DEFAULT '{}',
       status TEXT NOT NULL CHECK (status IN ('queued', 'leased', 'done', 'failed')),
       created_at TEXT NOT NULL,
@@ -1301,6 +1344,7 @@ function migrate() {
 
   ensureColumn("codex_sessions", "archived_at", "TEXT");
   ensureColumn("codex_sessions", "runtime_json", "TEXT NOT NULL DEFAULT '{}'");
+  ensureSessionCommandTypes();
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_codex_sessions_archived_updated
       ON codex_sessions(archived_at, updated_at);
@@ -1310,6 +1354,44 @@ function migrate() {
 function ensureColumn(table, column, definition) {
   const exists = db.prepare(`PRAGMA table_info(${table})`).all().some((info) => info.name === column);
   if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
+function ensureSessionCommandTypes() {
+  const schema = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'codex_session_commands'").get()?.sql || "";
+  if (schema.includes("'compact'")) return;
+
+  db.exec(`
+    PRAGMA foreign_keys = OFF;
+    BEGIN TRANSACTION;
+    ALTER TABLE codex_session_commands RENAME TO codex_session_commands_old;
+    CREATE TABLE codex_session_commands (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES codex_sessions(id) ON DELETE CASCADE,
+      type TEXT NOT NULL CHECK (type IN ('start', 'message', 'stop', 'compact')),
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL CHECK (status IN ('queued', 'leased', 'done', 'failed')),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      leased_by TEXT,
+      lease_expires_at TEXT,
+      error TEXT NOT NULL DEFAULT ''
+    );
+    INSERT INTO codex_session_commands (
+      id, session_id, type, payload_json, status, created_at, updated_at, leased_by, lease_expires_at, error
+    )
+    SELECT id, session_id, type, payload_json, status, created_at, updated_at, leased_by, lease_expires_at, error
+    FROM codex_session_commands_old;
+    DROP TABLE codex_session_commands_old;
+    COMMIT;
+    PRAGMA foreign_keys = ON;
+
+    CREATE INDEX IF NOT EXISTS idx_codex_session_commands_status_created
+      ON codex_session_commands(status, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_codex_session_commands_session
+      ON codex_session_commands(session_id, created_at);
+  `);
+  db.pragma("foreign_keys = ON");
 }
 
 function reclaimExpiredLeases() {
@@ -1694,12 +1776,14 @@ function buildAgentSessionCommand(command) {
   const parsed = summarizeSessionCommand(command);
   const messageId = String(parsed.payload?.messageId || "").trim();
   const message = messageId ? getSessionMessage(messageId) : null;
+  const mode = normalizeSessionMode(parsed.payload?.mode);
+  const agentText = message ? promptForSessionMode(message.text, mode) : "";
   const payload = {
     ...parsed.payload,
     ...(message
       ? parsed.type === "start"
-        ? { prompt: message.text, attachments: commandAttachmentsFromMessage(message) }
-        : { text: message.text, attachments: commandAttachmentsFromMessage(message) }
+        ? { prompt: agentText, displayText: message.text, attachments: commandAttachmentsFromMessage(message) }
+        : { text: agentText, displayText: message.text, attachments: commandAttachmentsFromMessage(message) }
       : {})
   };
   if (parsed.type === "message") {
@@ -1716,6 +1800,24 @@ function buildAgentSessionCommand(command) {
     payload,
     createdAt: parsed.createdAt
   };
+}
+
+function normalizeSessionMode(value) {
+  const mode = String(value || "").trim().toLowerCase();
+  return mode === "plan" ? "plan" : "execute";
+}
+
+function promptForSessionMode(text, mode) {
+  const normalized = String(text || "").trim();
+  if (mode !== "plan" || !normalized) return normalized;
+  return [
+    "请先进入计划模式，只分析并给出可执行计划。",
+    "不要修改文件，不要提交、推送、部署，也不要运行会改变仓库状态的命令。",
+    "如果需要验证，请只说明建议运行哪些检查，等待我确认后再执行。",
+    "",
+    "用户请求：",
+    normalized
+  ].join("\n");
 }
 
 function commandHistoryForSession(sessionId, currentMessageId) {
@@ -1856,6 +1958,11 @@ function canMutateSession(session, agentId) {
 function sessionCanRecoverFailure(session = {}) {
   const error = String(session.lastError || session.error || "");
   return /thread not found|requires a newer version of Codex|Please upgrade to the latest app or CLI/i.test(error);
+}
+
+function sessionCanCompact(session = {}) {
+  if (["queued", "starting", "running", "failed", "closed", "stale"].includes(session.status)) return false;
+  return Number(session.pendingCommandCount || 0) === 0 && Number(session.pendingApprovalCount || 0) === 0;
 }
 
 function canMutateRunningJob(job, agentId) {

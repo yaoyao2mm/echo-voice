@@ -98,6 +98,14 @@ rl.on("line", (line) => {
     send({ method: "item/agentMessage/delta", params: { threadId: message.params.threadId, turnId: turn.id, itemId: "msg_1", delta: "Fake interactive Codex finished: " } });
     send({ method: "item/completed", params: { threadId: message.params.threadId, turnId: turn.id, item: { type: "agentMessage", id: "msg_1", text: "Fake interactive Codex finished: " + text + " [images:" + imageCount + "]" } } });
     send({ method: "turn/completed", params: { threadId: message.params.threadId, turn: { ...turn, status: "completed", completedAt: 2 } } });
+    return;
+  }
+  if (message.method === "thread/compact/start") {
+    const turn = { id: "turn_compact", items: [], status: "inProgress", error: null, startedAt: 3, completedAt: null, durationMs: null };
+    send({ id: message.id, result: {} });
+    send({ method: "turn/started", params: { threadId: message.params.threadId, turn } });
+    send({ method: "item/completed", params: { threadId: message.params.threadId, turnId: turn.id, item: { type: "contextCompaction", id: "ctx_1" } } });
+    send({ method: "turn/completed", params: { threadId: message.params.threadId, turn: { ...turn, status: "completed", completedAt: 4 } } });
   }
 });
 `,
@@ -182,6 +190,19 @@ test("mobile relay flow runs an interactive Codex session end to end", async () 
     assert.equal(capture.localImageSizes[0] > 0, true);
     assert.equal(capture.localImagePaths[0].startsWith(path.join(workspacePath, ".echo-codex-attachments")), true);
     assert.equal(capture.localImagePaths[0].startsWith(path.join(tempHome, ".echo-voice", "codex-attachments")), false);
+
+    queue.compactCodexSession(created.id, { automatic: true, reason: "e2e-threshold" });
+    const compactCommand = await queue.waitForCodexSessionCommand({ waitMs: 2000, agent });
+    assert.equal(compactCommand.type, "compact");
+    assert.equal(compactCommand.appThreadId, "thr_mobile_e2e_1");
+    const compactResult = await runtime.handleCommand(compactCommand);
+    assert.equal(compactResult.ok, true);
+    assert.equal(queue.completeCodexSessionCommand(compactCommand.id, compactResult, { agentId: agent.id }), true);
+    const compacted = await waitForSessionState(() => {
+      const session = queue.getCodexSession(created.id);
+      return session?.events.some((event) => event.raw?.params?.item?.type === "contextCompaction") ? session : null;
+    });
+    assert.equal(compacted.status, "active");
   } finally {
     runtime.stop();
   }

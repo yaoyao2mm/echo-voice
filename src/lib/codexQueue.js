@@ -3,6 +3,7 @@ import {
   acquireNextSessionCommand,
   appendSessionEvents as appendStoredSessionEvents,
   archiveSession as archiveStoredSession,
+  compactSession as compactStoredSession,
   completeSessionCommand as completeStoredSessionCommand,
   completeWorkspaceCommand as completeStoredWorkspaceCommand,
   createSessionApproval as createStoredSessionApproval,
@@ -46,7 +47,7 @@ export function createCodexSession(input) {
     throw error;
   }
 
-  const session = createStoredSession({ projectId, prompt, attachments, runtime: input.runtime || {} });
+  const session = createStoredSession({ projectId, prompt, attachments, runtime: input.runtime || {}, mode: input.mode });
   events.emit("codex-session-command");
   return session;
 }
@@ -55,7 +56,8 @@ export function enqueueCodexSessionMessage(id, input = {}) {
   const session = enqueueStoredSessionMessage(id, {
     text: input.text || input.prompt || "",
     attachments: input.attachments,
-    runtime: input.runtime || {}
+    runtime: input.runtime || {},
+    mode: input.mode
   });
   events.emit("codex-session-command");
   return session;
@@ -117,6 +119,12 @@ export function completeCodexWorkspaceCommand(id, result = {}, options = {}) {
 
 export function archiveCodexSession(id, input = {}) {
   const session = archiveStoredSession(id, input);
+  if (session) events.emit("codex-session-command");
+  return session;
+}
+
+export function compactCodexSession(id, input = {}) {
+  const session = compactStoredSession(id, input);
   if (session) events.emit("codex-session-command");
   return session;
 }

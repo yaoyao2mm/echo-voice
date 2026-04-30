@@ -500,6 +500,82 @@ test("interactive Codex approvals wait for mobile decisions", async () => {
   assert.equal(detail.events.some((event) => event.type === "approval.approved"), true);
 });
 
+test("interactive Codex sessions can request app-server context compaction", async () => {
+  store.resetStoreForTest();
+
+  const agent = {
+    id: "compact-agent",
+    workspaces: [{ id: "demo", path: process.cwd() }]
+  };
+  const session = queue.createCodexSession({ projectId: "demo", prompt: "长对话先启动" });
+  const startCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  queue.appendCodexSessionEvents(session.id, [{ type: "thread.started", text: "started", appThreadId: "thr_compact" }], {
+    agentId: agent.id
+  });
+  queue.completeCodexSessionCommand(startCommand.id, { ok: true, appThreadId: "thr_compact", sessionStatus: "active" }, { agentId: agent.id });
+
+  const queued = queue.compactCodexSession(session.id, { automatic: true, reason: "test-threshold" });
+  assert.equal(queued.pendingCommandCount, 1);
+  assert.equal(queued.events.some((event) => event.type === "context.compaction.queued"), true);
+
+  const compactCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  assert.equal(compactCommand.type, "compact");
+  assert.equal(compactCommand.appThreadId, "thr_compact");
+  assert.equal(compactCommand.payload.automatic, true);
+  assert.equal(compactCommand.payload.reason, "test-threshold");
+  queue.completeCodexSessionCommand(compactCommand.id, { ok: true, appThreadId: "thr_compact", sessionStatus: "running" }, { agentId: agent.id });
+
+  const running = queue.getCodexSession(session.id);
+  assert.equal(running.status, "running");
+  assert.equal(running.leasedBy, agent.id);
+
+  queue.appendCodexSessionEvents(
+    session.id,
+    [
+      {
+        type: "item/completed",
+        text: "Context compaction completed.",
+        raw: { method: "item/completed", params: { threadId: "thr_compact", item: { type: "contextCompaction", id: "ctx_1" } } }
+      },
+      {
+        type: "turn/completed",
+        text: "Turn completed.",
+        raw: { method: "turn/completed", params: { threadId: "thr_compact", turn: { status: "completed" } } }
+      }
+    ],
+    { agentId: agent.id }
+  );
+
+  const compacted = queue.getCodexSession(session.id);
+  assert.equal(compacted.status, "active");
+  assert.equal(compacted.leasedBy, null);
+  assert.equal(compacted.events.some((event) => event.raw?.params?.item?.type === "contextCompaction"), true);
+});
+
+test("plan mode keeps the visible user message clean while sending plan instructions to Codex", async () => {
+  store.resetStoreForTest();
+
+  const agent = {
+    id: "plan-agent",
+    workspaces: [{ id: "demo", path: process.cwd() }]
+  };
+  const created = queue.createCodexSession({
+    projectId: "demo",
+    prompt: "分析一下怎么改这个功能",
+    mode: "plan"
+  });
+
+  const command = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  assert.equal(command.type, "start");
+  assert.equal(command.payload.mode, "plan");
+  assert.equal(command.payload.displayText, "分析一下怎么改这个功能");
+  assert.match(command.payload.prompt, /请先进入计划模式/);
+  assert.match(command.payload.prompt, /不要修改文件/);
+
+  const detail = queue.getCodexSession(created.id);
+  assert.equal(detail.messages[0].text, "分析一下怎么改这个功能");
+});
+
 test("mobile workspace commands create and advertise managed workspaces", async () => {
   store.resetStoreForTest();
 

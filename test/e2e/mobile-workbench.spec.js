@@ -120,7 +120,11 @@ async function loginToWorkbench(page) {
   await expect(page.locator("#contextUsageIndicator")).toBeVisible();
   await expect(page.locator("#contextUsageIndicator")).toHaveAttribute("role", "meter");
   await expect(page.locator("#quickDeployButton")).toBeVisible();
+  await expect(page.locator("#composerPlanModeButton")).toBeVisible();
+  await expect(page.locator("#compactContextButton")).toBeVisible();
   await expect(page.locator("#composerAttachmentButton")).toHaveCSS("width", "24px");
+  await expect(page.locator("#composerPlanModeButton")).toHaveCSS("width", "24px");
+  await expect(page.locator("#compactContextButton")).toHaveCSS("width", "24px");
   await expect(page.locator("#quickDeployButton")).toHaveCSS("width", "34px");
   await expect(page.locator("#contextUsageIndicator")).toHaveCSS("width", "16px");
   const topbarIconLayout = await page.evaluate(() => {
@@ -241,6 +245,77 @@ test("mobile composer defaults to GPT-5.5 and remembers the last chosen model", 
     await page.locator("#toggleSessionsButton").click();
     await page.locator("#newCodexSessionButton").click();
     await expect(page.locator("#codexModel")).toHaveValue("gpt-5.4");
+  } finally {
+    clearInterval(keepAlive);
+  }
+});
+
+test("mobile plan mode sends planning instructions without polluting the visible prompt", async ({ page, request }) => {
+  await touchMockAgent(request);
+  const keepAlive = setInterval(() => {
+    touchMockAgent(request).catch(() => {});
+  }, 10000);
+
+  try {
+    await loginToWorkbench(page);
+    await page.locator("#toggleSessionsButton").click();
+    await page.locator("#newCodexSessionButton").click();
+    await page.locator("#composerPlanModeButton").click();
+    await expect(page.locator("#composerPlanModeButton")).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator("#sendCodexButton")).toHaveText("计划");
+
+    const prompt = `先规划移动端功能 ${Date.now()}`;
+    await page.locator("#codexPrompt").fill(prompt);
+    await page.locator("#sendCodexButton").click();
+
+    const command = await leaseNextCodexCommand(request);
+    expect(command.type).toBe("start");
+    expect(command.payload.mode).toBe("plan");
+    expect(command.payload.displayText).toBe(prompt);
+    expect(command.payload.prompt).toContain("请先进入计划模式");
+    expect(command.payload.prompt).toContain("不要修改文件");
+
+    const appThreadId = `thr_${command.sessionId}`;
+    const eventsResponse = await request.post("/api/agent/codex/sessions/events", {
+      headers: {
+        "X-Echo-Token": pairingToken
+      },
+      data: {
+        id: command.sessionId,
+        agentId: "mobile-e2e-agent",
+        events: [
+          { type: "thread.started", text: "started", appThreadId, sessionStatus: "active" },
+          {
+            type: "item/completed",
+            text: "1. 先梳理入口\n2. 再实现验证",
+            raw: {
+              method: "item/completed",
+              params: {
+                threadId: appThreadId,
+                turnId: "turn_plan",
+                item: { type: "plan", id: "plan_1", text: "1. 先梳理入口\n2. 再实现验证" }
+              }
+            }
+          }
+        ]
+      }
+    });
+    expect(eventsResponse.ok()).toBeTruthy();
+    const completeResponse = await request.post("/api/agent/codex/sessions/commands/complete", {
+      headers: {
+        "X-Echo-Token": pairingToken
+      },
+      data: {
+        id: command.id,
+        agentId: "mobile-e2e-agent",
+        result: { ok: true, appThreadId, sessionStatus: "active" }
+      }
+    });
+    expect(completeResponse.ok()).toBeTruthy();
+
+    await expect(page.locator("#codexRunSummary")).toContainText(prompt);
+    await expect(page.locator("#codexRunSummary")).not.toContainText("请先进入计划模式");
+    await expect(page.locator(".thread-plan-card")).toContainText("先梳理入口");
   } finally {
     clearInterval(keepAlive);
   }

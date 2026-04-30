@@ -842,6 +842,31 @@
   color: var(--warn);
 }
 
+.thread-plan-card {
+  display: grid;
+  gap: 10px;
+  width: min(100%, 42rem);
+  border: 1px solid rgba(126, 106, 84, 0.13);
+  border-radius: 16px;
+  background: rgba(255, 252, 247, 0.78);
+  padding: 12px 13px;
+}
+
+.thread-plan-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.thread-plan-card-body {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.62;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .thread-welcome {
   display: grid;
   gap: 8px;

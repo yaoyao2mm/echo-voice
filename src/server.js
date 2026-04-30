@@ -19,6 +19,7 @@ import {
   appendCodexSessionEvents,
   archiveCodexSession,
   codexStatus,
+  compactCodexSession,
   completeCodexSessionCommand,
   completeCodexWorkspaceCommand,
   getCodexSessionAttachmentContent,
@@ -245,7 +246,8 @@ app.post("/api/codex/sessions", (req, res) => {
       projectId: req.body.projectId,
       prompt: req.body.prompt,
       attachments: req.body.attachments,
-      runtime: req.body.runtime || {}
+      runtime: req.body.runtime || {},
+      mode: req.body.mode
     });
     res.json({ session });
   } catch (error) {
@@ -288,7 +290,24 @@ app.post("/api/codex/sessions/:id/messages", (req, res) => {
     const session = enqueueCodexSessionMessage(req.params.id, {
       text: req.body.text || req.body.prompt,
       attachments: req.body.attachments,
-      runtime: req.body.runtime || {}
+      runtime: req.body.runtime || {},
+      mode: req.body.mode
+    });
+    res.json({ session });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.post("/api/codex/sessions/:id/compact", (req, res) => {
+  try {
+    if (config.mode !== "relay") {
+      return res.status(400).json({ error: "Codex interactive sessions are only available in relay mode." });
+    }
+
+    const session = compactCodexSession(req.params.id, {
+      automatic: req.body.automatic,
+      reason: req.body.reason
     });
     res.json({ session });
   } catch (error) {

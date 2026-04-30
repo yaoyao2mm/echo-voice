@@ -1,7 +1,7 @@
-import { installAuth } from "./auth.js?v=66";
-import { installCodex } from "./codex.js?v=66";
-import { createAppContext, installCore } from "./core.js?v=66";
-import { installSessions } from "./sessions.js?v=66";
+import { installAuth } from "./auth.js?v=67";
+import { installCodex } from "./codex.js?v=67";
+import { createAppContext, installCore } from "./core.js?v=67";
+import { installSessions } from "./sessions.js?v=67";
 
 export function createApp(windowRef = window, documentRef = document) {
   const app = createAppContext(windowRef, documentRef);
@@ -26,6 +26,8 @@ export function createApp(windowRef = window, documentRef = document) {
     elements.newCodexSessionButton.addEventListener("click", app.startNewCodexSession);
     elements.sendCodexButton.addEventListener("click", app.sendToCodex);
     elements.quickDeployButton?.addEventListener("click", app.sendQuickDeployPrompt);
+    elements.composerPlanModeButton?.addEventListener("click", app.toggleComposerPlanMode);
+    elements.compactContextButton?.addEventListener("click", () => app.requestContextCompaction({ automatic: false }));
     elements.toggleSessionsButton.addEventListener("click", app.toggleSessionSidebar);
     elements.sessionBackdrop.addEventListener("click", app.closeSessionSidebar);
     elements.projectSwitcherButton?.addEventListener("click", app.toggleProjectSwitcher);
@@ -67,6 +69,7 @@ export function createApp(windowRef = window, documentRef = document) {
     }
 
     app.renderComposerAttachments();
+    app.updateComposerModeControls?.();
     app.syncComposerInputHeight();
     app.updateSessionSidebarToggle(false);
 

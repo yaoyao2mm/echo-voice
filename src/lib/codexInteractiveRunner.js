@@ -3,6 +3,7 @@ import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { config } from "../config.js";
 import { CodexAppServerClient, buildUserInputs } from "./codexAppServerClient.js";
+import { publicWorkspaces } from "./codexRunner.js";
 import { codexCompatibleModel } from "./codexRuntime.js";
 import { httpFetch } from "./http.js";
 
@@ -28,6 +29,7 @@ export class CodexInteractiveRuntime {
     if (command.type === "start") return this.#startSession(command, workspace);
     if (command.type === "message") return this.#sendMessage(command, workspace);
     if (command.type === "stop") return this.#stopTurn(command);
+    if (command.type === "compact") return this.#compactThread(command, workspace);
     throw new Error(`Unsupported Codex session command: ${command.type}`);
   }
 
@@ -120,6 +122,22 @@ export class CodexInteractiveRuntime {
     return { ok: true, appThreadId, sessionStatus: "active" };
   }
 
+  async #compactThread(command, workspace) {
+    const runtime = this.#runtimeFor(command);
+    const thread = await this.#ensureThreadForCompaction(command, workspace, runtime);
+    await this.#emit(command.sessionId, [
+      {
+        type: "context.compaction.started",
+        text: "Codex context compaction started.",
+        appThreadId: thread.appThreadId,
+        sessionStatus: "running",
+        raw: { method: "thread/compact/start" }
+      }
+    ]);
+    await this.client.request("thread/compact/start", { threadId: thread.appThreadId }, 60000);
+    return { ok: true, appThreadId: thread.appThreadId, sessionStatus: "running" };
+  }
+
   async #startOrSteerTurn({ sessionId, threadId, text, attachments, workspace, runtime }) {
     const preparedAttachments = await this.#materializeAttachments({ sessionId, threadId, attachments, workspace });
     const input = buildUserInputs(text, preparedAttachments);
@@ -209,6 +227,38 @@ export class CodexInteractiveRuntime {
     throw new Error("Codex session has no app-server thread id yet.");
   }
 
+  async #ensureThreadForCompaction(command, workspace, runtime) {
+    const remembered = this.sessions.get(command.sessionId);
+    const appThreadId = command.appThreadId || remembered?.appThreadId || "";
+    if (!appThreadId) throw new Error("Codex session has no app-server thread id yet.");
+    if (!this.threadToSession.has(appThreadId)) {
+      try {
+        const resumeResult = await this.client.request(
+          "thread/resume",
+          {
+            threadId: appThreadId,
+            ...this.#resumeConfig(workspace, runtime)
+          },
+          120000
+        );
+        await this.#emit(command.sessionId, [
+          {
+            type: "thread.resumed",
+            text: `Interactive Codex thread resumed in ${workspace.path}.`,
+            appThreadId,
+            sessionStatus: "active",
+            raw: { method: "thread/resume", result: resumeResult }
+          }
+        ]);
+      } catch (error) {
+        if (!isThreadNotFoundError(error)) throw error;
+        throw new Error("Codex thread can no longer be compacted because the local app-server thread was not found.");
+      }
+    }
+    this.#rememberSession(command.sessionId, appThreadId, workspace.id, runtime);
+    return { appThreadId };
+  }
+
   async #startReplacementThread(command, workspace, runtime, reason) {
     if (command.appThreadId) {
       this.activeTurns.delete(command.appThreadId);
@@ -282,7 +332,7 @@ export class CodexInteractiveRuntime {
   }
 
   #workspaceFor(projectId) {
-    const workspace = config.codex.workspaces.find((item) => item.id === projectId);
+    const workspace = publicWorkspaces().find((item) => item.id === projectId);
     if (!workspace) {
       throw new Error(`Project is not allowed on this desktop agent: ${projectId}`);
     }
@@ -614,6 +664,7 @@ function notificationText(message) {
 function itemLabel(item = {}, fallbackStatus = "") {
   if (item.type === "agentMessage") return item.text || "";
   if (item.type === "plan") return item.text || "";
+  if (item.type === "contextCompaction") return "Context compaction completed.";
   if (item.type === "commandExecution") {
     const command = Array.isArray(item.command) ? item.command.join(" ") : item.command || "command";
     const output = item.aggregatedOutput ? `\n${item.aggregatedOutput}` : "";
