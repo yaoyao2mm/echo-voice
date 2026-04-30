@@ -1,5 +1,5 @@
 export function installSessions(app) {
-  const { elements, state } = app;
+  const { elements, state, window: windowRef } = app;
 
   app.loadCodexJobs = async function loadCodexJobs() {
     const data = await app.apiGet(`/api/codex/sessions?archived=${state.showArchivedSessions ? "true" : "false"}`);
@@ -116,8 +116,10 @@ export function installSessions(app) {
   };
 
   app.showCodexJob = async function showCodexJob(id, options = {}) {
-    const previousSessionId = state.selectedCodexJobId;
+    const previousSessionId = state.selectedCodexSession?.id || state.selectedCodexJobId;
     const switchingSession = Boolean(previousSessionId && previousSessionId !== id);
+    const shouldScrollToBottom = options.scrollToBottom !== false && (!state.selectedCodexSession || switchingSession || !options.keepSelection);
+    const scrollSnapshot = options.keepSelection ? app.conversationScrollSnapshot() : null;
     state.selectedCodexJobId = id;
     if (options.resetComposerAttachments || switchingSession) {
       app.clearComposerAttachments({ silent: true });
@@ -157,6 +159,58 @@ export function installSessions(app) {
     app.refreshActiveSessionHeader();
     app.updateComposerAvailability();
     app.resetTopbarScrollTracking({ forceVisible: true });
+    if (shouldScrollToBottom || app.wasConversationNearBottom(scrollSnapshot)) {
+      app.scrollConversationToBottom();
+    } else if (scrollSnapshot) {
+      app.restoreConversationScroll(scrollSnapshot);
+    }
+  };
+
+  app.conversationScrollTarget = function conversationScrollTarget() {
+    return app.usesCompactTopbarMode() ? elements.codexJobDetail : elements.codexRunSummary;
+  };
+
+  app.conversationScrollSnapshot = function conversationScrollSnapshot() {
+    const target = app.conversationScrollTarget();
+    if (!target) return null;
+    return {
+      scrollTop: target.scrollTop,
+      distanceToBottom: Math.max(0, target.scrollHeight - target.clientHeight - target.scrollTop)
+    };
+  };
+
+  app.wasConversationNearBottom = function wasConversationNearBottom(snapshot) {
+    return Boolean(snapshot) && snapshot.distanceToBottom <= 48;
+  };
+
+  app.restoreConversationScroll = function restoreConversationScroll(snapshot) {
+    const restore = () => {
+      const target = app.conversationScrollTarget();
+      if (!target) return;
+      target.scrollTop = snapshot.scrollTop;
+      app.resetTopbarScrollTracking({ forceVisible: true });
+    };
+
+    windowRef.requestAnimationFrame(() => {
+      restore();
+      windowRef.requestAnimationFrame(restore);
+    });
+  };
+
+  app.scrollConversationToBottom = function scrollConversationToBottom() {
+    const targets = [elements.codexRunSummary, elements.codexJobDetail].filter(Boolean);
+    const scroll = () => {
+      for (const target of targets) {
+        if (target.hidden) continue;
+        target.scrollTop = target.scrollHeight;
+      }
+      app.resetTopbarScrollTracking({ forceVisible: true });
+    };
+
+    windowRef.requestAnimationFrame(() => {
+      scroll();
+      windowRef.requestAnimationFrame(scroll);
+    });
   };
 
   app.renderEmptySessionDetail = function renderEmptySessionDetail({ title, body }) {

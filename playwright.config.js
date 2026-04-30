@@ -4,6 +4,7 @@ const port = 4011;
 const host = "127.0.0.1";
 const baseUrl = `http://${host}:${port}`;
 const workspacePath = process.cwd();
+const e2eHomePath = `${workspacePath}/.tmp/mobile-e2e-home-${Date.now()}`;
 
 export default defineConfig({
   testDir: "./test/e2e",
@@ -21,8 +22,8 @@ export default defineConfig({
   },
   webServer: {
     command:
-      `mkdir -p .tmp/mobile-e2e-home && ` +
-      `HOME="${workspacePath}/.tmp/mobile-e2e-home" ` +
+      `mkdir -p "${e2eHomePath}" && ` +
+      `HOME="${e2eHomePath}" ` +
       `ECHO_MODE=relay ` +
       `ECHO_HOST=${host} ` +
       `ECHO_PORT=${port} ` +

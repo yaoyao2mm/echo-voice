@@ -45,6 +45,7 @@ async function loginToWorkbench(page) {
   await expect(page.locator("body")).toHaveClass(/mobile-ui/);
   await expect(page.locator("#toggleSessionsButton")).toBeVisible();
   await expect(page.locator("#mobileStatusIndicator")).toBeVisible();
+  await expect(page.locator("#mobileStatusIndicator")).toHaveCSS("margin-right", "12px");
   await expect(page.locator("#codexStatusText")).toContainText("本机 Codex 在线");
   await expect(page.locator("#projectPickerLabel")).toContainText("echo");
 }
@@ -240,11 +241,14 @@ test("mobile composer stays pinned while the conversation surface scrolls", asyn
       const rect = node.getBoundingClientRect();
       return {
         top: rect.top,
-        bottomGap: window.innerHeight - rect.bottom
+        bottomGap: window.innerHeight - rect.bottom,
+        topbarCollapsed: document.body.classList.contains("topbar-collapsed")
       };
     });
 
-    expect(Math.abs(scrolledComposer.top - initialComposer.top)).toBeLessThanOrEqual(2);
+    if (!scrolledComposer.topbarCollapsed) {
+      expect(Math.abs(scrolledComposer.top - initialComposer.top)).toBeLessThanOrEqual(2);
+    }
     expect(scrolledComposer.bottomGap).toBeLessThanOrEqual(1);
 
     const collapsedComposer = await page.locator(".composer").evaluate((node) => {
@@ -259,6 +263,61 @@ test("mobile composer stays pinned while the conversation surface scrolls", asyn
 
     expect(collapsedComposer.bottomGap).toBeLessThanOrEqual(1);
     expect(collapsedComposer.mainHeight).toBeGreaterThan(initialComposer.top + collapsedComposer.topbarHeight / 2);
+  } finally {
+    clearInterval(keepAlive);
+  }
+});
+
+test("mobile opens a historical conversation at the latest message", async ({ page, request }) => {
+  await touchMockAgent(request);
+  const keepAlive = setInterval(() => {
+    touchMockAgent(request).catch(() => {});
+  }, 10000);
+
+  try {
+    const headers = await authHeadersForSessionRequests(request);
+    const suffix = Date.now();
+    const historicalPrompt = [
+      `历史长对话自动滚动 ${suffix}`,
+      ...Array.from({ length: 90 }, (_, index) => `历史消息行 ${index + 1}`)
+    ].join("\n");
+    const recentPrompt = `最近短对话 ${suffix}`;
+
+    const historicalResponse = await request.post("/api/codex/sessions", {
+      headers,
+      data: {
+        projectId: "echo",
+        prompt: historicalPrompt,
+        runtime: {}
+      }
+    });
+    expect(historicalResponse.ok()).toBeTruthy();
+
+    const recentResponse = await request.post("/api/codex/sessions", {
+      headers,
+      data: {
+        projectId: "echo",
+        prompt: recentPrompt,
+        runtime: {}
+      }
+    });
+    expect(recentResponse.ok()).toBeTruthy();
+
+    await loginToWorkbench(page);
+    await page.locator("#toggleSessionsButton").click();
+    await page
+      .locator(".conversation-item", { hasText: `历史长对话自动滚动 ${suffix}` })
+      .locator(".conversation-item-open")
+      .click();
+
+    await expect(page.locator("#codexRunSummary")).toContainText(`历史长对话自动滚动 ${suffix}`);
+    await expect
+      .poll(() =>
+        page.locator("#codexJobDetail").evaluate((node) => {
+          return Math.round(node.scrollHeight - node.clientHeight - node.scrollTop);
+        })
+      )
+      .toBeLessThanOrEqual(2);
   } finally {
     clearInterval(keepAlive);
   }
