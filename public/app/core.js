@@ -90,13 +90,9 @@ export function installCore(app) {
   app.syncViewportMetrics = function syncViewportMetrics() {
     const viewport = window.visualViewport;
     const nextHeight = Math.round(viewport?.height || window.innerHeight || 0);
-    const layoutHeight = Math.round(window.innerHeight || nextHeight || 0);
-    const viewportOffsetTop = Math.max(0, Math.round(viewport?.offsetTop || 0));
-    const viewportBottomInset = Math.max(0, layoutHeight - (nextHeight + viewportOffsetTop));
     if (nextHeight > 0) {
       document.documentElement.style.setProperty("--app-height", `${nextHeight}px`);
     }
-    document.documentElement.style.setProperty("--viewport-bottom-inset", `${viewportBottomInset}px`);
     document.body.classList.toggle("mobile-ui", app.usesCompactTopbarMode());
     document.body.classList.toggle("desktop-ui", !app.usesCompactTopbarMode());
     if (elements.topbar) {

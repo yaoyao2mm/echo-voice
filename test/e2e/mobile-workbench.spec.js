@@ -114,6 +114,8 @@ test("mobile composer defaults to GPT-5.5 and remembers the last chosen model", 
     await expect(page.locator("#codexModel")).toHaveValue("gpt-5.4");
 
     await reopenWorkbench(page);
+    await page.locator("#toggleSessionsButton").click();
+    await page.locator("#newCodexSessionButton").click();
     await expect(page.locator("#codexModel")).toHaveValue("gpt-5.4");
   } finally {
     clearInterval(keepAlive);
@@ -196,8 +198,9 @@ test("mobile composer stays pinned while the conversation surface scrolls", asyn
       };
     });
 
-    expect(initialComposer.position).toBe("fixed");
+    expect(initialComposer.position).toBe("relative");
     expect(initialComposer.bottomGap).toBeLessThanOrEqual(1);
+    await expect(page.locator("#codexJobDetail")).toHaveCSS("padding-bottom", "8px");
 
     await page.evaluate(() => {
       const surface = document.querySelector("#codexJobDetail");
