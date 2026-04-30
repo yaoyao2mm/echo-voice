@@ -136,6 +136,13 @@ button:disabled {
   min-width: 0;
 }
 
+.topbar-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .topbar-actions {
   display: flex;
   align-items: center;
@@ -151,6 +158,31 @@ h1 {
   font-size: 18px;
   line-height: 1.15;
   letter-spacing: 0;
+}
+
+.mobile-status-indicator {
+  display: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #aeb6c3;
+  box-shadow: 0 0 0 1px rgba(174, 182, 195, 0.18);
+  flex: 0 0 auto;
+}
+
+.mobile-status-indicator[data-state="online"] {
+  background: #2f7d4f;
+  box-shadow: 0 0 0 1px rgba(47, 125, 79, 0.16);
+}
+
+.mobile-status-indicator[data-state="busy"] {
+  background: #c56a2d;
+  box-shadow: 0 0 0 1px rgba(197, 106, 45, 0.16);
+}
+
+.mobile-status-indicator[data-state="error"] {
+  background: #b53c35;
+  box-shadow: 0 0 0 1px rgba(181, 60, 53, 0.16);
 }
 
 p {
@@ -3995,26 +4027,65 @@ body.topbar-collapsed .topbar {
   }
 
   body.mobile-ui .shell {
+    height: var(--app-height);
+    min-height: var(--app-height);
     padding-left: 0;
     padding-right: 0;
+    overflow: hidden;
+  }
+
+  body.mobile-ui {
+    min-height: var(--app-height);
+    overflow: hidden;
   }
 
   body.mobile-ui .topbar {
+    gap: 8px;
+    padding-top: calc(var(--safe-top) + 8px);
+    padding-bottom: 6px;
     padding-left: max(8px, var(--safe-left));
     padding-right: max(8px, var(--safe-right));
   }
 
   body.mobile-ui .topbar-actions {
-    flex: 0 0 auto;
-    flex-basis: auto;
-    max-width: none;
-    min-width: 0;
+    display: none;
   }
 
   body.mobile-ui .topbar-project-chip {
     min-width: 0;
+    min-height: 24px;
     padding-left: 0;
+    padding-right: 0;
     justify-content: flex-end;
+  }
+
+  body.mobile-ui .topbar-project-kicker,
+  body.mobile-ui .topbar-brand-copy p {
+    display: none;
+  }
+
+  body.mobile-ui .topbar-title-row {
+    gap: 6px;
+  }
+
+  body.mobile-ui .topbar-brand {
+    align-items: center;
+    gap: 8px;
+  }
+
+  body.mobile-ui .topbar-brand-copy {
+    display: flex;
+    align-items: center;
+    min-height: 28px;
+  }
+
+  body.mobile-ui .topbar-brand-copy h1 {
+    font-size: 17px;
+    line-height: 1;
+  }
+
+  body.mobile-ui .mobile-status-indicator {
+    display: inline-flex;
   }
 
   body.mobile-ui .codex-section,
@@ -4082,12 +4153,11 @@ body.topbar-collapsed .topbar {
   }
 
   body.mobile-ui .composer {
-    position: relative;
-    left: auto;
-    right: auto;
-    bottom: auto;
+    position: sticky;
+    bottom: 0;
     width: 100%;
     margin: 0;
+    z-index: 24;
   }
 
   body.mobile-ui .composer-statusbar,

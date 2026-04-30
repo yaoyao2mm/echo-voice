@@ -35,6 +35,7 @@ if (tokenFromUrl) {
 const elements = {
   topbar: document.querySelector(".topbar"),
   statusText: document.querySelector("#statusText"),
+  mobileStatusIndicator: document.querySelector("#mobileStatusIndicator"),
   userBadge: document.querySelector("#userBadge"),
   logoutButton: document.querySelector("#logoutButton"),
   openPairingButton: document.querySelector("#openPairingButton"),
@@ -214,18 +215,25 @@ function updateAuthView(message = "") {
   refreshTopbarProjectChip();
 
   if (!loggedIn) {
-    elements.statusText.textContent = "等待登录";
+    setTopbarStatus("等待登录", "idle");
     elements.loginStatus.textContent = message || "请输入账号后继续。";
+    queueViewportSync();
     return;
   }
 
   if (!paired) {
-    elements.statusText.textContent = "等待配对";
+    setTopbarStatus("等待配对", "idle");
     elements.pairingStatus.textContent = message || "如果你是直接打开这个网页，请先扫桌面端显示的二维码。";
+    queueViewportSync();
     return;
   }
 
-  if (message) elements.statusText.textContent = message;
+  if (message) {
+    setTopbarStatus(message, "info");
+  } else {
+    setTopbarStatus("连接中", "info");
+  }
+  queueViewportSync();
 }
 
 async function loadAuthConfig() {
@@ -366,6 +374,12 @@ function syncViewportMetrics() {
   syncComposerMetrics();
 }
 
+function queueViewportSync() {
+  window.requestAnimationFrame(() => {
+    syncViewportMetrics();
+  });
+}
+
 function bindTopbarScrollState() {
   resetTopbarScrollTracking({ forceVisible: true });
   elements.codexScrollSurface?.addEventListener(
@@ -479,6 +493,18 @@ function refreshComposerStatusBar() {
   }
   elements.composerStatusText.textContent = status;
   elements.composerStatusText.classList.toggle("is-empty", !status);
+}
+
+function setTopbarStatus(label, state = "idle") {
+  const text = String(label || "");
+  if (elements.statusText) {
+    elements.statusText.textContent = text;
+  }
+  if (elements.mobileStatusIndicator) {
+    elements.mobileStatusIndicator.dataset.state = state;
+    elements.mobileStatusIndicator.title = text;
+    elements.mobileStatusIndicator.setAttribute("aria-label", text);
+  }
 }
 
 function initRuntimeControls() {
@@ -661,7 +687,7 @@ async function refreshStatus(options = {}) {
   try {
     const status = await apiGet("/api/status");
     const codexOnline = status.codex?.agentOnline;
-    elements.statusText.textContent = codexOnline ? "Codex 在线" : status.mode === "relay" ? "等待桌面 agent" : status.platform;
+    setTopbarStatus(codexOnline ? "Codex 在线" : status.mode === "relay" ? "等待桌面 agent" : status.platform, codexOnline ? "online" : "idle");
     if (status.user) setCurrentUser(status.user, { updateView: false });
     renderUserCenter();
     if (status.codex) renderCodexStatus(status.codex);
@@ -671,7 +697,7 @@ async function refreshStatus(options = {}) {
         elements.pairingStatus.textContent = "当前浏览器没有有效配对，请扫描桌面端二维码。";
       }
     } else {
-      elements.statusText.textContent = "连接失败";
+      setTopbarStatus("连接失败", "error");
       toast(error.message);
     }
   }
@@ -1146,7 +1172,7 @@ function currentComposerAttachmentsPayload() {
 
 function setComposerBusy(isBusy, label = "") {
   composerBusy = isBusy;
-  if (label) elements.statusText.textContent = label;
+  if (label) setTopbarStatus(label, isBusy ? "busy" : "info");
   elements.sendCodexButton.textContent = isBusy ? label || "处理中" : composerActionLabel();
   updateComposerAvailability();
   syncComposerMetrics();
