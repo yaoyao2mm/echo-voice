@@ -243,6 +243,14 @@ test("mobile composer stays pinned while the conversation surface scrolls", asyn
     expect(initialComposer.position).toBe("relative");
     expect(initialComposer.bottomGap).toBeLessThanOrEqual(1);
     await expect(page.locator("#codexJobDetail")).toHaveCSS("padding-bottom", "8px");
+    await expect
+      .poll(() =>
+        page.locator(".composer-toolbar").evaluate((node) => {
+          const rect = node.getBoundingClientRect();
+          return Math.round(window.innerWidth - rect.right);
+        })
+      )
+      .toBeLessThanOrEqual(1);
 
     await page.evaluate(() => {
       const surface = document.querySelector("#codexJobDetail");

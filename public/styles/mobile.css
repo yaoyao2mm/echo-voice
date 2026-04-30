@@ -132,8 +132,8 @@
   .composer-dock {
     background: rgba(246, 241, 233, 0.82);
     padding-bottom: max(6px, var(--safe-bottom));
-    padding-left: var(--mobile-chat-rail);
-    padding-right: var(--mobile-chat-rail);
+    padding-left: 0;
+    padding-right: 0;
   }
 
   .conversation-thread {
@@ -709,13 +709,14 @@
 
   body.mobile-ui .composer-statusbar,
   body.mobile-ui .composer-attachment-tray,
-  body.mobile-ui .composer-editor,
-  body.mobile-ui .composer-dock {
+  body.mobile-ui .composer-editor {
     padding-left: var(--mobile-chat-rail);
     padding-right: var(--mobile-chat-rail);
   }
 
   body.mobile-ui .composer-dock {
+    padding-left: 0;
+    padding-right: 0;
     padding-bottom: max(5px, var(--safe-bottom));
   }
 }
