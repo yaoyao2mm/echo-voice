@@ -1,5 +1,16 @@
 export function installCodex(app) {
   const { constants, elements, state } = app;
+  const quickDeployPrompt = [
+    "请把当前对话中已经完成的代码改动做最终验证、提交、推送并等待部署完成。",
+    "",
+    "要求：",
+    "- 先检查 git status，只提交与本次对话需求相关的文件，不要提交未跟踪的本地预览或附件文件。",
+    "- 运行必要检查，至少包含 JS 检查、相关移动端 e2e 和单元测试。",
+    "- 提交到当前分支并推送到 origin/main。",
+    "- 等待 Deploy Relay 部署成功，并确认远端服务更新到新提交且 active (running)。",
+    "- 如果没有可提交改动，不要空提交，直接说明当前状态。",
+    "- 最后简短汇报测试、commit、部署链接和服务状态。"
+  ].join("\n");
 
   app.hasPendingComposerAttachments = function hasPendingComposerAttachments() {
     return Number(state.composerAttachmentPendingCount || 0) > 0;
@@ -222,6 +233,55 @@ export function installCodex(app) {
     }
   };
 
+  app.sendQuickDeployPrompt = async function sendQuickDeployPrompt() {
+    if (!app.ensurePaired()) return;
+    if (app.hasPendingComposerAttachments()) {
+      app.toast("图片还在处理中，请稍候再部署");
+      return;
+    }
+    if (elements.codexPrompt.value.trim() || state.composerAttachments.length > 0) {
+      app.toast("请先发送或清空输入框内容");
+      return;
+    }
+
+    const projectId = elements.codexProject.value;
+    const session = app.selectedSessionForComposer();
+    if (!projectId) {
+      app.toast("桌面 agent 还没有公布项目");
+      return;
+    }
+    if (!session) {
+      app.toast("先打开要部署的对话");
+      return;
+    }
+    if (!app.canQuickDeploySelectedSession()) {
+      app.toast("当前会话暂时不能部署");
+      return;
+    }
+
+    localStorage.setItem("echoCodexProject", projectId);
+    app.setComposerBusy(true, "部署中");
+    try {
+      const runtime = app.currentRuntimeDraft();
+      const data = await app.sendCodexPrompt({ projectId, prompt: quickDeployPrompt, runtime, attachments: [] });
+      state.selectedCodexJobId = data.session.id;
+      state.selectedCodexSession = data.session;
+      state.composingNewSession = false;
+      state.runtimeDirty = false;
+      app.applyRuntimeDraft(state.selectedCodexSession.runtime || runtime, { persist: false, dirty: false });
+      await app.loadCodexJobs();
+      await app.showCodexJob(data.session.id);
+      app.toast("已发送部署指令");
+      await app.refreshStatus({ silentAuthFailure: true });
+    } catch (error) {
+      if (!app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
+        app.toast(error.message);
+      }
+    } finally {
+      app.setComposerBusy(false);
+    }
+  };
+
   app.sendCodexPrompt = async function sendCodexPrompt({ projectId, prompt, runtime, attachments }) {
     if (app.canContinueSelectedSession()) {
       return app.apiPost(`/api/codex/sessions/${encodeURIComponent(state.selectedCodexJobId)}/messages`, {
@@ -244,6 +304,11 @@ export function installCodex(app) {
     if (state.composingNewSession) return null;
     if (!state.selectedCodexJobId || !state.selectedCodexSession) return null;
     return state.selectedCodexSession;
+  };
+
+  app.canQuickDeploySelectedSession = function canQuickDeploySelectedSession() {
+    const session = app.selectedSessionForComposer();
+    return Boolean(session && app.sessionCanAcceptFollowUp(session) && !app.sessionHasPendingWork(session));
   };
 
   app.sessionCanAcceptFollowUp = function sessionCanAcceptFollowUp(session) {
@@ -442,6 +507,10 @@ export function installCodex(app) {
     elements.codexReasoningEffort.disabled = state.composerBusy;
     elements.codexPrompt.disabled = state.composerBusy;
     elements.composerAttachmentButton.disabled = state.composerBusy || attachmentsPending;
+    if (elements.quickDeployButton) {
+      elements.quickDeployButton.disabled =
+        state.composerBusy || attachmentsPending || !hasProject || hasDraft || !app.canQuickDeploySelectedSession();
+    }
     app.refreshComposerMeta();
     app.refreshTopbarProjectChip();
     app.syncComposerMetrics();

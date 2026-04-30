@@ -168,6 +168,16 @@ body.topbar-collapsed .topbar {
   color: var(--ink);
 }
 
+.composer-status-action-deploy:not(:disabled) {
+  color: #7c806c;
+}
+
+.composer-status-action:not(:disabled):hover,
+.composer-status-action:not(:disabled):focus-visible {
+  background: rgba(126, 106, 84, 0.08);
+  color: var(--ink);
+}
+
 .composer-status-action:disabled {
   opacity: 0.4;
 }

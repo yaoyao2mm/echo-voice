@@ -801,6 +801,7 @@ function queryElements(documentRef) {
     composerStatusText: documentRef.querySelector("#composerStatusText"),
     composerActionsMeta: documentRef.querySelector("#composerActionsMeta"),
     contextUsageIndicator: documentRef.querySelector("#contextUsageIndicator"),
+    quickDeployButton: documentRef.querySelector("#quickDeployButton"),
     refreshCodex: documentRef.querySelector("#refreshCodex"),
     toggleSessionsButton: documentRef.querySelector("#toggleSessionsButton"),
     sessionBackdrop: documentRef.querySelector("#sessionBackdrop"),

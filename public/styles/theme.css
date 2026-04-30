@@ -232,6 +232,10 @@
   background: rgba(14, 18, 24, 0.92);
 }
 
+:root[data-theme="dark"] .composer-status-action-deploy:not(:disabled) {
+  color: #aab792;
+}
+
 :root[data-theme="dark"] .context-usage-ring {
   background:
     radial-gradient(circle at center, rgba(17, 21, 27, 0.98) 0 45%, transparent 47%),

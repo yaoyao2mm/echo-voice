@@ -33,6 +33,63 @@ async function touchMockAgent(request, runtimeOverrides = {}) {
   expect(response.ok()).toBeTruthy();
 }
 
+async function leaseNextCodexCommand(request) {
+  const response = await request.post("/api/agent/codex/sessions/next?wait=1000", {
+    headers: {
+      "X-Echo-Token": pairingToken
+    },
+    data: {
+      wait: 1000,
+      agentId: "mobile-e2e-agent",
+      workspaces: [
+        {
+          id: "echo",
+          label: "echo",
+          path: process.cwd()
+        }
+      ],
+      runtime: {
+        sandbox: "workspace-write",
+        approvalPolicy: "on-request",
+        model: "gpt-5.4-mini",
+        reasoningEffort: "medium"
+      }
+    }
+  });
+  expect(response.ok()).toBeTruthy();
+  const data = await response.json();
+  expect(data.command).toBeTruthy();
+  return data.command;
+}
+
+async function activateCodexSession(request, sessionId) {
+  const command = await leaseNextCodexCommand(request);
+  expect(command.sessionId).toBe(sessionId);
+  const appThreadId = `thr_${sessionId}`;
+  const eventsResponse = await request.post("/api/agent/codex/sessions/events", {
+    headers: {
+      "X-Echo-Token": pairingToken
+    },
+    data: {
+      id: sessionId,
+      agentId: "mobile-e2e-agent",
+      events: [{ type: "thread.started", text: "started", appThreadId, sessionStatus: "active" }]
+    }
+  });
+  expect(eventsResponse.ok()).toBeTruthy();
+  const completeResponse = await request.post("/api/agent/codex/sessions/commands/complete", {
+    headers: {
+      "X-Echo-Token": pairingToken
+    },
+    data: {
+      id: command.id,
+      agentId: "mobile-e2e-agent",
+      result: { ok: true, appThreadId, sessionStatus: "active" }
+    }
+  });
+  expect(completeResponse.ok()).toBeTruthy();
+}
+
 async function loginToWorkbench(page) {
   await page.goto(`/?token=${pairingToken}`);
 
@@ -48,6 +105,7 @@ async function loginToWorkbench(page) {
   await expect(page.locator("#mobileStatusIndicator")).toHaveCSS("margin-right", "12px");
   await expect(page.locator("#contextUsageIndicator")).toBeVisible();
   await expect(page.locator("#contextUsageIndicator")).toHaveAttribute("role", "meter");
+  await expect(page.locator("#quickDeployButton")).toBeVisible();
   await expect(page.locator(".composer-status-scope")).toHaveCount(0);
   await expect(page.locator("#codexStatusText")).toContainText("本机 Codex 在线");
   await expect(page.locator("#projectPickerLabel")).toContainText("echo");
@@ -335,6 +393,58 @@ test("mobile sidebar toggles and persists dark mode", async ({ page, request }) 
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await expect(page.locator("body")).toHaveClass(/theme-dark/);
     await expect(page.locator("#themeModeToggle")).toBeChecked();
+  } finally {
+    clearInterval(keepAlive);
+  }
+});
+
+test("mobile quick deploy sends the fixed deployment prompt", async ({ page, request }) => {
+  await touchMockAgent(request);
+  const headers = await authHeadersForSessionRequests(request);
+  const suffix = Date.now();
+  const prompt = `一键部署当前对话 ${suffix}`;
+
+  const createResponse = await request.post("/api/codex/sessions", {
+    headers,
+    data: {
+      projectId: "echo",
+      prompt,
+      runtime: {}
+    }
+  });
+  expect(createResponse.ok()).toBeTruthy();
+  const created = await createResponse.json();
+  await activateCodexSession(request, created.session.id);
+
+  const keepAlive = setInterval(() => {
+    touchMockAgent(request).catch(() => {});
+  }, 10000);
+
+  try {
+    await loginToWorkbench(page);
+    await page.locator("#toggleSessionsButton").click();
+    await page.locator(".conversation-item", { hasText: prompt }).locator(".conversation-item-open").click();
+
+    await expect(page.locator("#quickDeployButton")).toBeEnabled();
+    await page.locator("#codexPrompt").fill("还没发送的草稿");
+    await expect(page.locator("#quickDeployButton")).toBeDisabled();
+    await page.locator("#codexPrompt").fill("");
+    await expect(page.locator("#quickDeployButton")).toBeEnabled();
+
+    await page.locator("#quickDeployButton").click();
+
+    await expect(page.locator(".toast")).toContainText("已发送部署指令");
+    await expect(page.locator("#codexRunSummary")).toContainText("请把当前对话中已经完成的代码改动做最终验证、提交、推送并等待部署完成。");
+    await expect(page.locator("#quickDeployButton")).toBeDisabled();
+
+    const sessionResponse = await request.get(`/api/codex/sessions/${created.session.id}`, { headers });
+    expect(sessionResponse.ok()).toBeTruthy();
+    const sessionData = await sessionResponse.json();
+    expect(
+      sessionData.session.messages.some(
+        (message) => message.role === "user" && String(message.text || "").includes("等待 Deploy Relay 部署成功")
+      )
+    ).toBeTruthy();
   } finally {
     clearInterval(keepAlive);
   }

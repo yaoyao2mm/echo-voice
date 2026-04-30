@@ -1,7 +1,7 @@
-import { installAuth } from "./auth.js?v=59";
-import { installCodex } from "./codex.js?v=59";
-import { createAppContext, installCore } from "./core.js?v=59";
-import { installSessions } from "./sessions.js?v=59";
+import { installAuth } from "./auth.js?v=60";
+import { installCodex } from "./codex.js?v=60";
+import { createAppContext, installCore } from "./core.js?v=60";
+import { installSessions } from "./sessions.js?v=60";
 
 export function createApp(windowRef = window, documentRef = document) {
   const app = createAppContext(windowRef, documentRef);
@@ -25,6 +25,7 @@ export function createApp(windowRef = window, documentRef = document) {
     elements.refreshCodex?.addEventListener("click", app.refreshCodex);
     elements.newCodexSessionButton.addEventListener("click", app.startNewCodexSession);
     elements.sendCodexButton.addEventListener("click", app.sendToCodex);
+    elements.quickDeployButton?.addEventListener("click", app.sendQuickDeployPrompt);
     elements.toggleSessionsButton.addEventListener("click", app.toggleSessionSidebar);
     elements.sessionBackdrop.addEventListener("click", app.closeSessionSidebar);
     elements.showActiveSessionsButton.addEventListener("click", () => app.setSessionArchiveView(false));
