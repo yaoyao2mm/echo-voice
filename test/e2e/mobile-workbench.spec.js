@@ -246,6 +246,19 @@ test("mobile composer stays pinned while the conversation surface scrolls", asyn
 
     expect(Math.abs(scrolledComposer.top - initialComposer.top)).toBeLessThanOrEqual(2);
     expect(scrolledComposer.bottomGap).toBeLessThanOrEqual(1);
+
+    const collapsedComposer = await page.locator(".composer").evaluate((node) => {
+      document.body.classList.add("topbar-collapsed");
+      const rect = node.getBoundingClientRect();
+      return {
+        bottomGap: window.innerHeight - rect.bottom,
+        mainHeight: document.querySelector(".codex-main")?.getBoundingClientRect().height || 0,
+        topbarHeight: document.querySelector(".topbar")?.getBoundingClientRect().height || 0
+      };
+    });
+
+    expect(collapsedComposer.bottomGap).toBeLessThanOrEqual(1);
+    expect(collapsedComposer.mainHeight).toBeGreaterThan(initialComposer.top + collapsedComposer.topbarHeight / 2);
   } finally {
     clearInterval(keepAlive);
   }

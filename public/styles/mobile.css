@@ -1,8 +1,16 @@
 /* v29 mobile single-scroll frame */
 
 @media (max-width: 760px) {
+  body.mobile-ui {
+    --mobile-frame-top: var(--topbar-height, 72px);
+  }
+
+  body.mobile-ui.topbar-collapsed {
+    --mobile-frame-top: calc(var(--safe-top) + 8px);
+  }
+
   .shell {
-    padding: calc(var(--topbar-height, 72px) + 8px) 0 0;
+    padding: calc(var(--mobile-frame-top, var(--topbar-height, 72px)) + 8px) 0 0;
     padding-bottom: 0;
     transition: padding-top 240ms ease;
   }
@@ -33,7 +41,7 @@
   }
 
   .codex-section {
-    min-height: calc(var(--app-height) - var(--topbar-height, 72px));
+    min-height: calc(var(--app-height) - var(--mobile-frame-top, var(--topbar-height, 72px)));
     align-items: stretch;
   }
 
@@ -44,7 +52,7 @@
   .codex-main {
     --mobile-chat-rail: clamp(8px, 2.8vw, 12px);
     grid-template-rows: minmax(0, 1fr) auto;
-    height: calc(var(--app-height) - var(--topbar-height, 72px));
+    height: calc(var(--app-height) - var(--mobile-frame-top, var(--topbar-height, 72px)));
     min-height: 0;
     overflow: hidden;
     gap: 0;
@@ -621,7 +629,7 @@
   }
 
   body.mobile-ui .codex-section {
-    min-height: calc(var(--app-height) - var(--topbar-height, 72px));
+    min-height: calc(var(--app-height) - var(--mobile-frame-top, var(--topbar-height, 72px)));
     overflow: hidden;
   }
 
@@ -629,7 +637,7 @@
     --mobile-chat-rail: clamp(10px, 3vw, 14px);
     display: grid;
     grid-template-rows: minmax(0, 1fr) auto;
-    height: calc(var(--app-height) - var(--topbar-height, 72px));
+    height: calc(var(--app-height) - var(--mobile-frame-top, var(--topbar-height, 72px)));
     min-height: 0;
     overflow: hidden;
   }
