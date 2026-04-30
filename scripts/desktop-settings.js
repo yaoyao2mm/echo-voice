@@ -147,6 +147,21 @@ app.post("/api/desktop/restart", async (req, res) => {
   }
 });
 
+app.post("/api/desktop/update", async (req, res) => {
+  try {
+    const result = await runCommand("bash", ["scripts/desktop-update.sh"], 10 * 60 * 1000);
+    const ok = result.code === 0;
+    res.json({
+      ok,
+      restartRequired: ok,
+      ...result
+    });
+    if (ok) notifyDesktopShellUpdate();
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
 app.get("/api/pairing", async (req, res) => {
   try {
     const env = await readEnv();
@@ -803,6 +818,13 @@ function shellQuote(value) {
 function openBrowser(url) {
   if (process.platform !== "darwin") return;
   execFile("open", [url], () => {});
+}
+
+function notifyDesktopShellUpdate() {
+  console.log("ECHO_DESKTOP_UPDATE_READY");
+  if (process.env.ELECTRON_RUN_AS_NODE === "1") {
+    setTimeout(() => process.exit(0), 500);
+  }
 }
 
 function trimTrailingSlash(value) {

@@ -8,6 +8,7 @@ const rootDir = resolveRootDir();
 const settingsScript = path.join(rootDir, "scripts", "desktop-settings.js");
 const desktopAgentScript = path.join(rootDir, "src", "desktop-agent.js");
 const macAgentScript = path.join(rootDir, "scripts", "macos-desktop-agent.sh");
+const desktopUpdateScript = path.join(rootDir, "scripts", "desktop-update.sh");
 const logsDir = path.join(os.homedir(), "Library", "Logs", "EchoVoice");
 const desktopAppLog = path.join(logsDir, "desktop-app.log");
 const appAgentOutLog = path.join(logsDir, "desktop-agent-app.out.log");
@@ -24,6 +25,9 @@ let stdoutBuffer = "";
 let stderrBuffer = "";
 let tray = null;
 let isQuitting = false;
+let settingsRestartRequested = false;
+let settingsUpdateReady = false;
+let desktopUpdateProcess = null;
 
 app.setName("Echo Codex");
 logApp(`starting root=${rootDir}`);
@@ -93,6 +97,9 @@ function logApp(message) {
 }
 
 function startSettingsServer() {
+  stdoutBuffer = "";
+  stderrBuffer = "";
+  settingsUrl = "";
   logApp(`starting settings service ${settingsScript}`);
   settingsProcess = spawn(process.execPath, [settingsScript], {
     cwd: rootDir,
@@ -107,6 +114,10 @@ function startSettingsServer() {
 
   settingsProcess.stdout.on("data", (chunk) => {
     stdoutBuffer += chunk.toString();
+    if (stdoutBuffer.includes("ECHO_DESKTOP_UPDATE_READY")) {
+      settingsUpdateReady = true;
+      logApp("settings service reported desktop update ready");
+    }
     const url = stdoutBuffer.match(/https?:\/\/127\.0\.0\.1:\d+\/\?key=[a-f0-9]+/i)?.[0];
     if (url && !settingsUrl) {
       settingsUrl = url;
@@ -121,6 +132,18 @@ function startSettingsServer() {
 
   settingsProcess.on("exit", (code) => {
     logApp(`settings service exited code=${code ?? "unknown"}`);
+    const shouldRestart = !isQuitting && (settingsRestartRequested || Boolean(settingsUrl));
+    const shouldRestartAgent = settingsUpdateReady;
+    settingsProcess = null;
+    settingsRestartRequested = false;
+    settingsUpdateReady = false;
+
+    if (shouldRestart) {
+      startSettingsServer();
+      if (shouldRestartAgent) restartAgentAfterUpdate();
+      return;
+    }
+
     if (!settingsUrl) {
       dialog.showErrorBox(
         "Echo Codex could not start",
@@ -137,8 +160,20 @@ function stopSettingsServer() {
   settingsProcess = null;
 }
 
+function requestSettingsRestart() {
+  settingsRestartRequested = true;
+  if (settingsProcess && !settingsProcess.killed) {
+    settingsProcess.kill("SIGTERM");
+    return;
+  }
+  startSettingsServer();
+}
+
 function openSettingsWindow(url) {
   if (mainWindow) {
+    if (url && mainWindow.webContents.getURL() !== url) {
+      mainWindow.loadURL(url);
+    }
     mainWindow.show();
     mainWindow.focus();
     return;
@@ -217,6 +252,11 @@ function buildTrayMenu() {
     {
       label: "Restart App Agent",
       click: () => restartAppAgent()
+    },
+    {
+      label: "Update Desktop App",
+      enabled: !desktopUpdateProcess,
+      click: () => runDesktopUpdate()
     },
     {
       label: "Switch From LaunchAgent To App Agent",
@@ -333,6 +373,14 @@ function restartAppAgent() {
   setTimeout(() => startAppAgent({ userInitiated: true }), 500);
 }
 
+function restartAgentAfterUpdate() {
+  if (appAgentProcess || appAgentWanted) {
+    restartAppAgent();
+    return;
+  }
+  if (launchAgentDetected) runAgentCommand("restart");
+}
+
 function switchToAppAgent() {
   execFile("bash", [macAgentScript, "stop"], { cwd: rootDir, timeout: 30000 }, (error, stdout, stderr) => {
     if (error) {
@@ -425,6 +473,57 @@ function runAgentCommand(command) {
   });
 }
 
+function runDesktopUpdate() {
+  if (desktopUpdateProcess) {
+    dialog.showMessageBox({
+      type: "info",
+      title: "Echo update already running",
+      message: "Echo update already running"
+    });
+    return;
+  }
+
+  const env = buildDesktopEnv(process.env);
+  desktopUpdateProcess = execFile("bash", [desktopUpdateScript], { cwd: rootDir, env, timeout: 10 * 60 * 1000 }, (error, stdout, stderr) => {
+    desktopUpdateProcess = null;
+    refreshTray();
+    const ok = !error;
+    const detail = `${stdout || ""}${stderr || error?.message || ""}`.trim() || (ok ? "Updated." : "Update failed.");
+
+    if (!ok) {
+      dialog.showMessageBox({
+        type: "error",
+        title: "Echo update failed",
+        message: "Echo update failed",
+        detail: detail.slice(-4000)
+      });
+      return;
+    }
+
+    logApp("desktop update completed from app menu");
+    requestSettingsRestart();
+    restartAgentAfterUpdate();
+    dialog
+      .showMessageBox({
+        type: "info",
+        title: "Echo update finished",
+        message: "Echo update finished",
+        detail: `${detail.slice(-3200)}\n\nReopen Echo Codex to load any desktop shell changes.`,
+        buttons: ["Relaunch Echo Codex", "Later"],
+        defaultId: 0,
+        cancelId: 1
+      })
+      .then((result) => {
+        if (result.response === 0) {
+          app.relaunch();
+          app.exit(0);
+        }
+      });
+  });
+
+  refreshTray();
+}
+
 function createTrayIcon() {
   const svg = [
     '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">',
@@ -468,6 +567,11 @@ function createMenu() {
         {
           label: "Restart App Agent",
           click: () => restartAppAgent()
+        },
+        {
+          label: "Update Desktop App",
+          enabled: !desktopUpdateProcess,
+          click: () => runDesktopUpdate()
         },
         {
           label: "Switch From LaunchAgent To App Agent",

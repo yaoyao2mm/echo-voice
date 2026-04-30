@@ -108,6 +108,8 @@ The native window also installs a menu bar item. Closing the settings window hid
 
 The Overview tab checks the relay config, app-managed or launchd agent, Codex App, and allowlisted workspaces.
 
+Use "更新桌面端" in the settings window, or "Update Desktop App" from the menu bar item, to fast-forward this local checkout to `origin/main`, install dependencies, rebuild the local app bundle when present, and restart the local settings/agent processes. The updater refuses to run when tracked local files have uncommitted changes.
+
 The Codex tab has an engineering directory manager. Use "发现工程" to scan common local project folders, or "浏览目录" to pick a folder manually. After saving and restarting the desktop agent, those project names appear in the phone UI as the selectable Codex working directories.
 
 The Overview tab also shows a pairing QR code. Scan it from the phone to open the mobile UI with the pairing token already attached, so the phone page no longer needs a manually pasted token.

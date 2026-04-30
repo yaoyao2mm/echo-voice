@@ -39,6 +39,7 @@ function bindEvents() {
 
   document.querySelector("#networkTest").addEventListener("click", () => runAction("/api/test/network", "Testing network..."));
   document.querySelector("#restartAgent").addEventListener("click", () => runAction("/api/desktop/restart", "Restarting desktop agent..."));
+  document.querySelector("#desktopUpdate").addEventListener("click", () => runAction("/api/desktop/update", "Updating desktop app..."));
   document.querySelector("#reloadState").addEventListener("click", loadState);
   document.querySelector("#refreshHealth").addEventListener("click", loadHealth);
   document.querySelector("#refreshPairingQr").addEventListener("click", loadPairing);
@@ -302,6 +303,7 @@ function formatState(state) {
 function formatCommandResult(result) {
   const lines = [];
   lines.push(result.ok ? "OK" : `Failed (${result.code})`);
+  if (result.restartRequired) lines.push("Desktop services are restarting with the updated code.");
   if (result.stdout) lines.push("", result.stdout);
   if (result.stderr) lines.push("", result.stderr);
   return lines.join("\n").trim();
