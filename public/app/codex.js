@@ -120,6 +120,42 @@ export function installCodex(app) {
     }
   };
 
+  app.openProjectSwitcher = function openProjectSwitcher() {
+    if (!elements.projectSwitcherPanel) return;
+    app.setTopbarCollapsed(false);
+    elements.projectSwitcherPanel.hidden = false;
+    elements.projectSwitcherButton?.setAttribute("aria-expanded", "true");
+    app.renderProjectSheetList();
+    app.updateProjectCreateControls();
+  };
+
+  app.closeProjectSwitcher = function closeProjectSwitcher({ restoreFocus = false } = {}) {
+    if (!elements.projectSwitcherPanel || elements.projectSwitcherPanel.hidden) return;
+    elements.projectSwitcherPanel.hidden = true;
+    elements.projectSwitcherButton?.setAttribute("aria-expanded", "false");
+    if (!state.projectCreateBusy && elements.projectCreateForm) {
+      elements.projectCreateForm.hidden = true;
+      if (elements.projectSheetStatus) elements.projectSheetStatus.textContent = "";
+    }
+    if (restoreFocus) elements.projectSwitcherButton?.focus({ preventScroll: true });
+  };
+
+  app.toggleProjectSwitcher = function toggleProjectSwitcher(event) {
+    event?.stopPropagation();
+    if (!elements.projectSwitcherPanel) return;
+    if (elements.projectSwitcherPanel.hidden) {
+      app.openProjectSwitcher();
+      return;
+    }
+    app.closeProjectSwitcher({ restoreFocus: true });
+  };
+
+  app.handleDocumentClick = function handleDocumentClick(event) {
+    if (!elements.projectSwitcher || elements.projectSwitcherPanel?.hidden) return;
+    if (elements.projectSwitcher.contains(event.target)) return;
+    app.closeProjectSwitcher();
+  };
+
   app.toggleSessionSidebar = function toggleSessionSidebar() {
     if (elements.codexView.classList.contains("sessions-open")) {
       app.closeSessionSidebar();
@@ -538,6 +574,7 @@ export function installCodex(app) {
       app.toast(state.codexAgentOnline ? "工程正在创建中" : "桌面 agent 在线后才能新建工程");
       return;
     }
+    app.openProjectSwitcher();
     elements.projectCreateForm.hidden = !elements.projectCreateForm.hidden;
     if (!elements.projectCreateForm.hidden) {
       elements.projectSheetStatus.textContent = "会在桌面默认工程目录下创建，并自动加入工程列表。";
@@ -573,6 +610,7 @@ export function installCodex(app) {
       app.selectProject(workspace.id);
       elements.projectSheetStatus.textContent = `已创建 ${app.workspaceLabel(workspace)}`;
       app.toast(`已新建并切换到 ${app.workspaceLabel(workspace)}`);
+      app.closeProjectSwitcher();
     } catch (error) {
       if (!app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
         elements.projectSheetStatus.textContent = error.message;
@@ -624,11 +662,11 @@ export function installCodex(app) {
     app.updateProjectCreateControls();
 
     if (!hasProjects) {
-      elements.projectPickerLabel.textContent = agentOnline ? "还没有授权工程目录" : "等待桌面 agent";
+      elements.projectPickerLabel.textContent = agentOnline ? "还没有工程" : "等待桌面 agent";
       elements.projectPickerMeta.textContent = agentOnline
-        ? "去桌面端 Codex 设置添加允许的项目。"
+        ? "可以新建工程，或去桌面端添加允许的项目。"
         : "桌面端启动后会同步可切换项目。";
-      elements.composerProjectLabel.textContent = elements.projectPickerLabel.textContent;
+      elements.composerProjectLabel.textContent = agentOnline ? "无工程" : "等待";
       elements.projectSheetStatus.textContent = "";
       app.renderProjectSheetList();
       app.refreshActiveSessionHeader();
@@ -637,11 +675,12 @@ export function installCodex(app) {
     }
 
     if (selectedWorkspace) {
-      elements.projectPickerLabel.textContent = app.workspaceLabel(selectedWorkspace);
-      elements.projectPickerMeta.textContent = app.workspaceMeta(selectedWorkspace);
-      elements.composerProjectLabel.textContent = app.workspaceLabel(selectedWorkspace);
+      const directoryName = app.workspaceDirectoryName(selectedWorkspace);
+      elements.projectPickerLabel.textContent = directoryName;
+      elements.projectPickerMeta.textContent = app.workspaceLabel(selectedWorkspace);
+      elements.composerProjectLabel.textContent = directoryName;
     } else {
-      elements.projectPickerLabel.textContent = "选择项目";
+      elements.projectPickerLabel.textContent = "选择工程";
       elements.projectPickerMeta.textContent = `已同步 ${state.codexWorkspaces.length} 个项目。`;
       elements.composerProjectLabel.textContent = elements.projectPickerLabel.textContent;
     }
@@ -662,22 +701,23 @@ export function installCodex(app) {
     for (const workspace of state.codexWorkspaces) {
       const button = document.createElement("button");
       const isActive = workspace.id === elements.codexProject.value;
-      const secondaryLabel = app.workspaceSecondaryLabel(workspace);
+      const directoryName = app.workspaceDirectoryName(workspace);
+      const secondaryLabel = workspace.label && workspace.label !== directoryName ? workspace.label : app.workspaceSecondaryLabel(workspace);
       const pathLabel = app.workspacePathLabel(workspace) || app.workspaceMeta(workspace);
       button.type = "button";
       button.className = "project-option";
       button.dataset.projectId = workspace.id || "";
+      button.title = pathLabel;
       button.setAttribute("role", "option");
       button.setAttribute("aria-selected", isActive ? "true" : "false");
       button.classList.toggle("active", isActive);
       button.innerHTML = `
         <div class="project-option-main">
           <div class="project-option-title-row">
-            <strong>${app.escapeHtml(app.workspaceLabel(workspace))}</strong>
+            <strong>${app.escapeHtml(directoryName)}</strong>
             ${isActive ? '<span class="project-option-badge">当前</span>' : ""}
           </div>
           ${secondaryLabel ? `<span class="project-option-id">${app.escapeHtml(secondaryLabel)}</span>` : ""}
-          <span class="project-option-path">${app.escapeHtml(pathLabel)}</span>
         </div>
       `;
       button.addEventListener("click", () => app.selectProject(workspace.id));
@@ -687,6 +727,11 @@ export function installCodex(app) {
 
   app.handleGlobalKeydown = function handleGlobalKeydown(event) {
     if (event.key !== "Escape") return;
+    if (elements.projectSwitcherPanel && !elements.projectSwitcherPanel.hidden) {
+      event.preventDefault();
+      app.closeProjectSwitcher({ restoreFocus: true });
+      return;
+    }
     if (elements.codexView.classList.contains("sessions-open")) {
       event.preventDefault();
       app.closeSessionSidebar();
@@ -703,14 +748,16 @@ export function installCodex(app) {
     if (previous && previous !== projectId) {
       app.toast(`已切换到 ${app.workspaceLabel(state.codexWorkspaces.find((workspace) => workspace.id === projectId) || { id: projectId })}`);
     }
+    app.closeProjectSwitcher();
   };
 
   app.syncProjectPicker = function syncProjectPicker() {
     const workspace = state.codexWorkspaces.find((item) => item.id === elements.codexProject.value);
     if (workspace) {
-      elements.projectPickerLabel.textContent = app.workspaceLabel(workspace);
-      elements.projectPickerMeta.textContent = app.workspaceMeta(workspace);
-      elements.composerProjectLabel.textContent = app.workspaceLabel(workspace);
+      const directoryName = app.workspaceDirectoryName(workspace);
+      elements.projectPickerLabel.textContent = directoryName;
+      elements.projectPickerMeta.textContent = app.workspaceLabel(workspace);
+      elements.composerProjectLabel.textContent = directoryName;
     } else {
       elements.composerProjectLabel.textContent = elements.projectPickerLabel.textContent;
     }

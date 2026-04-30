@@ -1,7 +1,7 @@
-import { installAuth } from "./auth.js?v=63";
-import { installCodex } from "./codex.js?v=63";
-import { createAppContext, installCore } from "./core.js?v=63";
-import { installSessions } from "./sessions.js?v=63";
+import { installAuth } from "./auth.js?v=65";
+import { installCodex } from "./codex.js?v=65";
+import { createAppContext, installCore } from "./core.js?v=65";
+import { installSessions } from "./sessions.js?v=65";
 
 export function createApp(windowRef = window, documentRef = document) {
   const app = createAppContext(windowRef, documentRef);
@@ -28,6 +28,7 @@ export function createApp(windowRef = window, documentRef = document) {
     elements.quickDeployButton?.addEventListener("click", app.sendQuickDeployPrompt);
     elements.toggleSessionsButton.addEventListener("click", app.toggleSessionSidebar);
     elements.sessionBackdrop.addEventListener("click", app.closeSessionSidebar);
+    elements.projectSwitcherButton?.addEventListener("click", app.toggleProjectSwitcher);
     elements.newProjectButton?.addEventListener("click", app.toggleProjectCreateForm);
     elements.projectCreateForm?.addEventListener("submit", app.createProjectFromMobile);
     elements.showActiveSessionsButton.addEventListener("click", () => app.setSessionArchiveView(false));
@@ -51,6 +52,7 @@ export function createApp(windowRef = window, documentRef = document) {
     elements.composerAttachmentInput.addEventListener("change", app.handleComposerAttachmentInput);
     elements.codexPrompt.addEventListener("paste", app.handleComposerPaste);
     document.addEventListener("keydown", app.handleGlobalKeydown);
+    document.addEventListener("click", app.handleDocumentClick);
   };
 
   app.init = async function init() {

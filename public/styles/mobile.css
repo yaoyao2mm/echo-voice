@@ -602,16 +602,25 @@
     padding-right: max(8px, var(--safe-right));
   }
 
-  body.mobile-ui .topbar-actions {
-    display: none;
+  body.mobile-ui .topbar-project-switcher {
+    flex: 0 1 104px;
+    min-width: 78px;
+    max-width: 104px;
   }
 
   body.mobile-ui .topbar-project-chip {
     min-width: 0;
-    min-height: 24px;
-    padding-left: 0;
-    padding-right: 0;
-    justify-content: flex-end;
+    min-height: 30px;
+    justify-content: center;
+  }
+
+  body.mobile-ui .project-switcher-panel {
+    position: fixed;
+    top: calc(var(--safe-top) + 48px);
+    left: max(8px, var(--safe-left));
+    right: max(8px, var(--safe-right));
+    width: auto;
+    max-height: min(430px, calc(var(--app-height) - var(--safe-top) - 64px));
   }
 
   body.mobile-ui .topbar-project-kicker,

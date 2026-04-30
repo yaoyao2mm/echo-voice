@@ -261,7 +261,7 @@ test("mobile composer disables models unsupported by the desktop Codex", async (
   }
 });
 
-test("mobile sidebar creates and switches to a new project", async ({ page, request }) => {
+test("mobile topbar project switcher creates and switches to a new project", async ({ page, request }) => {
   await touchMockAgent(request);
   const keepAlive = setInterval(() => {
     touchMockAgent(request).catch(() => {});
@@ -269,7 +269,8 @@ test("mobile sidebar creates and switches to a new project", async ({ page, requ
 
   try {
     await loginToWorkbench(page);
-    await page.locator("#toggleSessionsButton").click();
+    await page.locator("#projectSwitcherButton").click();
+    await expect(page.locator("#projectSwitcherPanel")).toBeVisible();
     await expect(page.locator("#newProjectButton")).toBeEnabled();
     await page.locator("#newProjectButton").click();
     await expect(page.locator("#projectCreateForm")).toBeVisible();
@@ -300,9 +301,10 @@ test("mobile sidebar creates and switches to a new project", async ({ page, requ
     expect(completeResponse.ok()).toBeTruthy();
 
     await expect(page.locator("#projectCreateForm")).toBeHidden();
-    await expect(page.locator("#projectPickerLabel")).toContainText(projectLabel);
+    await expect(page.locator("#projectPickerLabel")).toContainText("mobile-project-e2e");
+    await expect(page.locator("#projectSwitcherButton")).toContainText("mobile-project-e2e");
     await expect(page.locator("#codexProject")).toHaveValue(workspace.id);
-    await expect(page.locator(".project-option.active")).toContainText(projectLabel);
+    await expect(page.locator(".project-option.active")).toContainText("mobile-project-e2e");
   } finally {
     clearInterval(keepAlive);
   }

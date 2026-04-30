@@ -15,8 +15,8 @@
         if (localStorage.getItem("echoTheme") === "dark") document.documentElement.dataset.theme = "dark";
       } catch {}
     </script>
-    <link rel="manifest" href="/manifest.webmanifest?v=63" />
-    <link rel="stylesheet" href="/styles.css?v=63" />
+    <link rel="manifest" href="/manifest.webmanifest?v=65" />
+    <link rel="stylesheet" href="/styles.css?v=65" />
   </head>
   <body>
     <main class="shell">
@@ -41,11 +41,45 @@
             </div>
             <p id="statusText">连接中</p>
           </div>
-        </div>
-        <div class="topbar-actions" data-authenticated hidden>
-          <div class="topbar-project-chip" aria-label="当前工程">
-            <span class="topbar-project-kicker">工程</span>
-            <strong id="composerProjectLabel">等待桌面 agent</strong>
+          <div id="projectSwitcher" class="topbar-project-switcher" data-authenticated hidden>
+            <button
+              id="projectSwitcherButton"
+              class="topbar-project-chip"
+              type="button"
+              aria-label="切换工程"
+              aria-haspopup="dialog"
+              aria-expanded="false"
+              aria-controls="projectSwitcherPanel"
+            >
+              <span class="topbar-project-kicker">工程</span>
+              <strong id="composerProjectLabel">等待</strong>
+            </button>
+            <div id="projectSwitcherPanel" class="project-switcher-panel" role="dialog" aria-label="切换工程" hidden>
+              <div id="projectSidebarCard" class="project-sidebar-card">
+                <div class="project-switcher-current">
+                  <span class="project-switcher-kicker">当前</span>
+                  <strong id="projectPickerLabel" class="project-picker-label">等待桌面 agent</strong>
+                  <span id="projectPickerMeta" class="project-picker-meta">桌面端启动后会同步可切换项目。</span>
+                </div>
+                <button
+                  id="newProjectButton"
+                  class="icon-button sidebar-project-add"
+                  type="button"
+                  aria-label="新建工程"
+                  title="新建工程"
+                >
+                  +
+                </button>
+              </div>
+              <form id="projectCreateForm" class="project-create-form" hidden>
+                <label class="sr-only" for="projectCreateName">新工程名称</label>
+                <input id="projectCreateName" type="text" autocomplete="off" maxlength="80" placeholder="新工程名" />
+                <button id="projectCreateSubmit" class="project-create-submit" type="submit">创建</button>
+              </form>
+              <p id="projectSheetStatus" class="sidebar-panel-note"></p>
+              <div id="projectSheetList" class="project-sheet-list sidebar-project-list" role="listbox" aria-label="项目列表"></div>
+              <select id="codexProject" class="sr-only" tabindex="-1" aria-hidden="true"></select>
+            </div>
           </div>
         </div>
         <button
@@ -137,33 +171,6 @@
               <p id="codexQueueMeta" class="codex-runtime"></p>
             </div>
             <div id="codexJobs" class="codex-jobs"></div>
-          </section>
-
-          <section class="sidebar-panel sidebar-panel-projects">
-            <div class="sidebar-panel-head">
-              <strong>工程</strong>
-              <button
-                id="newProjectButton"
-                class="icon-button sidebar-project-add"
-                type="button"
-                aria-label="新建工程"
-                title="新建工程"
-              >
-                +
-              </button>
-            </div>
-            <form id="projectCreateForm" class="project-create-form" hidden>
-              <label class="sr-only" for="projectCreateName">新工程名称</label>
-              <input id="projectCreateName" type="text" autocomplete="off" maxlength="80" placeholder="新工程名" />
-              <button id="projectCreateSubmit" class="project-create-submit" type="submit">创建</button>
-            </form>
-            <div id="projectSidebarCard" class="project-sidebar-card">
-              <strong id="projectPickerLabel" class="project-picker-label">等待桌面 agent</strong>
-              <span id="projectPickerMeta" class="project-picker-meta">桌面端启动后会同步可切换项目。</span>
-            </div>
-            <p id="projectSheetStatus" class="sidebar-panel-note"></p>
-            <div id="projectSheetList" class="project-sheet-list sidebar-project-list" role="listbox" aria-label="项目列表"></div>
-            <select id="codexProject" class="sr-only" tabindex="-1" aria-hidden="true"></select>
           </section>
 
           <section class="sidebar-panel sidebar-panel-appearance">
@@ -298,6 +305,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=63" type="module"></script>
+    <script src="/app.js?v=65" type="module"></script>
   </body>
 </html>

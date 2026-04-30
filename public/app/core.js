@@ -550,17 +550,18 @@ export function installCore(app) {
     return workspace.path !== workspace.id ? workspace.path : "";
   };
 
+  app.workspaceDirectoryName = function workspaceDirectoryName(workspace) {
+    const pathLabel = String(workspace?.path || "").trim().replace(/[/\\]+$/g, "");
+    const directoryName = pathLabel.split(/[/\\]/).filter(Boolean).pop();
+    return directoryName || workspace?.label || workspace?.id || "未命名工程";
+  };
+
   app.refreshTopbarProjectChip = function refreshTopbarProjectChip() {
-    if (!elements.topbarProjectChip) return;
+    if (!elements.topbarProjectChip || !elements.projectSwitcher) return;
     const label = String(elements.composerProjectLabel?.textContent || "").trim();
-    const hide =
-      !app.isLoggedIn() ||
-      !state.token ||
-      !label ||
-      label === "选择项目" ||
-      label === "等待桌面 agent" ||
-      label === "还没有授权工程目录";
-    elements.topbarProjectChip.hidden = hide;
+    const hide = !app.isLoggedIn() || !state.token || !label;
+    elements.projectSwitcher.hidden = hide;
+    elements.topbarProjectChip.title = label ? `当前工程：${label}` : "切换工程";
   };
 
   app.formatRelativeTime = function formatRelativeTime(value) {
@@ -840,7 +841,10 @@ function queryElements(documentRef) {
     showArchivedSessionsButton: documentRef.querySelector("#showArchivedSessionsButton"),
     sidebarUserToggle: documentRef.querySelector("#sidebarUserToggle"),
     sidebarUserBody: documentRef.querySelector("#sidebarUserBody"),
-    topbarProjectChip: documentRef.querySelector(".topbar-project-chip"),
+    projectSwitcher: documentRef.querySelector("#projectSwitcher"),
+    projectSwitcherButton: documentRef.querySelector("#projectSwitcherButton"),
+    projectSwitcherPanel: documentRef.querySelector("#projectSwitcherPanel"),
+    topbarProjectChip: documentRef.querySelector("#projectSwitcherButton"),
     sidebarUserMeta: documentRef.querySelector("#sidebarUserMeta"),
     codexProject: documentRef.querySelector("#codexProject"),
     codexPermissionMode: documentRef.querySelector("#codexPermissionMode"),
