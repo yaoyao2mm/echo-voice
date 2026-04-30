@@ -448,8 +448,9 @@ function syncComposerInputHeight() {
   const textarea = elements.codexPrompt;
   if (!textarea) return;
   const maxHeight = usesCompactTopbarMode() ? 132 : 168;
+  const minHeight = usesCompactTopbarMode() ? 56 : 52;
   textarea.style.height = "auto";
-  const nextHeight = Math.max(textarea.scrollHeight, 42);
+  const nextHeight = Math.max(textarea.scrollHeight, minHeight);
   textarea.style.height = `${Math.min(nextHeight, maxHeight)}px`;
   textarea.style.overflowY = nextHeight > maxHeight ? "auto" : "hidden";
 }

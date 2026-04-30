@@ -3165,7 +3165,7 @@ body.topbar-collapsed .topbar {
 }
 
 .composer textarea {
-  min-height: 42px;
+  min-height: 52px;
   max-height: 168px;
   border: 1px solid rgba(126, 106, 84, 0.12);
   border-radius: 16px;
@@ -3389,7 +3389,7 @@ body.topbar-collapsed .topbar {
   }
 
   .composer textarea {
-    min-height: 40px;
+    min-height: 56px;
     max-height: 132px;
     padding: 9px 12px;
   }
@@ -3545,24 +3545,24 @@ body.topbar-collapsed .topbar {
   .composer-statusbar,
   .composer-attachment-tray,
   .composer-editor {
-    padding-left: var(--shell-pad-left);
-    padding-right: var(--shell-pad-right);
+    padding-left: 8px;
+    padding-right: 8px;
   }
 
   .composer-statusbar {
     min-height: 28px;
     padding-top: 5px;
-    padding-bottom: 5px;
+    padding-bottom: 4px;
   }
 
   .composer-attachment-tray {
-    padding-top: 5px;
-    padding-bottom: 7px;
+    padding-top: 4px;
+    padding-bottom: 6px;
   }
 
   .composer-editor {
-    padding-top: 6px;
-    padding-bottom: 6px;
+    padding-top: 5px;
+    padding-bottom: 5px;
   }
 
   .composer-dock {
