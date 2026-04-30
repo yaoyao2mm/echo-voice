@@ -274,23 +274,49 @@ test("interactive Codex image sessions fall back away from unsupported models", 
 
 test("interactive Codex sessions avoid models that require a newer CLI", async () => {
   store.resetStoreForTest();
+  const previousUnsupportedModels = process.env.ECHO_CODEX_UNSUPPORTED_MODELS;
+  process.env.ECHO_CODEX_UNSUPPORTED_MODELS = "gpt-5.5";
+  try {
+    const agent = {
+      id: "model-fallback-agent",
+      workspaces: [{ id: "demo", path: process.cwd() }]
+    };
+
+    const created = queue.createCodexSession({
+      projectId: "demo",
+      prompt: "现在如何了？",
+      runtime: { model: "gpt-5.5", sandbox: "danger-full-access", approvalPolicy: "never", reasoningEffort: "xhigh", profile: "full" }
+    });
+    assert.equal(created.runtime.model, "");
+    assert.equal(created.runtime.sandbox, "danger-full-access");
+
+    const command = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+    assert.equal(command.runtime.model, "");
+    assert.equal(command.payload.prompt, "现在如何了？");
+  } finally {
+    if (previousUnsupportedModels === undefined) delete process.env.ECHO_CODEX_UNSUPPORTED_MODELS;
+    else process.env.ECHO_CODEX_UNSUPPORTED_MODELS = previousUnsupportedModels;
+  }
+});
+
+test("interactive Codex sessions keep GPT-5.5 when the desktop CLI supports it", async () => {
+  store.resetStoreForTest();
 
   const agent = {
-    id: "model-fallback-agent",
+    id: "supported-model-agent",
     workspaces: [{ id: "demo", path: process.cwd() }]
   };
 
   const created = queue.createCodexSession({
     projectId: "demo",
-    prompt: "现在如何了？",
+    prompt: "使用新模型",
     runtime: { model: "gpt-5.5", sandbox: "danger-full-access", approvalPolicy: "never", reasoningEffort: "xhigh", profile: "full" }
   });
-  assert.equal(created.runtime.model, "");
-  assert.equal(created.runtime.sandbox, "danger-full-access");
+  assert.equal(created.runtime.model, "gpt-5.5");
 
   const command = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
-  assert.equal(command.runtime.model, "");
-  assert.equal(command.payload.prompt, "现在如何了？");
+  assert.equal(command.runtime.model, "gpt-5.5");
+  assert.equal(command.payload.prompt, "使用新模型");
 });
 
 test("interactive Codex sessions recover expired running leases instead of looking stuck forever", async () => {
