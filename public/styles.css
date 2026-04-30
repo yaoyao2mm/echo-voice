@@ -4022,24 +4022,38 @@ body.topbar-collapsed .topbar {
     display: block;
   }
 
+  body.mobile-ui .codex-section {
+    height: calc(var(--app-height) - var(--topbar-height, 72px));
+    min-height: 0;
+    overflow: hidden;
+  }
+
   body.mobile-ui .codex-main {
     --mobile-chat-rail: clamp(10px, 3vw, 14px);
+    display: grid;
+    grid-template-rows: minmax(0, 1fr) auto;
     height: calc(var(--app-height) - var(--topbar-height, 72px));
     min-height: 0;
     overflow: hidden;
   }
 
   body.mobile-ui .codex-job-detail {
-    padding-bottom: calc(var(--composer-height, 0px) + 8px);
+    height: auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 0 8px;
   }
 
   body.mobile-ui .codex-run-summary {
-    min-height: 100%;
+    min-height: 0;
+    height: auto;
+    overflow: visible;
     padding: 0;
   }
 
   body.mobile-ui .conversation-thread {
     gap: 10px;
+    min-height: auto;
     padding-left: var(--mobile-chat-rail);
     padding-right: var(--mobile-chat-rail);
   }
@@ -4052,19 +4066,28 @@ body.topbar-collapsed .topbar {
 
   body.mobile-ui .thread-message-assistant,
   body.mobile-ui .thread-message-system {
-    justify-items: stretch;
+    justify-items: start;
   }
 
   body.mobile-ui .thread-message-assistant .thread-bubble,
   body.mobile-ui .thread-message-assistant .thread-attachments,
   body.mobile-ui .thread-message-system .thread-bubble {
-    width: 100%;
-    max-width: 100%;
+    width: fit-content;
+    max-width: min(92%, 32rem);
   }
 
   body.mobile-ui .thread-message-user .thread-bubble,
   body.mobile-ui .thread-message-user .thread-attachments {
     max-width: min(94%, 30rem);
+  }
+
+  body.mobile-ui .composer {
+    position: relative;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    width: 100%;
+    margin: 0;
   }
 
   body.mobile-ui .composer-statusbar,
