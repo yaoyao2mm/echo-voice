@@ -140,7 +140,10 @@ elements.codexProject.addEventListener("change", () => {
 elements.codexPermissionMode.addEventListener("change", handleRuntimeControlChange);
 elements.codexModel.addEventListener("change", handleRuntimeControlChange);
 elements.codexReasoningEffort.addEventListener("change", handleRuntimeControlChange);
-elements.codexPrompt.addEventListener("input", updateComposerAvailability);
+elements.codexPrompt.addEventListener("input", () => {
+  syncComposerInputHeight();
+  updateComposerAvailability();
+});
 elements.composerAttachmentButton.addEventListener("click", openComposerAttachmentPicker);
 elements.composerAttachmentInput.addEventListener("change", handleComposerAttachmentInput);
 elements.codexPrompt.addEventListener("paste", handleComposerPaste);
@@ -151,6 +154,7 @@ if ("serviceWorker" in navigator) {
 }
 
 renderComposerAttachments();
+syncComposerInputHeight();
 updateSessionSidebarToggle(false);
 await bootUserSession();
 updateAuthView();
@@ -356,6 +360,7 @@ function syncViewportMetrics() {
   if (elements.topbar) {
     document.documentElement.style.setProperty("--topbar-height", `${Math.round(elements.topbar.offsetHeight || 0)}px`);
   }
+  syncComposerInputHeight();
   syncComposerMetrics();
 }
 
@@ -439,39 +444,38 @@ function syncComposerMetrics() {
   }
 }
 
+function syncComposerInputHeight() {
+  const textarea = elements.codexPrompt;
+  if (!textarea) return;
+  const maxHeight = usesCompactTopbarMode() ? 132 : 168;
+  textarea.style.height = "auto";
+  const nextHeight = Math.max(textarea.scrollHeight, 42);
+  textarea.style.height = `${Math.min(nextHeight, maxHeight)}px`;
+  textarea.style.overflowY = nextHeight > maxHeight ? "auto" : "hidden";
+}
+
 function refreshComposerStatusBar() {
   if (!elements.composerStatusText) return;
 
   const session = composingNewSession ? null : selectedCodexSession;
+  let status = "";
   if (composerBusy) {
-    elements.composerStatusText.textContent = "正在发送…";
-    return;
+    status = "正在发送…";
+  } else if (!elements.codexProject.value) {
+    status = "先选择工程";
+  } else if (session?.pendingApprovalCount > 0) {
+    status = "等待你的审批";
+  } else if (session?.status === "starting") {
+    status = "Codex 正在启动";
+  } else if (session?.status === "running") {
+    status = "Codex 正在回复";
+  } else if (session?.pendingCommandCount > 0) {
+    status = "消息已排队";
+  } else if (session && !sessionCanAcceptFollowUp(session)) {
+    status = "当前会话不可继续";
   }
-  if (!elements.codexProject.value) {
-    elements.composerStatusText.textContent = "先选择工程";
-    return;
-  }
-  if (session?.pendingApprovalCount > 0) {
-    elements.composerStatusText.textContent = "等待你的审批";
-    return;
-  }
-  if (session?.status === "starting") {
-    elements.composerStatusText.textContent = "Codex 正在启动";
-    return;
-  }
-  if (session?.status === "running") {
-    elements.composerStatusText.textContent = "Codex 正在回复";
-    return;
-  }
-  if (session?.pendingCommandCount > 0) {
-    elements.composerStatusText.textContent = "消息已排队";
-    return;
-  }
-  if (session && !sessionCanAcceptFollowUp(session)) {
-    elements.composerStatusText.textContent = "当前会话不可继续";
-    return;
-  }
-  elements.composerStatusText.textContent = "工作区";
+  elements.composerStatusText.textContent = status;
+  elements.composerStatusText.classList.toggle("is-empty", !status);
 }
 
 function initRuntimeControls() {
@@ -950,6 +954,7 @@ async function sendToCodex() {
     runtimeDirty = false;
     applyRuntimeDraft(selectedCodexSession.runtime || runtime, { persist: false, dirty: false });
     elements.codexPrompt.value = "";
+    syncComposerInputHeight();
     await loadCodexJobs();
     await showCodexJob(data.session.id);
     clearComposerAttachments({ silent: true });
