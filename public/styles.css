@@ -3143,6 +3143,7 @@ body.topbar-collapsed .topbar {
 
 .composer-status-text {
   margin-left: auto;
+  display: block;
   min-width: 0;
   max-width: 56%;
   color: var(--muted);
@@ -3156,7 +3157,7 @@ body.topbar-collapsed .topbar {
 }
 
 .composer-status-text.is-empty {
-  opacity: 0;
+  display: none;
 }
 
 .composer-editor {
@@ -3448,7 +3449,7 @@ body.topbar-collapsed .topbar {
 
 @media (max-width: 760px) {
   .shell {
-    padding-top: calc(var(--topbar-height, 72px) + 8px);
+    padding: calc(var(--topbar-height, 72px) + 8px) 0 0;
     padding-bottom: 0;
     transition: padding-top 240ms ease;
   }
@@ -3488,12 +3489,12 @@ body.topbar-collapsed .topbar {
   }
 
   .codex-main {
-    --mobile-chat-rail: clamp(4px, 1.8vw, 8px);
+    --mobile-chat-rail: clamp(8px, 2.8vw, 12px);
     grid-template-rows: minmax(0, 1fr);
     height: calc(var(--app-height) - var(--topbar-height, 72px));
     min-height: 0;
     overflow: hidden;
-    gap: 8px;
+    gap: 0;
     padding-bottom: 0;
   }
 
@@ -3509,7 +3510,7 @@ body.topbar-collapsed .topbar {
     overscroll-behavior-y: contain;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
-    padding: 0 var(--mobile-chat-rail) calc(var(--composer-height, 0px) + 10px);
+    padding: 0 0 calc(var(--composer-height, 0px) + 10px);
   }
 
   .run-log {
@@ -3523,6 +3524,7 @@ body.topbar-collapsed .topbar {
   .codex-run-summary {
     height: auto;
     overflow: visible;
+    padding: 0;
     padding-bottom: 0;
   }
 
@@ -3545,8 +3547,8 @@ body.topbar-collapsed .topbar {
   .composer-statusbar,
   .composer-attachment-tray,
   .composer-editor {
-    padding-left: 8px;
-    padding-right: 8px;
+    padding-left: var(--mobile-chat-rail);
+    padding-right: var(--mobile-chat-rail);
   }
 
   .composer-statusbar {
@@ -3568,12 +3570,13 @@ body.topbar-collapsed .topbar {
   .composer-dock {
     background: rgba(246, 241, 233, 0.82);
     padding-bottom: max(6px, var(--safe-bottom));
-    padding-left: 0;
-    padding-right: 0;
+    padding-left: var(--mobile-chat-rail);
+    padding-right: var(--mobile-chat-rail);
   }
 
   .conversation-thread {
     gap: 10px;
+    padding: 0 var(--mobile-chat-rail);
   }
 
   .conversation-thread-empty {
@@ -3599,7 +3602,7 @@ body.topbar-collapsed .topbar {
 
   .thread-message-user .thread-bubble,
   .thread-message-user .thread-attachments {
-    max-width: min(88%, 30rem);
+    max-width: min(92%, 30rem);
   }
 
   .codex-submit {

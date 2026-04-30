@@ -1,9 +1,9 @@
-self.ECHO_CACHE = "echo-codex-v42";
+self.ECHO_CACHE = "echo-codex-v43";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(self.ECHO_CACHE).then((cache) =>
-      cache.addAll(["/", "/styles.css?v=42", "/app.js?v=42", "/manifest.webmanifest?v=42"])
+      cache.addAll(["/", "/styles.css?v=43", "/app.js?v=43", "/manifest.webmanifest?v=43"])
     )
   );
   self.skipWaiting();
