@@ -1,6 +1,8 @@
 const MAX_COMPOSER_ATTACHMENTS = 3;
 const MAX_COMPOSER_ATTACHMENT_BYTES = 6 * 1024 * 1024;
 const DEFAULT_CODEX_MODEL = "gpt-5.5";
+const DEFAULT_CONTEXT_TOKEN_LIMIT = 128000;
+const ATTACHMENT_CONTEXT_TOKEN_ESTIMATE = 1200;
 
 const MODEL_OPTIONS = [
   { value: "", label: "桌面默认" },
@@ -247,6 +249,64 @@ export function installCore(app) {
     }
     elements.composerStatusText.textContent = status;
     elements.composerStatusText.classList.toggle("is-empty", !status);
+    app.refreshContextUsageIndicator();
+  };
+
+  app.refreshContextUsageIndicator = function refreshContextUsageIndicator() {
+    const indicator = elements.contextUsageIndicator;
+    if (!indicator) return;
+
+    const usage = app.estimateContextUsage();
+    const rawPercent = usage.limitTokens > 0 ? Math.round((usage.estimatedTokens / usage.limitTokens) * 100) : 0;
+    const percent = Math.max(0, Math.min(100, rawPercent));
+    const visiblePercent = usage.estimatedTokens > 0 ? Math.max(1, percent) : 0;
+    const stateName = percent >= 85 ? "full" : percent >= 65 ? "warn" : "normal";
+    const label = `上下文使用约 ${percent}% · 估算 ${usage.estimatedTokens.toLocaleString("zh-CN")} / ${usage.limitTokens.toLocaleString("zh-CN")} tokens`;
+
+    indicator.style.setProperty("--context-used", `${visiblePercent}%`);
+    indicator.dataset.state = stateName;
+    indicator.title = label;
+    indicator.setAttribute("aria-label", label);
+    indicator.setAttribute("aria-valuenow", String(percent));
+  };
+
+  app.estimateContextUsage = function estimateContextUsage() {
+    const session = state.composingNewSession ? null : state.selectedCodexSession;
+    const parts = [];
+    let attachmentCount = 0;
+
+    for (const message of session?.messages || []) {
+      if (message?.text) parts.push(message.text);
+      attachmentCount += Array.isArray(message?.attachments) ? message.attachments.length : 0;
+    }
+    if ((!session?.messages || session.messages.length === 0) && Array.isArray(session?.events)) {
+      for (const event of session.events) {
+        if (event?.text) parts.push(event.text);
+      }
+    }
+    if (session?.finalMessage) parts.push(session.finalMessage);
+    if (elements.codexPrompt?.value) parts.push(elements.codexPrompt.value);
+    attachmentCount += state.composerAttachments.length;
+
+    const textTokens = app.estimateTextTokens(parts.join("\n"));
+    const estimatedTokens = textTokens + attachmentCount * ATTACHMENT_CONTEXT_TOKEN_ESTIMATE;
+    return {
+      estimatedTokens,
+      limitTokens: app.contextTokenLimit()
+    };
+  };
+
+  app.estimateTextTokens = function estimateTextTokens(value) {
+    const text = String(value || "");
+    if (!text) return 0;
+    const cjkMatches = text.match(/[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]/g) || [];
+    const cjkCount = cjkMatches.length;
+    const nonCjkLength = text.replace(/[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]/g, "").replace(/\s+/g, " ").trim().length;
+    return cjkCount + Math.ceil(nonCjkLength / 4);
+  };
+
+  app.contextTokenLimit = function contextTokenLimit() {
+    return DEFAULT_CONTEXT_TOKEN_LIMIT;
   };
 
   app.setTopbarStatus = function setTopbarStatus(label, indicatorState = "idle") {
@@ -705,6 +765,7 @@ function queryElements(documentRef) {
     activeSessionMeta: documentRef.querySelector("#activeSessionMeta"),
     composerStatusText: documentRef.querySelector("#composerStatusText"),
     composerActionsMeta: documentRef.querySelector("#composerActionsMeta"),
+    contextUsageIndicator: documentRef.querySelector("#contextUsageIndicator"),
     refreshCodex: documentRef.querySelector("#refreshCodex"),
     toggleSessionsButton: documentRef.querySelector("#toggleSessionsButton"),
     sessionBackdrop: documentRef.querySelector("#sessionBackdrop"),

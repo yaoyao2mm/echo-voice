@@ -46,6 +46,8 @@ async function loginToWorkbench(page) {
   await expect(page.locator("#toggleSessionsButton")).toBeVisible();
   await expect(page.locator("#mobileStatusIndicator")).toBeVisible();
   await expect(page.locator("#mobileStatusIndicator")).toHaveCSS("margin-right", "12px");
+  await expect(page.locator("#contextUsageIndicator")).toBeVisible();
+  await expect(page.locator("#contextUsageIndicator")).toHaveAttribute("role", "meter");
   await expect(page.locator("#codexStatusText")).toContainText("本机 Codex 在线");
   await expect(page.locator("#projectPickerLabel")).toContainText("echo");
 }
@@ -108,6 +110,10 @@ test("mobile login, pairing, sidebar, and session creation", async ({ page, requ
     await expect(page.locator("#activeSessionMeta")).toContainText(/排队中|启动中|运行中/);
     await expect(page.locator("#codexRunSummary")).toContainText("E2E mobile workbench smoke test");
     await expect(page.locator("#sendCodexButton")).toBeDisabled();
+    await expect(page.locator("#contextUsageIndicator")).toHaveAttribute("aria-label", /上下文使用约/);
+    await expect
+      .poll(() => page.locator("#contextUsageIndicator").evaluate((node) => Number(node.getAttribute("aria-valuenow"))))
+      .toBeGreaterThanOrEqual(0);
 
     const message = page.locator(".thread-message-user", { hasText: "E2E mobile workbench smoke test" }).first();
     const copyAction = message.getByRole("button", { name: "复制消息" });

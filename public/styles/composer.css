@@ -180,6 +180,27 @@ body.topbar-collapsed .topbar {
   white-space: nowrap;
 }
 
+.context-usage-ring {
+  --context-used: 0%;
+  --context-color: #82ad8f;
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at center, rgba(251, 249, 245, 0.98) 0 45%, transparent 47%),
+    conic-gradient(var(--context-color) var(--context-used), rgba(126, 106, 84, 0.16) 0);
+  box-shadow: inset 0 0 0 1px rgba(126, 106, 84, 0.08);
+}
+
+.context-usage-ring[data-state="warn"] {
+  --context-color: #bd8b3c;
+}
+
+.context-usage-ring[data-state="full"] {
+  --context-color: #b85c50;
+}
+
 .composer-status-text {
   margin-left: auto;
   display: block;

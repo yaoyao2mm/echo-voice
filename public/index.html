@@ -10,8 +10,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Echo Codex</title>
-    <link rel="manifest" href="/manifest.webmanifest?v=55" />
-    <link rel="stylesheet" href="/styles.css?v=55" />
+    <link rel="manifest" href="/manifest.webmanifest?v=56" />
+    <link rel="stylesheet" href="/styles.css?v=56" />
   </head>
   <body>
     <main class="shell">
@@ -197,6 +197,16 @@
                     </svg>
                   </button>
                   <span class="composer-status-scope">工作区</span>
+                  <span
+                    id="contextUsageIndicator"
+                    class="context-usage-ring"
+                    role="meter"
+                    aria-label="上下文使用 0%"
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                    aria-valuenow="0"
+                    title="上下文使用 0%"
+                  ></span>
                 </div>
                 <span id="composerStatusText" class="composer-status-text" aria-live="polite"></span>
               </div>
@@ -228,6 +238,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=55" type="module"></script>
+    <script src="/app.js?v=56" type="module"></script>
   </body>
 </html>
