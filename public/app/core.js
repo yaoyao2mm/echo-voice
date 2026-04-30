@@ -68,7 +68,8 @@ export function createAppContext(windowRef = window, documentRef = document) {
       lastTopbarScrollY: 0,
       topbarScrollAccumulator: 0,
       topbarCollapsed: false,
-      composerAttachments: []
+      composerAttachments: [],
+      composerAttachmentPendingCount: 0
     }
   };
 }
@@ -210,6 +211,11 @@ export function installCore(app) {
     let status = "";
     if (state.composerBusy) {
       status = "正在发送…";
+    } else if (state.composerAttachmentPendingCount > 0) {
+      status =
+        state.composerAttachmentPendingCount === 1
+          ? "正在处理 1 张图片…"
+          : `正在处理 ${state.composerAttachmentPendingCount} 张图片…`;
     } else if (!elements.codexProject.value) {
       status = "先选择工程";
     } else if (session?.pendingApprovalCount > 0) {

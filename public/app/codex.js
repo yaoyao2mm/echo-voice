@@ -1,6 +1,15 @@
 export function installCodex(app) {
   const { constants, elements, state } = app;
 
+  app.hasPendingComposerAttachments = function hasPendingComposerAttachments() {
+    return Number(state.composerAttachmentPendingCount || 0) > 0;
+  };
+
+  app.setComposerAttachmentPendingCount = function setComposerAttachmentPendingCount(count) {
+    state.composerAttachmentPendingCount = Math.max(0, Number(count) || 0);
+    app.updateComposerAvailability();
+  };
+
   app.refreshCodex = async function refreshCodex() {
     if (!app.isLoggedIn() || !state.token) return;
 
@@ -152,6 +161,10 @@ export function installCodex(app) {
 
   app.sendToCodex = async function sendToCodex() {
     if (!app.ensurePaired()) return;
+    if (app.hasPendingComposerAttachments()) {
+      app.toast("图片还在处理中，请稍候再发送");
+      return;
+    }
 
     const rawPrompt = elements.codexPrompt.value.trim();
     const attachments = app.currentComposerAttachmentsPayload();
@@ -248,19 +261,28 @@ export function installCodex(app) {
   };
 
   app.openComposerAttachmentPicker = function openComposerAttachmentPicker() {
-    if (state.composerBusy) return;
+    if (state.composerBusy || app.hasPendingComposerAttachments()) return;
     elements.composerAttachmentInput.click();
   };
 
   app.handleComposerAttachmentInput = async function handleComposerAttachmentInput(event) {
     const files = Array.from(event.target.files || []);
     event.target.value = "";
+    if (app.hasPendingComposerAttachments()) {
+      if (files.length > 0) app.toast("请等待当前图片处理完成");
+      return;
+    }
     await app.addComposerAttachmentFiles(files);
   };
 
   app.handleComposerPaste = async function handleComposerPaste(event) {
     const files = Array.from(event.clipboardData?.files || []).filter((file) => file.type.startsWith("image/"));
     if (files.length === 0) return;
+    if (app.hasPendingComposerAttachments()) {
+      event.preventDefault();
+      app.toast("请等待当前图片处理完成");
+      return;
+    }
     event.preventDefault();
     await app.addComposerAttachmentFiles(files);
   };
@@ -272,19 +294,24 @@ export function installCodex(app) {
       return;
     }
 
-    const remaining = constants.MAX_COMPOSER_ATTACHMENTS - state.composerAttachments.length;
+    const remaining = constants.MAX_COMPOSER_ATTACHMENTS - state.composerAttachments.length - state.composerAttachmentPendingCount;
     if (remaining <= 0) {
       app.toast(`最多附加 ${constants.MAX_COMPOSER_ATTACHMENTS} 张截图`);
       return;
     }
+    if (imageFiles.length > remaining) {
+      app.toast(`最多附加 ${constants.MAX_COMPOSER_ATTACHMENTS} 张截图`);
+    }
 
     const accepted = [];
-    for (const file of imageFiles.slice(0, remaining)) {
-      if (file.size > constants.MAX_COMPOSER_ATTACHMENT_BYTES) {
-        app.toast(`截图不能超过 ${Math.round(constants.MAX_COMPOSER_ATTACHMENT_BYTES / 1024 / 1024)} MB`);
-        continue;
-      }
+    const queuedFiles = imageFiles.slice(0, remaining);
+    app.setComposerAttachmentPendingCount(state.composerAttachmentPendingCount + queuedFiles.length);
+    for (const file of queuedFiles) {
       try {
+        if (file.size > constants.MAX_COMPOSER_ATTACHMENT_BYTES) {
+          app.toast(`截图不能超过 ${Math.round(constants.MAX_COMPOSER_ATTACHMENT_BYTES / 1024 / 1024)} MB`);
+          continue;
+        }
         const url = await app.fileToDataUrl(file);
         accepted.push({
           id: crypto.randomUUID(),
@@ -295,6 +322,8 @@ export function installCodex(app) {
         });
       } catch {
         app.toast("读取截图失败，请重试");
+      } finally {
+        app.setComposerAttachmentPendingCount(state.composerAttachmentPendingCount - 1);
       }
     }
 
@@ -382,15 +411,18 @@ export function installCodex(app) {
     const hasProject = Boolean(elements.codexProject.value);
     const hasDraft = Boolean(elements.codexPrompt.value.trim()) || state.composerAttachments.length > 0;
     const blockedBySelectedSession = app.selectedSessionNeedsExplicitNew();
-    elements.sendCodexButton.disabled = state.composerBusy || !hasProject || !hasDraft || blockedBySelectedSession;
-    elements.sendCodexButton.textContent = state.composerBusy ? elements.sendCodexButton.textContent : app.composerActionLabel();
+    const attachmentsPending = app.hasPendingComposerAttachments();
+    elements.sendCodexButton.disabled = state.composerBusy || attachmentsPending || !hasProject || !hasDraft || blockedBySelectedSession;
+    if (!state.composerBusy) {
+      elements.sendCodexButton.textContent = attachmentsPending ? "处理图片" : app.composerActionLabel();
+    }
     elements.newCodexSessionButton.disabled = state.composerBusy;
     elements.codexProject.disabled = state.composerBusy;
     elements.codexPermissionMode.disabled = state.composerBusy;
     elements.codexModel.disabled = state.composerBusy;
     elements.codexReasoningEffort.disabled = state.composerBusy;
     elements.codexPrompt.disabled = state.composerBusy;
-    elements.composerAttachmentButton.disabled = state.composerBusy;
+    elements.composerAttachmentButton.disabled = state.composerBusy || attachmentsPending;
     app.refreshComposerMeta();
     app.refreshTopbarProjectChip();
     app.syncComposerMetrics();
