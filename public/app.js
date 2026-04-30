@@ -357,6 +357,8 @@ function syncViewportMetrics() {
   const viewport = window.visualViewport;
   const nextHeight = Math.round(viewport?.height || window.innerHeight || 0);
   if (nextHeight > 0) document.documentElement.style.setProperty("--app-height", `${nextHeight}px`);
+  document.body.classList.toggle("mobile-ui", usesCompactTopbarMode());
+  document.body.classList.toggle("desktop-ui", !usesCompactTopbarMode());
   if (elements.topbar) {
     document.documentElement.style.setProperty("--topbar-height", `${Math.round(elements.topbar.offsetHeight || 0)}px`);
   }

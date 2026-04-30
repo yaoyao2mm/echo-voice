@@ -3979,3 +3979,99 @@ body.topbar-collapsed .topbar {
     width: calc(100vw - 48px);
   }
 }
+
+/* v44 dedicated mobile surface */
+
+@media (max-width: 760px) {
+  body.mobile-ui .shell,
+  body.mobile-ui .codex-section,
+  body.mobile-ui .codex-main,
+  body.mobile-ui .codex-job-detail,
+  body.mobile-ui .codex-run-summary,
+  body.mobile-ui .conversation-thread,
+  body.mobile-ui .composer-shell {
+    width: 100%;
+    max-width: none;
+  }
+
+  body.mobile-ui .shell {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  body.mobile-ui .topbar {
+    padding-left: max(8px, var(--safe-left));
+    padding-right: max(8px, var(--safe-right));
+  }
+
+  body.mobile-ui .topbar-actions {
+    flex: 0 0 auto;
+    flex-basis: auto;
+    max-width: none;
+    min-width: 0;
+  }
+
+  body.mobile-ui .topbar-project-chip {
+    min-width: 0;
+    padding-left: 0;
+    justify-content: flex-end;
+  }
+
+  body.mobile-ui .codex-section,
+  body.mobile-ui .codex-main {
+    display: block;
+  }
+
+  body.mobile-ui .codex-main {
+    --mobile-chat-rail: clamp(10px, 3vw, 14px);
+    height: calc(var(--app-height) - var(--topbar-height, 72px));
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  body.mobile-ui .codex-job-detail {
+    padding-bottom: calc(var(--composer-height, 0px) + 8px);
+  }
+
+  body.mobile-ui .codex-run-summary {
+    min-height: 100%;
+    padding: 0;
+  }
+
+  body.mobile-ui .conversation-thread {
+    gap: 10px;
+    padding-left: var(--mobile-chat-rail);
+    padding-right: var(--mobile-chat-rail);
+  }
+
+  body.mobile-ui .thread-message,
+  body.mobile-ui .thread-message-assistant,
+  body.mobile-ui .thread-message-system {
+    width: 100%;
+  }
+
+  body.mobile-ui .thread-message-assistant,
+  body.mobile-ui .thread-message-system {
+    justify-items: stretch;
+  }
+
+  body.mobile-ui .thread-message-assistant .thread-bubble,
+  body.mobile-ui .thread-message-assistant .thread-attachments,
+  body.mobile-ui .thread-message-system .thread-bubble {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  body.mobile-ui .thread-message-user .thread-bubble,
+  body.mobile-ui .thread-message-user .thread-attachments {
+    max-width: min(94%, 30rem);
+  }
+
+  body.mobile-ui .composer-statusbar,
+  body.mobile-ui .composer-attachment-tray,
+  body.mobile-ui .composer-editor,
+  body.mobile-ui .composer-dock {
+    padding-left: var(--mobile-chat-rail);
+    padding-right: var(--mobile-chat-rail);
+  }
+}
