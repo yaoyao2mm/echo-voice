@@ -675,11 +675,32 @@
 
   body.mobile-ui .codex-main {
     --mobile-chat-rail: clamp(10px, 3vw, 14px);
+    --session-rail-height: 30px;
     display: grid;
     grid-template-rows: minmax(0, 1fr) auto;
     height: calc(var(--app-height) - var(--mobile-frame-top, var(--topbar-height, 72px)));
     min-height: 0;
     overflow: hidden;
+  }
+
+  body.mobile-ui .session-status-rail {
+    position: fixed;
+    top: var(--mobile-frame-top, var(--topbar-height, 72px));
+    left: 0;
+    right: 0;
+    z-index: 25;
+    min-height: var(--session-rail-height);
+    border-right: 0;
+    border-left: 0;
+    border-radius: 0;
+    background: rgba(251, 249, 245, 0.97);
+    padding: 5px max(12px, var(--safe-right)) 5px max(12px, var(--safe-left));
+    box-shadow: none;
+    backdrop-filter: blur(14px);
+  }
+
+  body.mobile-ui .session-status-rail:not([hidden]) ~ .codex-job-detail {
+    padding-top: calc(var(--session-rail-height) + 8px);
   }
 
   body.mobile-ui .codex-job-detail {

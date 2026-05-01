@@ -614,7 +614,13 @@ export function installCore(app) {
   app.workspaceDirectoryName = function workspaceDirectoryName(workspace) {
     const pathLabel = String(workspace?.path || "").trim().replace(/[/\\]+$/g, "");
     const directoryName = pathLabel.split(/[/\\]/).filter(Boolean).pop();
-    return directoryName || workspace?.label || workspace?.id || "未命名工程";
+    const label = String(workspace?.label || "").trim();
+    if (label && app.looksLikeWorktreeDirectoryName(directoryName)) return label;
+    return directoryName || label || workspace?.id || "未命名工程";
+  };
+
+  app.looksLikeWorktreeDirectoryName = function looksLikeWorktreeDirectoryName(value) {
+    return /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(String(value || ""));
   };
 
   app.refreshTopbarProjectChip = function refreshTopbarProjectChip() {
@@ -912,6 +918,7 @@ function queryElements(documentRef) {
     codexQueueMeta: documentRef.querySelector("#codexQueueMeta"),
     activeSessionTitle: documentRef.querySelector("#activeSessionTitle"),
     activeSessionMeta: documentRef.querySelector("#activeSessionMeta"),
+    sessionStatusRail: documentRef.querySelector("#sessionStatusRail"),
     stopCodexTurnButton: documentRef.querySelector("#stopCodexTurnButton"),
     turnActivityLine: documentRef.querySelector("#turnActivityLine"),
     turnActivityText: documentRef.querySelector("#turnActivityText"),

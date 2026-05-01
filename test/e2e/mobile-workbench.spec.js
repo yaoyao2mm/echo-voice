@@ -580,6 +580,22 @@ test("mobile plan mode sends planning instructions without polluting the visible
                 item: { type: "plan", id: "plan_1", text: "1. 先梳理入口\n2. 再实现验证" }
               }
             }
+          },
+          {
+            type: "git.summary",
+            text: "Git: echo/job-plan-e2e @ 46025af\nNo Git changes detected.",
+            appThreadId,
+            raw: {
+              source: "desktop-agent",
+              gitSummary: {
+                root: "/tmp/echo-worktree",
+                branch: "echo/job-plan-e2e",
+                commit: "46025af",
+                statusShort: "",
+                diffStat: "",
+                changedFiles: []
+              }
+            }
           }
         ]
       }
@@ -592,13 +608,27 @@ test("mobile plan mode sends planning instructions without polluting the visible
       data: {
         id: command.id,
         agentId: "mobile-e2e-agent",
-        result: { ok: true, appThreadId, sessionStatus: "active" }
+        result: {
+          ok: true,
+          appThreadId,
+          sessionStatus: "active",
+          execution: {
+            mode: "worktree",
+            branchName: "echo/job-plan-e2e",
+            path: "/tmp/echo-worktree",
+            baseCommit: "46025af178c1cb1c32356031a444ff1110666503"
+          }
+        }
       }
     });
     expect(completeResponse.ok()).toBeTruthy();
 
     await expect(page.locator("#codexRunSummary")).toContainText(prompt);
     await expect(page.locator("#codexRunSummary")).not.toContainText("请先进入计划模式");
+    await expect(page.locator("#codexRunSummary")).not.toContainText("Git 无变更");
+    await expect(page.locator("#sessionStatusRail")).toContainText("隔离 worktree");
+    await expect(page.locator("#sessionStatusRail")).toContainText("Git 无变更");
+    await expect(page.locator("#sessionStatusRail")).toContainText("echo/job-plan-e2e");
     await expect(page.locator(".thread-plan-card")).toContainText("先梳理入口");
   } finally {
     clearInterval(keepAlive);

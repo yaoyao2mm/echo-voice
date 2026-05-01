@@ -233,6 +233,7 @@ export function installSessions(app) {
 
     if (canSkipDetailRender) {
       app.renderCodexLog(job, errorText);
+      app.renderSessionStatusRail(job);
       app.refreshActiveSessionHeader();
       app.updateComposerAvailability();
       app.updateStopButton();
@@ -249,6 +250,7 @@ export function installSessions(app) {
     `;
     state.renderedCodexSessionId = job.id;
     state.renderedCodexSessionSignature = renderSignature;
+    app.renderSessionStatusRail(job);
     app.renderApprovals(job);
     app.renderCodexLog(job, errorText);
     app.refreshActiveSessionHeader();
@@ -388,6 +390,7 @@ export function installSessions(app) {
     state.renderedCodexSessionSignature = "";
     elements.codexApprovals.hidden = true;
     elements.codexApprovals.innerHTML = "";
+    app.renderSessionStatusRail(null);
     elements.runLog.hidden = true;
     elements.codexLog.textContent = "";
     elements.codexRunSummary.innerHTML = `
@@ -774,19 +777,6 @@ export function installSessions(app) {
       seenSystem.add(system.text);
       timeline.push(system);
     }
-
-    const worktree = app.worktreeEntryFromSession(job);
-    if (worktree?.text && !seenSystem.has(worktree.text)) {
-      seenSystem.add(worktree.text);
-      timeline.push(worktree);
-    }
-
-    for (const event of job.events || []) {
-      const gitSummary = app.gitSummaryEntryFromEvent(event);
-      if (!gitSummary?.text || seenSystem.has(gitSummary.text)) continue;
-      seenSystem.add(gitSummary.text);
-      timeline.push(gitSummary);
-    }
   };
 
   app.sortTimelineEntries = function sortTimelineEntries(timeline) {
@@ -834,29 +824,76 @@ export function installSessions(app) {
     return null;
   };
 
-  app.gitSummaryEntryFromEvent = function gitSummaryEntryFromEvent(event) {
-    if (event.type !== "git.summary") return null;
-    const summary = event.raw?.gitSummary || {};
-    const changedCount = Array.isArray(summary.changedFiles) ? summary.changedFiles.length : 0;
-    const title = changedCount > 0 ? `Git 变更 ${changedCount} 个文件` : "Git 无变更";
-    const detail = String(event.text || "").trim();
+  app.renderSessionStatusRail = function renderSessionStatusRail(session) {
+    const rail = elements.sessionStatusRail;
+    if (!rail) return;
+
+    const entry = app.sessionStatusRailEntry(session);
+    if (!entry) {
+      rail.hidden = true;
+      rail.innerHTML = "";
+      rail.removeAttribute("title");
+      rail.dataset.mode = "";
+      rail.dataset.gitState = "";
+      return;
+    }
+
+    rail.hidden = false;
+    rail.dataset.mode = entry.mode;
+    rail.dataset.gitState = entry.gitState;
+    rail.title = entry.title;
+    rail.innerHTML = `
+      <span class="session-status-dot" aria-hidden="true"></span>
+      <span class="session-status-mode">${app.escapeHtml(entry.modeLabel)}</span>
+      <span class="session-status-git">${app.escapeHtml(entry.gitLabel)}</span>
+      ${entry.refText ? `<span class="session-status-ref">${app.escapeHtml(entry.refText)}</span>` : ""}
+    `;
+  };
+
+  app.sessionStatusRailEntry = function sessionStatusRailEntry(session) {
+    if (!session?.id) return null;
+
+    const execution = session.execution || {};
+    const latestGitEvent = app.latestGitSummaryEvent(session.events || []);
+    const summary = latestGitEvent?.raw?.gitSummary || {};
+    const inWorktree = execution.mode === "worktree";
+    if (!inWorktree && !latestGitEvent) return null;
+
+    const changedFiles = Array.isArray(summary.changedFiles) ? summary.changedFiles : null;
+    const branch = String(summary.branch || execution.branchName || "").trim();
+    const commit = app.shortCommit(summary.commit || execution.baseCommit || "");
+    const refText = [branch, commit].filter(Boolean).join(" @ ");
+    const gitLabel = changedFiles
+      ? changedFiles.length > 0
+        ? `Git 变更 ${changedFiles.length}`
+        : "Git 无变更"
+      : app.sessionStatusGitPendingLabel(session);
+    const modeLabel = inWorktree ? "隔离 worktree" : "主工作区";
+    const title = [modeLabel, refText, execution.path || summary.root || ""].filter(Boolean).join("\n");
+
     return {
-      kind: "git",
-      title,
-      text: detail || title,
-      at: event.at || ""
+      mode: inWorktree ? "worktree" : "workspace",
+      gitState: changedFiles && changedFiles.length > 0 ? "dirty" : changedFiles ? "clean" : "pending",
+      modeLabel,
+      gitLabel,
+      refText,
+      title
     };
   };
 
-  app.worktreeEntryFromSession = function worktreeEntryFromSession(session) {
-    const execution = session?.execution || {};
-    if (execution.mode !== "worktree") return null;
-    const branch = execution.branchName ? ` · ${execution.branchName}` : "";
-    return {
-      kind: "system",
-      text: `隔离 worktree${branch}`,
-      at: execution.createdAt || session.createdAt || ""
-    };
+  app.latestGitSummaryEvent = function latestGitSummaryEvent(events) {
+    return [...(events || [])].reverse().find((event) => event.type === "git.summary") || null;
+  };
+
+  app.sessionStatusGitPendingLabel = function sessionStatusGitPendingLabel(session) {
+    if (["queued", "starting", "running"].includes(session.status)) return "运行中";
+    return "Git 待更新";
+  };
+
+  app.shortCommit = function shortCommit(value) {
+    const text = String(value || "").trim();
+    if (!text) return "";
+    return text.length > 12 ? text.slice(0, 7) : text;
   };
 
   app.renderConversationEntry = function renderConversationEntry(entry) {
@@ -894,20 +931,6 @@ export function installSessions(app) {
               ${entry.at ? `<span class="thread-message-time">${app.escapeHtml(app.formatMessageTime(entry.at))}</span>` : ""}
             </div>
             <div class="thread-plan-card-body">${app.escapeHtml(entry.text)}</div>
-          </div>
-        </article>
-      `;
-    }
-
-    if (entry.kind === "git") {
-      return `
-        <article class="thread-message thread-message-system">
-          <div class="thread-plan-card thread-git-card">
-            <div class="thread-plan-card-head">
-              <span class="thread-status-pill">${app.escapeHtml(entry.title || "Git 摘要")}</span>
-              ${entry.at ? `<span class="thread-message-time">${app.escapeHtml(app.formatMessageTime(entry.at))}</span>` : ""}
-            </div>
-            <pre class="thread-git-summary">${app.escapeHtml(entry.text)}</pre>
           </div>
         </article>
       `;
