@@ -103,27 +103,38 @@ export function installCore(app) {
     window.addEventListener("resize", app.syncViewportMetrics, { passive: true });
     window.visualViewport?.addEventListener("resize", app.syncViewportMetrics, { passive: true });
     window.visualViewport?.addEventListener("scroll", app.syncViewportMetrics, { passive: true });
+    elements.codexPrompt?.addEventListener("focus", app.queueViewportSync);
+    elements.codexPrompt?.addEventListener("blur", app.queueViewportSync);
   };
 
   app.syncViewportMetrics = function syncViewportMetrics() {
+    const keepConversationBottom = app.shouldKeepConversationAtBottom();
     const viewport = window.visualViewport;
     const nextHeight = Math.round(viewport?.height || window.innerHeight || 0);
+    const viewportTop = Math.max(0, Math.round(viewport?.offsetTop || 0));
     if (nextHeight > 0) {
       document.documentElement.style.setProperty("--app-height", `${nextHeight}px`);
     }
+    document.documentElement.style.setProperty("--visual-viewport-top", `${viewportTop}px`);
     document.body.classList.toggle("mobile-ui", app.usesCompactTopbarMode());
     document.body.classList.toggle("desktop-ui", !app.usesCompactTopbarMode());
+    if (app.usesCompactTopbarMode() && Math.abs(window.scrollY || 0) > 0) {
+      window.scrollTo(0, 0);
+    }
     if (elements.topbar) {
       document.documentElement.style.setProperty("--topbar-height", `${Math.round(elements.topbar.offsetHeight || 0)}px`);
     }
     app.syncComposerInputHeight();
     app.syncComposerMetrics();
+    app.restoreConversationBottomIfNeeded(keepConversationBottom);
   };
 
   app.queueViewportSync = function queueViewportSync() {
     window.requestAnimationFrame(() => {
       app.syncViewportMetrics();
     });
+    window.setTimeout(app.syncViewportMetrics, 120);
+    window.setTimeout(app.syncViewportMetrics, 320);
   };
 
   app.applyThemeMode = function applyThemeMode(themeMode, options = {}) {
@@ -251,7 +262,8 @@ export function installCore(app) {
   };
 
   app.syncComposerMetrics = function syncComposerMetrics() {
-    const composerHeight = Math.round(elements.composer?.offsetHeight || 0);
+    const composerRectHeight = elements.composer?.getBoundingClientRect?.().height || 0;
+    const composerHeight = Math.ceil(composerRectHeight || elements.composer?.offsetHeight || 0);
     if (composerHeight > 0) {
       document.documentElement.style.setProperty("--composer-height", `${composerHeight}px`);
     }
@@ -260,12 +272,29 @@ export function installCore(app) {
   app.syncComposerInputHeight = function syncComposerInputHeight() {
     const textarea = elements.codexPrompt;
     if (!textarea) return;
+    const keepConversationBottom = app.shouldKeepConversationAtBottom();
     const maxHeight = app.usesCompactTopbarMode() ? 132 : 168;
     const minHeight = app.usesCompactTopbarMode() ? 56 : 52;
     textarea.style.height = "auto";
     const nextHeight = Math.max(textarea.scrollHeight, minHeight);
     textarea.style.height = `${Math.min(nextHeight, maxHeight)}px`;
     textarea.style.overflowY = nextHeight > maxHeight ? "auto" : "hidden";
+    app.syncComposerMetrics();
+    app.restoreConversationBottomIfNeeded(keepConversationBottom);
+  };
+
+  app.shouldKeepConversationAtBottom = function shouldKeepConversationAtBottom() {
+    return Boolean(
+      app.usesCompactTopbarMode() &&
+        app.conversationScrollSnapshot &&
+        app.wasConversationNearBottom &&
+        app.wasConversationNearBottom(app.conversationScrollSnapshot())
+    );
+  };
+
+  app.restoreConversationBottomIfNeeded = function restoreConversationBottomIfNeeded(shouldRestore) {
+    if (!shouldRestore || !app.scrollConversationToBottom) return;
+    app.scrollConversationToBottom({ forceTopbarVisible: false });
   };
 
   app.refreshComposerStatusBar = function refreshComposerStatusBar() {

@@ -983,6 +983,26 @@ test("mobile composer stays pinned while the conversation surface scrolls", asyn
       )
       .toBeLessThanOrEqual(1);
 
+    await page.waitForTimeout(360);
+    const shiftedViewport = await page.evaluate(async () => {
+      const root = document.documentElement;
+      root.style.setProperty("--visual-viewport-top", "96px");
+      await new Promise((resolve) => setTimeout(resolve, 280));
+      const detail = document.querySelector("#codexJobDetail")?.getBoundingClientRect();
+      const topbar = document.querySelector(".topbar")?.getBoundingClientRect();
+      const shellPaddingTop = Number.parseFloat(window.getComputedStyle(document.querySelector(".shell")).paddingTop);
+      root.style.setProperty("--visual-viewport-top", "0px");
+      await new Promise((resolve) => setTimeout(resolve, 280));
+      return {
+        detailTop: detail?.top || 0,
+        topbarTop: topbar?.top || 0,
+        shellPaddingTop
+      };
+    });
+    expect(shiftedViewport.detailTop).toBeGreaterThan(96);
+    expect(shiftedViewport.topbarTop).toBeGreaterThanOrEqual(95);
+    expect(shiftedViewport.shellPaddingTop).toBeGreaterThan(96);
+
     await page.evaluate(() => {
       const surface = document.querySelector("#codexJobDetail");
       const thread = document.querySelector(".conversation-thread");
@@ -990,7 +1010,10 @@ test("mobile composer stays pinned while the conversation surface scrolls", asyn
       const filler = document.createElement("div");
       filler.setAttribute("data-test-filler", "true");
       filler.style.height = "1600px";
-      thread.append(filler);
+      const marker = document.createElement("article");
+      marker.className = "thread-message thread-message-assistant";
+      marker.innerHTML = '<div class="thread-bubble" data-test-latest-message="true">Latest message should stay above the composer.</div>';
+      thread.append(filler, marker);
       surface.scrollTop = surface.scrollHeight;
       surface.dispatchEvent(new Event("scroll"));
     });
@@ -1029,6 +1052,33 @@ test("mobile composer stays pinned while the conversation surface scrolls", asyn
     expect(Math.abs(collapsedComposer.top - initialComposer.top)).toBeLessThanOrEqual(1);
     expect(collapsedComposer.bottomGap).toBeLessThanOrEqual(1);
     expect(collapsedComposer.mainHeight).toBeGreaterThan(initialComposer.top + collapsedComposer.topbarHeight / 2);
+
+    await page.locator("#codexPrompt").fill(
+      ["Composer growth regression", "line 2", "line 3", "line 4", "line 5", "line 6", "line 7"].join("\n")
+    );
+
+    await expect
+      .poll(() =>
+        page.locator("#codexJobDetail").evaluate((node) => {
+          return Math.round(node.scrollHeight - node.clientHeight - node.scrollTop);
+        })
+      )
+      .toBeLessThanOrEqual(2);
+
+    const focusedLayout = await page.locator("#codexJobDetail").evaluate((node) => {
+      const marker = document.querySelector("[data-test-latest-message]");
+      const composer = document.querySelector(".composer");
+      const markerRect = marker?.getBoundingClientRect();
+      const composerRect = composer?.getBoundingClientRect();
+      return {
+        markerBottom: Math.round(markerRect?.bottom || 0),
+        composerTop: Math.round(composerRect?.top || 0),
+        paddingBottom: Number.parseFloat(window.getComputedStyle(node).paddingBottom)
+      };
+    });
+
+    expect(focusedLayout.paddingBottom).toBeGreaterThan(initialComposer.height + 24);
+    expect(focusedLayout.markerBottom).toBeLessThanOrEqual(focusedLayout.composerTop - 8);
   } finally {
     clearInterval(keepAlive);
   }

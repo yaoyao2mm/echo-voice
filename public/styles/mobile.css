@@ -10,18 +10,18 @@
   }
 
   .shell {
-    padding: var(--mobile-frame-top, var(--topbar-height, 72px)) 0 0;
+    padding: calc(var(--visual-viewport-top, 0px) + var(--mobile-frame-top, var(--topbar-height, 72px))) 0 0;
     padding-bottom: 0;
     transition: padding-top 240ms ease;
   }
 
   body.topbar-collapsed .shell {
-    padding-top: calc(var(--safe-top) + 8px);
+    padding-top: calc(var(--visual-viewport-top, 0px) + var(--safe-top) + 8px);
   }
 
   .topbar {
     position: fixed;
-    top: 0;
+    top: var(--visual-viewport-top, 0px);
     left: 0;
     right: 0;
     z-index: 26;
@@ -729,7 +729,7 @@
     overscroll-behavior-y: contain;
     -webkit-overflow-scrolling: touch;
     box-sizing: border-box;
-    padding: 0 0 calc(var(--composer-height, 0px) + 8px);
+    padding: 0 0 calc(var(--composer-height, 0px) + 24px);
   }
 
   body.mobile-ui .codex-run-summary {
