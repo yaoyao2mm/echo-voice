@@ -753,10 +753,16 @@ export function installSessions(app) {
     const messages = Array.isArray(job.messages) ? job.messages : [];
 
     if (messages.length > 0) {
+      const renderedAssistantKeys = new Set();
+      const renderedAssistantTexts = new Set();
       for (const message of messages) {
         const text = String(message.text || "").trim();
         const attachments = app.messageAttachments(message);
         if (!text && attachments.length === 0) continue;
+        if (message.role === "assistant") {
+          if (message.externalKey) renderedAssistantKeys.add(message.externalKey);
+          if (text) renderedAssistantTexts.add(text);
+        }
         timeline.push({
           kind: "message",
           role: message.role === "assistant" ? "assistant" : "user",
@@ -764,6 +770,17 @@ export function installSessions(app) {
           attachments,
           at: message.createdAt || job.updatedAt || job.createdAt || ""
         });
+      }
+
+      for (const event of job.events || []) {
+        const assistantEntry = app.assistantMessageEntryFromEvent(event);
+        if (!assistantEntry?.text) continue;
+        if (assistantEntry.externalKey && renderedAssistantKeys.has(assistantEntry.externalKey)) continue;
+        if (!assistantEntry.externalKey && renderedAssistantTexts.has(assistantEntry.text)) continue;
+        if (app.lastTimelineMessageText(timeline, "assistant") === assistantEntry.text) continue;
+        if (assistantEntry.externalKey) renderedAssistantKeys.add(assistantEntry.externalKey);
+        renderedAssistantTexts.add(assistantEntry.text);
+        timeline.push(assistantEntry);
       }
     } else {
       const events = Array.isArray(job.events) ? job.events : [];
@@ -1138,11 +1155,72 @@ export function installSessions(app) {
     return "";
   };
 
+  app.assistantMessageEntryFromEvent = function assistantMessageEntryFromEvent(event) {
+    const text = app.assistantMessageText(event);
+    if (!text) return null;
+    return {
+      kind: "message",
+      role: "assistant",
+      text,
+      at: event.at || "",
+      externalKey: app.assistantMessageExternalKey(event)
+    };
+  };
+
+  app.assistantMessageExternalKey = function assistantMessageExternalKey(event) {
+    const raw = event?.raw || {};
+    const params = raw.params || {};
+    const item = params.item || {};
+    if ((raw.method || event?.type) !== "item/completed" || item.type !== "agentMessage") return "";
+    const turnId = String(params.turnId || params.turn?.id || "").trim() || "turn";
+    const itemId = String(item.id || "").trim();
+    return itemId ? `assistant:${turnId}:${itemId}` : "";
+  };
+
   app.activeAssistantDraft = function activeAssistantDraft(job, timeline) {
+    const streamedDraft = app.activeAssistantDraftFromEvents(job.events || []);
+    if (streamedDraft && app.lastTimelineMessageText(timeline, "assistant") !== streamedDraft) return streamedDraft;
     const current = String(job.finalMessage || "").trim();
     if (!current) return "";
     if (app.lastTimelineMessageText(timeline, "assistant") === current) return "";
     return current;
+  };
+
+  app.activeAssistantDraftFromEvents = function activeAssistantDraftFromEvents(events) {
+    const drafts = new Map();
+    const completed = new Set();
+
+    for (const event of events || []) {
+      const raw = event.raw || {};
+      const method = raw.method || event.type || "";
+      if (method === "item/completed" && raw.params?.item?.type === "agentMessage") {
+        const key = app.assistantEventItemKey(event);
+        if (key) {
+          completed.add(key);
+          drafts.delete(key);
+        }
+        continue;
+      }
+      if (method !== "item/agentMessage/delta") continue;
+      const key = app.assistantEventItemKey(event);
+      if (!key || completed.has(key)) continue;
+      const delta = String(event.text || "");
+      if (!delta) continue;
+      drafts.set(key, `${drafts.get(key) || ""}${delta}`);
+    }
+
+    const latest = Array.from(drafts.values()).filter(Boolean).at(-1) || "";
+    return latest.trim();
+  };
+
+  app.assistantEventItemKey = function assistantEventItemKey(event) {
+    const params = event?.raw?.params || {};
+    const item = params.item || {};
+    const threadId = String(params.threadId || "").trim();
+    const turnId = String(params.turnId || params.turn?.id || "").trim();
+    const itemId = String(params.itemId || item.id || "").trim();
+    if (!threadId && !turnId && !itemId) return "";
+    return [threadId, turnId, itemId].join("\u001f");
   };
 
   app.lastTimelineMessageText = function lastTimelineMessageText(timeline, role) {

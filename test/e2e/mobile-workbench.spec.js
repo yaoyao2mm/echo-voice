@@ -103,28 +103,41 @@ async function activateCodexSession(request, sessionId) {
   const command = await leaseNextCodexCommand(request);
   expect(command.sessionId).toBe(sessionId);
   const appThreadId = `thr_${sessionId}`;
-  const eventsResponse = await request.post("/api/agent/codex/sessions/events", {
+  await postCodexSessionEvents(request, sessionId, [{ type: "thread.started", text: "started", appThreadId, sessionStatus: "active" }]);
+  await completeCodexSessionCommand(request, command, { appThreadId });
+}
+
+async function postCodexSessionEvents(request, sessionId, events) {
+  const response = await request.post("/api/agent/codex/sessions/events", {
     headers: {
       "X-Echo-Token": pairingToken
     },
     data: {
       id: sessionId,
       agentId: "mobile-e2e-agent",
-      events: [{ type: "thread.started", text: "started", appThreadId, sessionStatus: "active" }]
+      events
     }
   });
-  expect(eventsResponse.ok()).toBeTruthy();
-  const completeResponse = await request.post("/api/agent/codex/sessions/commands/complete", {
+  expect(response.ok()).toBeTruthy();
+}
+
+async function completeCodexSessionCommand(request, command, result = {}) {
+  const response = await request.post("/api/agent/codex/sessions/commands/complete", {
     headers: {
       "X-Echo-Token": pairingToken
     },
     data: {
       id: command.id,
       agentId: "mobile-e2e-agent",
-      result: { ok: true, appThreadId, sessionStatus: "active" }
+      result: {
+        ok: true,
+        appThreadId: `thr_${command.sessionId}`,
+        sessionStatus: "active",
+        ...result
+      }
     }
   });
-  expect(completeResponse.ok()).toBeTruthy();
+  expect(response.ok()).toBeTruthy();
 }
 
 async function loginToWorkbench(page) {
@@ -445,6 +458,119 @@ test("mobile shows a compact terminal activity line while a command runs", async
     });
     expect(completeResponse.ok()).toBeTruthy();
     await expect(page.locator("#turnActivityLine")).toBeHidden();
+  } finally {
+    clearInterval(keepAlive);
+  }
+});
+
+test("mobile renders streamed assistant replies as separate messages", async ({ page, request }) => {
+  await touchMockAgent(request);
+  const keepAlive = setInterval(() => {
+    touchMockAgent(request).catch(() => {});
+  }, 10000);
+
+  try {
+    await loginToWorkbench(page);
+
+    const firstPrompt = `第一轮流式回复 ${Date.now()}`;
+    await page.locator("#codexPrompt").fill(firstPrompt);
+    await page.locator("#sendCodexButton").click();
+    const firstCommand = await leaseCodexCommandForPrompt(request, firstPrompt);
+    const appThreadId = `thr_${firstCommand.sessionId}`;
+    await postCodexSessionEvents(request, firstCommand.sessionId, [
+      {
+        type: "turn/started",
+        text: "Codex turn started.",
+        appThreadId,
+        activeTurnId: "turn_first",
+        sessionStatus: "running",
+        raw: { method: "turn/started", params: { threadId: appThreadId, turn: { id: "turn_first" } } }
+      },
+      {
+        type: "item/completed",
+        text: "第一轮回复完成",
+        finalMessage: "第一轮回复完成",
+        appThreadId,
+        raw: {
+          method: "item/completed",
+          params: {
+            threadId: appThreadId,
+            turnId: "turn_first",
+            item: { type: "agentMessage", id: "msg_first", text: "第一轮回复完成" }
+          }
+        }
+      },
+      {
+        type: "turn/completed",
+        text: "Turn completed.",
+        appThreadId,
+        clearActiveTurnId: true,
+        sessionStatus: "active",
+        raw: { method: "turn/completed", params: { threadId: appThreadId, turn: { id: "turn_first", status: "completed" } } }
+      }
+    ]);
+    await completeCodexSessionCommand(request, firstCommand, { appThreadId });
+    await expect(page.locator(".thread-message-assistant .thread-bubble", { hasText: "第一轮回复完成" })).toBeVisible();
+
+    const secondPrompt = "第二轮应该单独显示";
+    await page.locator("#codexPrompt").fill(secondPrompt);
+    await page.locator("#sendCodexButton").click();
+    const secondCommand = await leaseCodexCommandForPrompt(request, secondPrompt);
+    await postCodexSessionEvents(request, secondCommand.sessionId, [
+      {
+        type: "turn/started",
+        text: "Codex turn started.",
+        appThreadId,
+        activeTurnId: "turn_second",
+        sessionStatus: "running",
+        raw: { method: "turn/started", params: { threadId: appThreadId, turn: { id: "turn_second" } } }
+      },
+      {
+        type: "item/agentMessage/delta",
+        text: "第二轮",
+        finalMessage: "第二轮",
+        appThreadId,
+        raw: { method: "item/agentMessage/delta", params: { threadId: appThreadId, turnId: "turn_second", itemId: "msg_second" } }
+      },
+      {
+        type: "item/agentMessage/delta",
+        text: "回复草稿",
+        finalMessage: "回复草稿",
+        appThreadId,
+        raw: { method: "item/agentMessage/delta", params: { threadId: appThreadId, turnId: "turn_second", itemId: "msg_second" } }
+      }
+    ]);
+    await expect(page.locator(".thread-message-assistant .thread-bubble", { hasText: "第二轮回复草稿" })).toBeVisible();
+    await expect(page.locator(".thread-message-assistant .thread-bubble")).toHaveCount(2);
+
+    await postCodexSessionEvents(request, secondCommand.sessionId, [
+      {
+        type: "item/completed",
+        text: "第二轮回复完成",
+        finalMessage: "第二轮回复完成",
+        appThreadId,
+        raw: {
+          method: "item/completed",
+          params: {
+            threadId: appThreadId,
+            turnId: "turn_second",
+            item: { type: "agentMessage", id: "msg_second", text: "第二轮回复完成" }
+          }
+        }
+      },
+      {
+        type: "turn/completed",
+        text: "Turn completed.",
+        appThreadId,
+        clearActiveTurnId: true,
+        sessionStatus: "active",
+        raw: { method: "turn/completed", params: { threadId: appThreadId, turn: { id: "turn_second", status: "completed" } } }
+      }
+    ]);
+    await completeCodexSessionCommand(request, secondCommand, { appThreadId });
+    await expect(page.locator(".thread-message-assistant .thread-bubble", { hasText: "第一轮回复完成" })).toBeVisible();
+    await expect(page.locator(".thread-message-assistant .thread-bubble", { hasText: "第二轮回复完成" })).toBeVisible();
+    await expect(page.locator(".thread-message-assistant .thread-bubble")).toHaveCount(2);
   } finally {
     clearInterval(keepAlive);
   }
@@ -799,16 +925,19 @@ test("mobile composer stays pinned while the conversation surface scrolls", asyn
 
     const initialComposer = await page.locator(".composer").evaluate((node) => {
       const rect = node.getBoundingClientRect();
+      const surface = document.querySelector("#codexJobDetail");
       return {
         position: window.getComputedStyle(node).position,
         top: rect.top,
-        bottomGap: window.innerHeight - rect.bottom
+        bottomGap: window.innerHeight - rect.bottom,
+        height: rect.height,
+        surfacePaddingBottom: Number.parseFloat(window.getComputedStyle(surface).paddingBottom)
       };
     });
 
-    expect(initialComposer.position).toBe("relative");
+    expect(initialComposer.position).toBe("fixed");
     expect(initialComposer.bottomGap).toBeLessThanOrEqual(1);
-    await expect(page.locator("#codexJobDetail")).toHaveCSS("padding-bottom", "8px");
+    expect(initialComposer.surfacePaddingBottom).toBeGreaterThanOrEqual(initialComposer.height);
     await expect
       .poll(() =>
         page.locator(".composer-toolbar").evaluate((node) => {
@@ -847,21 +976,21 @@ test("mobile composer stays pinned while the conversation surface scrolls", asyn
       };
     });
 
-    if (!scrolledComposer.topbarCollapsed) {
-      expect(Math.abs(scrolledComposer.top - initialComposer.top)).toBeLessThanOrEqual(2);
-    }
+    expect(Math.abs(scrolledComposer.top - initialComposer.top)).toBeLessThanOrEqual(1);
     expect(scrolledComposer.bottomGap).toBeLessThanOrEqual(1);
 
     const collapsedComposer = await page.locator(".composer").evaluate((node) => {
       document.body.classList.add("topbar-collapsed");
       const rect = node.getBoundingClientRect();
       return {
+        top: rect.top,
         bottomGap: window.innerHeight - rect.bottom,
         mainHeight: document.querySelector(".codex-main")?.getBoundingClientRect().height || 0,
         topbarHeight: document.querySelector(".topbar")?.getBoundingClientRect().height || 0
       };
     });
 
+    expect(Math.abs(collapsedComposer.top - initialComposer.top)).toBeLessThanOrEqual(1);
     expect(collapsedComposer.bottomGap).toBeLessThanOrEqual(1);
     expect(collapsedComposer.mainHeight).toBeGreaterThan(initialComposer.top + collapsedComposer.topbarHeight / 2);
   } finally {

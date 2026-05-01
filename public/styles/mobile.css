@@ -497,7 +497,7 @@
       transform 180ms ease,
       opacity 160ms ease;
     transform-origin: top center;
-    will-change: transform, opacity;
+    will-change: auto;
   }
 
   .session-sidebar {
@@ -541,6 +541,7 @@
     transform: translateY(18px) scale(0.985);
     opacity: 0.24;
     pointer-events: none;
+    will-change: transform, opacity;
   }
 
   .codex-section.sessions-open .composer {
@@ -676,8 +677,9 @@
   body.mobile-ui .codex-main {
     --mobile-chat-rail: clamp(10px, 3vw, 14px);
     --session-rail-height: 28px;
+    position: relative;
     display: grid;
-    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-rows: minmax(0, 1fr);
     height: calc(var(--app-height) - var(--mobile-frame-top, var(--topbar-height, 72px)));
     min-height: 0;
     overflow: hidden;
@@ -685,7 +687,7 @@
 
   body.mobile-ui .session-status-rail {
     --session-rail-height: 28px;
-    position: fixed;
+    position: absolute;
     top: -1px;
     left: 0;
     right: 0;
@@ -726,7 +728,8 @@
     overflow-x: hidden;
     overscroll-behavior-y: contain;
     -webkit-overflow-scrolling: touch;
-    padding: 0 0 8px;
+    box-sizing: border-box;
+    padding: 0 0 calc(var(--composer-height, 0px) + 8px);
   }
 
   body.mobile-ui .codex-run-summary {
@@ -775,14 +778,14 @@
   }
 
   body.mobile-ui .composer {
-    grid-row: 2;
-    position: relative;
-    left: auto;
-    right: auto;
-    bottom: auto;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
     width: 100%;
     margin: 0;
     z-index: 24;
+    transform: translate3d(0, 0, 0);
   }
 
   body.mobile-ui .composer-statusbar,
