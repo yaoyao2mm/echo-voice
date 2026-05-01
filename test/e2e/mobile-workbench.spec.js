@@ -633,13 +633,33 @@ test("mobile plan mode sends planning instructions without polluting the visible
       const topbar = document.querySelector(".topbar")?.getBoundingClientRect();
       const rail = document.querySelector("#sessionStatusRail")?.getBoundingClientRect();
       const detail = document.querySelector("#codexJobDetail")?.getBoundingClientRect();
+      const runSummary = document.querySelector("#codexRunSummary")?.getBoundingClientRect();
+      const detailStyle = document.querySelector("#codexJobDetail")
+        ? window.getComputedStyle(document.querySelector("#codexJobDetail"))
+        : null;
       return {
         railTouchesTopbar: Boolean(topbar && rail && Math.abs(rail.top - topbar.bottom) <= 2),
-        detailStartsBelowRail: Boolean(rail && detail && detail.top >= rail.bottom - 1)
+        contentStartsBelowRail: Boolean(rail && runSummary && runSummary.top >= rail.bottom - 1),
+        detailPaddingTop: detailStyle?.paddingTop || "",
+        detailTopAlignedWithTopbar: Boolean(topbar && detail && Math.abs(detail.top - topbar.bottom) <= 2)
       };
     });
     expect(railLayout.railTouchesTopbar).toBeTruthy();
-    expect(railLayout.detailStartsBelowRail).toBeTruthy();
+    expect(railLayout.contentStartsBelowRail).toBeTruthy();
+    expect(railLayout.detailPaddingTop).toBe("28px");
+    expect(railLayout.detailTopAlignedWithTopbar).toBeTruthy();
+    await page.evaluate(() => document.body.classList.add("topbar-collapsed"));
+    await page.waitForTimeout(280);
+    const collapsedRailLayout = await page.locator("#sessionStatusRail").evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      return {
+        bottom: rect.bottom,
+        opacity: window.getComputedStyle(node).opacity
+      };
+    });
+    expect(collapsedRailLayout.bottom).toBeLessThanOrEqual(1);
+    expect(collapsedRailLayout.opacity).toBe("0");
+    await page.evaluate(() => document.body.classList.remove("topbar-collapsed"));
     await expect(page.locator(".thread-plan-card")).toContainText("先梳理入口");
   } finally {
     clearInterval(keepAlive);

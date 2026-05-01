@@ -675,37 +675,51 @@
 
   body.mobile-ui .codex-main {
     --mobile-chat-rail: clamp(10px, 3vw, 14px);
-    --session-rail-height: 30px;
+    --session-rail-height: 28px;
     display: grid;
-    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-rows: minmax(0, 1fr) auto;
     height: calc(var(--app-height) - var(--mobile-frame-top, var(--topbar-height, 72px)));
     min-height: 0;
     overflow: hidden;
   }
 
   body.mobile-ui .session-status-rail {
-    grid-row: 1;
-    position: relative;
-    top: auto;
-    left: auto;
-    right: auto;
-    z-index: 1;
+    --session-rail-height: 28px;
+    position: fixed;
+    top: -1px;
+    left: 0;
+    right: 0;
+    z-index: 25;
     min-height: var(--session-rail-height);
     border-right: 0;
     border-left: 0;
     border-radius: 0;
     background: rgba(251, 249, 245, 0.97);
-    padding: 5px max(12px, var(--safe-right)) 5px max(12px, var(--safe-left));
+    padding: 4px max(12px, var(--safe-right)) 4px max(12px, var(--safe-left));
     box-shadow: none;
     backdrop-filter: blur(14px);
+    transition:
+      transform 240ms ease,
+      opacity 180ms ease,
+      background 220ms ease;
+  }
+
+  body.mobile-ui.topbar-collapsed .session-status-rail {
+    transform: translateY(calc(-1 * (var(--topbar-height, 72px) + var(--session-rail-height, 28px) + 6px)));
+    opacity: 0;
+    pointer-events: none;
   }
 
   body.mobile-ui .session-status-rail:not([hidden]) ~ .codex-job-detail {
+    padding-top: var(--session-rail-height);
+  }
+
+  body.mobile-ui.topbar-collapsed .session-status-rail:not([hidden]) ~ .codex-job-detail {
     padding-top: 0;
   }
 
   body.mobile-ui .codex-job-detail {
-    grid-row: 2;
+    grid-row: 1;
     height: 100%;
     min-height: 0;
     overflow-y: auto;
@@ -761,7 +775,7 @@
   }
 
   body.mobile-ui .composer {
-    grid-row: 3;
+    grid-row: 2;
     position: relative;
     left: auto;
     right: auto;
