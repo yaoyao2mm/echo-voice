@@ -86,6 +86,7 @@ export function createAppContext(windowRef = window, documentRef = document) {
       composerAttachments: [],
       composerAttachmentPendingCount: 0,
       composerPlanMode: windowRef.localStorage.getItem("echoComposerMode") === "plan",
+      turnActivityDetailsOpen: false,
       autoCompactedSessionIds: new Set()
     }
   };
@@ -291,6 +292,7 @@ export function installCore(app) {
     }
     elements.composerStatusText.textContent = status;
     elements.composerStatusText.classList.toggle("is-empty", !status);
+    app.refreshTurnActivityToggle?.(session, status);
     app.refreshTurnActivityLine?.();
     app.refreshContextUsageIndicator();
   };

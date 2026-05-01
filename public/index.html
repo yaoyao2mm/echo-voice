@@ -15,8 +15,8 @@
         if (localStorage.getItem("echoTheme") === "dark") document.documentElement.dataset.theme = "dark";
       } catch {}
     </script>
-    <link rel="manifest" href="/manifest.webmanifest?v=70" />
-    <link rel="stylesheet" href="/styles.css?v=70" />
+    <link rel="manifest" href="/manifest.webmanifest?v=71" />
+    <link rel="stylesheet" href="/styles.css?v=71" />
   </head>
   <body>
     <main class="shell">
@@ -326,7 +326,15 @@
                   </button>
                 </div>
                 <div class="composer-status-right">
-                  <span id="composerStatusText" class="composer-status-text" aria-live="polite"></span>
+                  <button
+                    id="composerStatusText"
+                    class="composer-status-text"
+                    type="button"
+                    aria-live="polite"
+                    aria-expanded="false"
+                    aria-controls="turnActivityLine"
+                    disabled
+                  ></button>
                   <button
                     id="stopCodexTurnButton"
                     class="composer-status-action session-stop-action"
@@ -369,6 +377,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=70" type="module"></script>
+    <script src="/app.js?v=71" type="module"></script>
   </body>
 </html>

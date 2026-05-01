@@ -463,13 +463,16 @@ export function installSessions(app) {
 
   app.refreshTurnActivityLine = function refreshTurnActivityLine() {
     if (!elements.turnActivityLine || !elements.turnActivityText) return;
+    if (!state.turnActivityDetailsOpen) {
+      app.hideTurnActivityLine();
+      return;
+    }
+
     const activity = app.turnActivityForSession(state.composingNewSession ? null : state.selectedCodexSession);
     if (!activity) {
-      elements.turnActivityLine.hidden = true;
-      elements.turnActivityLine.dataset.state = "";
-      elements.turnActivityLine.removeAttribute("title");
-      elements.turnActivityText.textContent = "";
-      app.syncComposerMetrics?.();
+      state.turnActivityDetailsOpen = false;
+      app.refreshTurnActivityToggle?.(state.composingNewSession ? null : state.selectedCodexSession);
+      app.hideTurnActivityLine();
       return;
     }
 
@@ -480,13 +483,45 @@ export function installSessions(app) {
     app.syncComposerMetrics?.();
   };
 
+  app.hideTurnActivityLine = function hideTurnActivityLine() {
+    if (elements.turnActivityLine.hidden && !elements.turnActivityText.textContent && !elements.turnActivityLine.dataset.state) return;
+    elements.turnActivityLine.hidden = true;
+    elements.turnActivityLine.dataset.state = "";
+    elements.turnActivityLine.removeAttribute("title");
+    elements.turnActivityText.textContent = "";
+    app.syncComposerMetrics?.();
+  };
+
+  app.toggleTurnActivityDetails = function toggleTurnActivityDetails() {
+    const session = state.composingNewSession ? null : state.selectedCodexSession;
+    if (!app.turnActivityAvailable(session)) return;
+    state.turnActivityDetailsOpen = !state.turnActivityDetailsOpen;
+    app.refreshTurnActivityToggle(session);
+    app.refreshTurnActivityLine();
+  };
+
+  app.refreshTurnActivityToggle = function refreshTurnActivityToggle(session = null, status = "") {
+    if (!elements.composerStatusText) return;
+    const available = app.turnActivityAvailable(session);
+    if (!available) state.turnActivityDetailsOpen = false;
+    elements.composerStatusText.disabled = !available;
+    elements.composerStatusText.classList.toggle("is-clickable", available);
+    elements.composerStatusText.setAttribute("aria-expanded", available && state.turnActivityDetailsOpen ? "true" : "false");
+    elements.composerStatusText.setAttribute("title", available ? "查看运行详情" : status || "");
+  };
+
+  app.turnActivityAvailable = function turnActivityAvailable(session) {
+    return Boolean(
+      session &&
+        (["queued", "starting", "running"].includes(session.status) ||
+          Number(session.pendingCommandCount || 0) > 0 ||
+          Number(session.pendingApprovalCount || 0) > 0)
+    );
+  };
+
   app.turnActivityForSession = function turnActivityForSession(session) {
     if (!session) return null;
-    const busy =
-      ["queued", "starting", "running"].includes(session.status) ||
-      Number(session.pendingCommandCount || 0) > 0 ||
-      Number(session.pendingApprovalCount || 0) > 0;
-    if (!busy) return null;
+    if (!app.turnActivityAvailable(session)) return null;
 
     const commandActivity = app.latestCommandActivity(session.events || []);
     if (commandActivity) return commandActivity;

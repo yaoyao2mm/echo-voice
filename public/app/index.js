@@ -1,7 +1,7 @@
-import { installAuth } from "./auth.js?v=70";
-import { installCodex } from "./codex.js?v=70";
-import { createAppContext, installCore } from "./core.js?v=70";
-import { installSessions } from "./sessions.js?v=70";
+import { installAuth } from "./auth.js?v=71";
+import { installCodex } from "./codex.js?v=71";
+import { createAppContext, installCore } from "./core.js?v=71";
+import { installSessions } from "./sessions.js?v=71";
 
 export function createApp(windowRef = window, documentRef = document) {
   const app = createAppContext(windowRef, documentRef);
@@ -26,6 +26,7 @@ export function createApp(windowRef = window, documentRef = document) {
     elements.newCodexSessionButton.addEventListener("click", app.startNewCodexSession);
     elements.sendCodexButton.addEventListener("click", app.sendToCodex);
     elements.stopCodexTurnButton?.addEventListener("click", app.cancelSelectedCodexTurn);
+    elements.composerStatusText?.addEventListener("click", app.toggleTurnActivityDetails);
     elements.quickDeployButton?.addEventListener("click", app.sendQuickDeployPrompt);
     elements.composerPlanModeButton?.addEventListener("click", app.toggleComposerPlanMode);
     elements.compactContextButton?.addEventListener("click", () => app.requestContextCompaction({ automatic: false }));

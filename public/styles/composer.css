@@ -202,7 +202,11 @@ body.topbar-collapsed .topbar {
   display: block;
   min-width: 0;
   max-width: 100%;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
   color: var(--muted);
+  padding: 2px 0;
   font-size: 12px;
   font-weight: 600;
   line-height: 1.3;
@@ -210,6 +214,25 @@ body.topbar-collapsed .topbar {
   overflow: hidden;
   text-overflow: ellipsis;
   text-align: right;
+}
+
+.composer-status-text.is-clickable {
+  cursor: pointer;
+  color: var(--accent-strong);
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+.composer-status-text.is-clickable:hover,
+.composer-status-text.is-clickable:focus-visible,
+.composer-status-text[aria-expanded="true"] {
+  background: rgba(126, 106, 84, 0.08);
+  color: var(--ink);
+}
+
+.composer-status-text:disabled {
+  cursor: default;
+  opacity: 1;
 }
 
 .composer-status-text.is-empty {

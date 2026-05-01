@@ -319,7 +319,13 @@ test("mobile shows a compact terminal activity line while a command runs", async
     });
     expect(eventsResponse.ok()).toBeTruthy();
 
+    await expect(page.locator("#turnActivityLine")).toBeHidden();
+    await expect(page.locator("#composerStatusText")).toContainText("Codex 正在回复");
+    await expect(page.locator("#composerStatusText")).toBeEnabled();
+    await expect(page.locator("#composerStatusText")).toHaveAttribute("aria-expanded", "false");
+    await page.locator("#composerStatusText").click();
     await expect(page.locator("#turnActivityLine")).toBeVisible();
+    await expect(page.locator("#composerStatusText")).toHaveAttribute("aria-expanded", "true");
     await expect(page.locator("#turnActivityText")).toContainText("正在运行 pnpm test");
     await expect(page.locator("#turnActivityText")).toContainText("12 passed");
     await expect
