@@ -59,6 +59,27 @@ async function leaseNextCodexCommand(request) {
   return data.command;
 }
 
+async function leaseCodexCommandForPrompt(request, prompt) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const command = await leaseNextCodexCommand(request);
+    const displayText = String(command.payload?.displayText || command.payload?.prompt || "");
+    if (displayText.includes(prompt)) return command;
+
+    const response = await request.post("/api/agent/codex/sessions/commands/complete", {
+      headers: {
+        "X-Echo-Token": pairingToken
+      },
+      data: {
+        id: command.id,
+        agentId: "mobile-e2e-agent",
+        result: { ok: true, appThreadId: `thr_${command.sessionId}`, sessionStatus: "active" }
+      }
+    });
+    expect(response.ok()).toBeTruthy();
+  }
+  throw new Error(`Could not lease Codex command for prompt: ${prompt}`);
+}
+
 async function leaseNextWorkspaceCommand(request) {
   const response = await request.post("/api/agent/codex/workspaces/next?wait=1000", {
     headers: {
@@ -236,6 +257,108 @@ test("mobile login, pairing, sidebar, and session creation", async ({ page, requ
     await editAction.click();
     await expect(page.locator("#codexPrompt")).toHaveValue("E2E mobile workbench smoke test");
     await expect(page.locator("#sendCodexButton")).toBeEnabled();
+  } finally {
+    clearInterval(keepAlive);
+  }
+});
+
+test("mobile shows a compact terminal activity line while a command runs", async ({ page, request }) => {
+  await touchMockAgent(request);
+  const keepAlive = setInterval(() => {
+    touchMockAgent(request).catch(() => {});
+  }, 10000);
+
+  try {
+    await loginToWorkbench(page);
+    await page.locator("#toggleSessionsButton").click();
+    await page.locator("#newCodexSessionButton").click();
+    const prompt = "E2E terminal activity line";
+    await page.locator("#codexPrompt").fill(prompt);
+    await page.locator("#sendCodexButton").click();
+
+    const command = await leaseCodexCommandForPrompt(request, prompt);
+    const appThreadId = `thr_${command.sessionId}`;
+    const eventsResponse = await request.post("/api/agent/codex/sessions/events", {
+      headers: {
+        "X-Echo-Token": pairingToken
+      },
+      data: {
+        id: command.sessionId,
+        agentId: "mobile-e2e-agent",
+        events: [
+          {
+            type: "turn/started",
+            text: "Codex turn started.",
+            appThreadId,
+            activeTurnId: "turn_terminal",
+            sessionStatus: "running",
+            raw: { method: "turn/started", params: { threadId: appThreadId, turn: { id: "turn_terminal" } } }
+          },
+          {
+            type: "item/started",
+            text: "pnpm test running",
+            raw: {
+              method: "item/started",
+              params: {
+                threadId: appThreadId,
+                turnId: "turn_terminal",
+                item: { type: "commandExecution", id: "cmd_terminal", command: ["pnpm", "test"], status: "running" }
+              }
+            }
+          },
+          {
+            type: "item/commandExecution/outputDelta",
+            text: "running tests\n12 passed",
+            raw: {
+              method: "item/commandExecution/outputDelta",
+              params: { threadId: appThreadId, turnId: "turn_terminal", delta: "running tests\n12 passed" }
+            }
+          }
+        ]
+      }
+    });
+    expect(eventsResponse.ok()).toBeTruthy();
+
+    await expect(page.locator("#turnActivityLine")).toBeVisible();
+    await expect(page.locator("#turnActivityText")).toContainText("正在运行 pnpm test");
+    await expect(page.locator("#turnActivityText")).toContainText("12 passed");
+
+    const completeEventsResponse = await request.post("/api/agent/codex/sessions/events", {
+      headers: {
+        "X-Echo-Token": pairingToken
+      },
+      data: {
+        id: command.sessionId,
+        agentId: "mobile-e2e-agent",
+        events: [
+          {
+            type: "turn/completed",
+            text: "Turn completed.",
+            appThreadId,
+            sessionStatus: "active",
+            clearActiveTurnId: true,
+            raw: {
+              method: "turn/completed",
+              params: { threadId: appThreadId, turn: { id: "turn_terminal", status: "completed" } }
+            }
+          }
+        ]
+      }
+    });
+    expect(completeEventsResponse.ok()).toBeTruthy();
+
+    const completeResponse = await request.post("/api/agent/codex/sessions/commands/complete", {
+      headers: {
+        "X-Echo-Token": pairingToken
+      },
+      data: {
+        id: command.id,
+        agentId: "mobile-e2e-agent",
+        result: { ok: true, appThreadId, sessionStatus: "active" }
+      }
+    });
+    expect(completeResponse.ok()).toBeTruthy();
+    await expect(page.locator("#turnActivityLine")).toBeHidden();
   } finally {
     clearInterval(keepAlive);
   }

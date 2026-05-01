@@ -15,8 +15,8 @@
         if (localStorage.getItem("echoTheme") === "dark") document.documentElement.dataset.theme = "dark";
       } catch {}
     </script>
-    <link rel="manifest" href="/manifest.webmanifest?v=68" />
-    <link rel="stylesheet" href="/styles.css?v=68" />
+    <link rel="manifest" href="/manifest.webmanifest?v=69" />
+    <link rel="stylesheet" href="/styles.css?v=69" />
   </head>
   <body>
     <main class="shell">
@@ -257,6 +257,11 @@
 
           <section class="composer">
             <div class="composer-shell">
+              <div id="turnActivityLine" class="turn-activity-line" aria-live="polite" hidden>
+                <span class="turn-activity-dot" aria-hidden="true"></span>
+                <span class="turn-activity-label">终端</span>
+                <span id="turnActivityText" class="turn-activity-text"></span>
+              </div>
               <div class="composer-statusbar" aria-label="输入状态">
                 <div class="composer-status-meta">
                   <button id="composerAttachmentButton" class="composer-status-action" type="button" aria-label="附加截图">
@@ -364,6 +369,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=68" type="module"></script>
+    <script src="/app.js?v=69" type="module"></script>
   </body>
 </html>

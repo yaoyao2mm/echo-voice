@@ -456,6 +456,138 @@ export function installSessions(app) {
     return JSON.stringify(payload, null, 2).slice(0, 1600);
   };
 
+  app.refreshTurnActivityLine = function refreshTurnActivityLine() {
+    if (!elements.turnActivityLine || !elements.turnActivityText) return;
+    const activity = app.turnActivityForSession(state.composingNewSession ? null : state.selectedCodexSession);
+    if (!activity) {
+      elements.turnActivityLine.hidden = true;
+      elements.turnActivityLine.dataset.state = "";
+      elements.turnActivityLine.removeAttribute("title");
+      elements.turnActivityText.textContent = "";
+      app.syncComposerMetrics?.();
+      return;
+    }
+
+    elements.turnActivityLine.hidden = false;
+    elements.turnActivityLine.dataset.state = activity.state || "running";
+    elements.turnActivityLine.title = activity.title || activity.text;
+    elements.turnActivityText.textContent = activity.text;
+    app.syncComposerMetrics?.();
+  };
+
+  app.turnActivityForSession = function turnActivityForSession(session) {
+    if (!session) return null;
+    const busy =
+      ["queued", "starting", "running"].includes(session.status) ||
+      Number(session.pendingCommandCount || 0) > 0 ||
+      Number(session.pendingApprovalCount || 0) > 0;
+    if (!busy) return null;
+
+    const commandActivity = app.latestCommandActivity(session.events || []);
+    if (commandActivity) return commandActivity;
+    if (Number(session.pendingApprovalCount || 0) > 0) {
+      return { state: "approval", text: "等待审批", title: "等待你在手机上批准 Codex 请求" };
+    }
+    if (Number(session.pendingCommandCount || 0) > 0 || session.status === "queued") {
+      return { state: "queued", text: "等待桌面接收任务", title: "任务已进入桌面端队列" };
+    }
+    if (session.status === "starting") {
+      return { state: "running", text: "Codex 正在启动", title: "桌面端正在启动 Codex" };
+    }
+    if (session.status === "running") {
+      return { state: "running", text: "Codex 正在处理这一轮", title: "Codex 正在执行当前 turn" };
+    }
+    return null;
+  };
+
+  app.latestCommandActivity = function latestCommandActivity(events) {
+    let latestOutput = "";
+    for (const event of [...events].reverse()) {
+      const raw = event.raw || {};
+      const method = raw.method || event.type || "";
+      const params = raw.params || {};
+
+      if (app.isCommandOutputEvent(method)) {
+        latestOutput ||= app.activityOutputSnippet(event.text || params.delta || "");
+        continue;
+      }
+
+      if (method === "item/commandExecution/requestApproval") {
+        const commandText = app.commandDisplayText(params.command);
+        return {
+          state: "approval",
+          text: app.compactActivityText(`等待审批 ${commandText}`),
+          title: commandText
+        };
+      }
+
+      const item = params.item || {};
+      if (item.type !== "commandExecution") continue;
+      const commandText = app.commandDisplayText(item.command);
+      const status = String(item.status || (method === "item/completed" ? "completed" : "running")).toLowerCase();
+      const output = latestOutput || app.activityOutputSnippet(item.aggregatedOutput || "");
+      const prefix = app.commandActivityPrefix(status, method);
+      const text = output ? `${prefix} ${commandText} · ${output}` : `${prefix} ${commandText}`;
+      return {
+        state: app.commandActivityState(status, method),
+        text: app.compactActivityText(text),
+        title: output ? `${commandText}\n${output}` : commandText
+      };
+    }
+    if (latestOutput) {
+      return {
+        state: "running",
+        text: app.compactActivityText(`输出 ${latestOutput}`),
+        title: latestOutput
+      };
+    }
+    return null;
+  };
+
+  app.isCommandOutputEvent = function isCommandOutputEvent(method) {
+    return method === "command/exec/outputDelta" || method === "item/commandExecution/outputDelta";
+  };
+
+  app.commandDisplayText = function commandDisplayText(command) {
+    const text = Array.isArray(command) ? command.join(" ") : String(command || "后台命令");
+    return app.compactActivityText(text.replace(/\s+/g, " ").trim() || "后台命令", 96);
+  };
+
+  app.commandActivityPrefix = function commandActivityPrefix(status, method) {
+    if (status.includes("fail") || status.includes("error")) return "命令失败";
+    if (status.includes("cancel")) return "已取消";
+    if (status.includes("complete") || status.includes("success") || status.includes("succeed")) return "已完成";
+    return method === "item/completed" ? "已完成" : "正在运行";
+  };
+
+  app.commandActivityState = function commandActivityState(status, method) {
+    if (status.includes("fail") || status.includes("error")) return "failed";
+    if (status.includes("cancel")) return "idle";
+    if (status.includes("complete") || status.includes("success") || status.includes("succeed") || method === "item/completed") {
+      return "completed";
+    }
+    return "running";
+  };
+
+  app.activityOutputSnippet = function activityOutputSnippet(value) {
+    const lines = String(value || "")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const latestLine = lines.at(-1) || "";
+    return app.compactActivityText(app.redactActivityText(latestLine), 72);
+  };
+
+  app.redactActivityText = function redactActivityText(value) {
+    return String(value || "").replace(/\b(token|secret|password|api[_-]?key)\b\s*[:=]\s*[^,\s]+/gi, "$1=***");
+  };
+
+  app.compactActivityText = function compactActivityText(value, limit = 140) {
+    const text = String(value || "").replace(/\s+/g, " ").trim();
+    if (!text) return "";
+    return text.length > limit ? `${text.slice(0, Math.max(0, limit - 1)).trimEnd()}…` : text;
+  };
+
   app.renderConversationThread = function renderConversationThread(job, errorText = "") {
     const timeline = app.buildConversationTimeline(job, errorText);
     return timeline.map(app.renderConversationEntry).join("");

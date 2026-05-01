@@ -291,6 +291,7 @@ export function installCore(app) {
     }
     elements.composerStatusText.textContent = status;
     elements.composerStatusText.classList.toggle("is-empty", !status);
+    app.refreshTurnActivityLine?.();
     app.refreshContextUsageIndicator();
   };
 
@@ -846,6 +847,8 @@ function queryElements(documentRef) {
     activeSessionTitle: documentRef.querySelector("#activeSessionTitle"),
     activeSessionMeta: documentRef.querySelector("#activeSessionMeta"),
     stopCodexTurnButton: documentRef.querySelector("#stopCodexTurnButton"),
+    turnActivityLine: documentRef.querySelector("#turnActivityLine"),
+    turnActivityText: documentRef.querySelector("#turnActivityText"),
     composerStatusText: documentRef.querySelector("#composerStatusText"),
     composerActionsMeta: documentRef.querySelector("#composerActionsMeta"),
     contextUsageIndicator: documentRef.querySelector("#contextUsageIndicator"),

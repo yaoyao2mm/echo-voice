@@ -260,6 +260,11 @@
   background: rgba(14, 18, 24, 0.92);
 }
 
+:root[data-theme="dark"] .turn-activity-line {
+  border-color: rgba(139, 154, 174, 0.12);
+  background: rgba(16, 20, 26, 0.94);
+}
+
 :root[data-theme="dark"] .context-usage-ring {
   background:
     radial-gradient(circle at center, rgba(17, 21, 27, 0.98) 0 45%, transparent 47%),

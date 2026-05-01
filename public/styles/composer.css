@@ -93,6 +93,14 @@ body.topbar-collapsed .topbar {
   gap: 0;
 }
 
+.turn-activity-line {
+  display: none;
+}
+
+.turn-activity-line[hidden] {
+  display: none !important;
+}
+
 .composer-statusbar {
   display: flex;
   align-items: center;
