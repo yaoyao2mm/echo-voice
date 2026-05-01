@@ -138,7 +138,7 @@ async function loginToWorkbench(page) {
   await expect(page.locator("#codexView")).toBeVisible();
   await expect(page.locator("body")).toHaveClass(/mobile-ui/);
   await expect(page.locator("#toggleSessionsButton")).toBeVisible();
-  await expect(page.locator("#mobileStatusIndicator")).toBeVisible();
+  await expect(page.locator("#mobileStatusIndicator")).toBeHidden();
   await expect(page.locator("#contextUsageIndicator")).toBeVisible();
   await expect(page.locator("#contextUsageIndicator")).toHaveAttribute("role", "meter");
   await expect(page.locator("#quickDeployButton")).toBeVisible();
@@ -152,17 +152,17 @@ async function loginToWorkbench(page) {
   await expect(page.locator("#contextUsageIndicator")).toHaveCSS("width", "16px");
   const topbarIconLayout = await page.evaluate(() => {
     const titleRow = document.querySelector(".topbar-title-row");
-    const status = document.querySelector("#mobileStatusIndicator");
+    const status = document.querySelector("#mobileStatusIndicator")?.getBoundingClientRect();
     const context = document.querySelector("#contextUsageIndicator")?.getBoundingClientRect();
     const deploy = document.querySelector("#quickDeployButton")?.getBoundingClientRect();
     const composer = document.querySelector(".composer-statusbar")?.getBoundingClientRect();
     return {
-      statusBesideTitle: Boolean(titleRow && status && titleRow.contains(status)),
+      statusHidden: Boolean(status && status.width === 0 && status.height === 0),
       deployInTopbar: Boolean(context && deploy && composer && deploy.top < composer.top),
       deployRightOfContext: Boolean(context && deploy && deploy.left > context.right)
     };
   });
-  expect(topbarIconLayout.statusBesideTitle).toBeTruthy();
+  expect(topbarIconLayout.statusHidden).toBeTruthy();
   expect(topbarIconLayout.deployInTopbar).toBeTruthy();
   expect(topbarIconLayout.deployRightOfContext).toBeTruthy();
   await expect(page.locator(".composer-status-scope")).toHaveCount(0);
@@ -629,6 +629,17 @@ test("mobile plan mode sends planning instructions without polluting the visible
     await expect(page.locator("#sessionStatusRail")).toContainText("隔离 worktree");
     await expect(page.locator("#sessionStatusRail")).toContainText("Git 无变更");
     await expect(page.locator("#sessionStatusRail")).toContainText("echo/job-plan-e2e");
+    const railLayout = await page.evaluate(() => {
+      const topbar = document.querySelector(".topbar")?.getBoundingClientRect();
+      const rail = document.querySelector("#sessionStatusRail")?.getBoundingClientRect();
+      const detail = document.querySelector("#codexJobDetail")?.getBoundingClientRect();
+      return {
+        railTouchesTopbar: Boolean(topbar && rail && Math.abs(rail.top - topbar.bottom) <= 2),
+        detailStartsBelowRail: Boolean(rail && detail && detail.top >= rail.bottom - 1)
+      };
+    });
+    expect(railLayout.railTouchesTopbar).toBeTruthy();
+    expect(railLayout.detailStartsBelowRail).toBeTruthy();
     await expect(page.locator(".thread-plan-card")).toContainText("先梳理入口");
   } finally {
     clearInterval(keepAlive);
