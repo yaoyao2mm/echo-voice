@@ -2,8 +2,27 @@ export function installSessions(app) {
   const { document, elements, navigator, state, window: windowRef } = app;
 
   app.loadCodexJobs = async function loadCodexJobs() {
-    const data = await app.apiGet(`/api/codex/sessions?archived=${state.showArchivedSessions ? "true" : "false"}`);
+    const projectId = app.currentProjectId();
+    if (!projectId) {
+      await app.renderProjectSessionList([]);
+      state.selectedCodexSession = null;
+      state.selectedCodexJobId = "";
+      app.closeCodexSessionStream();
+      app.applyRuntimeDraft(state.runtimePreferences, { persist: false, dirty: false });
+      app.renderEmptySessionDetail({ title: "选择工程", body: "先选择工程，再开始或继续会话。" });
+      return;
+    }
+
+    const params = new URLSearchParams({
+      archived: state.showArchivedSessions ? "true" : "false",
+      projectId
+    });
+    const data = await app.apiGet(`/api/codex/sessions?${params.toString()}`);
     const jobs = data.items.slice(0, 30);
+    await app.renderProjectSessionList(jobs);
+  };
+
+  app.renderProjectSessionList = async function renderProjectSessionList(jobs) {
     elements.codexJobs.innerHTML = "";
     if (jobs.length === 0) {
       const emptyCopy = state.showArchivedSessions ? "还没有归档会话" : "还没有 Codex 会话";
@@ -19,6 +38,15 @@ export function installSessions(app) {
         });
       }
       return;
+    }
+
+    const selectedSessionMatchesProject =
+      state.selectedCodexSession?.id === state.selectedCodexJobId &&
+      app.sessionBelongsToCurrentProject(state.selectedCodexSession);
+    if (state.selectedCodexJobId && !selectedSessionMatchesProject && !jobs.some((job) => job.id === state.selectedCodexJobId)) {
+      state.selectedCodexJobId = "";
+      state.selectedCodexSession = null;
+      app.closeCodexSessionStream();
     }
 
     if (!state.selectedCodexJobId && !state.composingNewSession) {
@@ -167,6 +195,14 @@ export function installSessions(app) {
       }
     }
     const data = await app.apiGet(`/api/codex/sessions/${encodeURIComponent(id)}`);
+    if (!app.sessionBelongsToCurrentProject(data.session)) {
+      state.selectedCodexJobId = "";
+      state.selectedCodexSession = null;
+      app.closeCodexSessionStream();
+      app.renderEmptySessionDetail({ title: "新会话", body: "这个工程还没有打开的会话。" });
+      app.updateComposerAvailability();
+      return;
+    }
     app.openCodexSessionStream(id);
     app.renderCodexJob(data.session, { ...options, previousSessionId, switchingSession });
   };

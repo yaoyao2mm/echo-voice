@@ -75,8 +75,15 @@ export function installCodex(app) {
       ? `会话 ${codex.interactive?.activeSessions || 0} · 待审批 ${codex.interactive?.pendingApprovals || 0} · 归档 ${codex.interactive?.archivedSessions || 0} · 项目 ${workspaces.length}`
       : "打开桌面端后自动同步";
 
+    const previousProject = app.currentProjectId();
     const preferred = localStorage.getItem("echoCodexProject") || elements.codexProject.value;
     const selected = workspaces.find((workspace) => workspace.id === preferred)?.id || workspaces[0]?.id || "";
+    if (previousProject && selected && previousProject !== selected) {
+      state.composingNewSession = false;
+      state.selectedCodexJobId = "";
+      state.selectedCodexSession = null;
+      app.closeCodexSessionStream?.();
+    }
     elements.codexProject.innerHTML = "";
     if (!workspaces.length) {
       const option = document.createElement("option");
@@ -337,6 +344,7 @@ export function installCodex(app) {
   app.sendCodexPrompt = async function sendCodexPrompt({ projectId, prompt, runtime, attachments, mode = "execute" }) {
     if (app.canContinueSelectedSession()) {
       return app.apiPost(`/api/codex/sessions/${encodeURIComponent(state.selectedCodexJobId)}/messages`, {
+        projectId,
         text: prompt,
         runtime,
         attachments,
@@ -356,6 +364,7 @@ export function installCodex(app) {
   app.selectedSessionForComposer = function selectedSessionForComposer() {
     if (state.composingNewSession) return null;
     if (!state.selectedCodexJobId || !state.selectedCodexSession) return null;
+    if (!app.sessionBelongsToCurrentProject(state.selectedCodexSession)) return null;
     return state.selectedCodexSession;
   };
 
@@ -449,6 +458,7 @@ export function installCodex(app) {
 
   app.canStartNewSessionFromComposer = function canStartNewSessionFromComposer() {
     if (state.composingNewSession) return true;
+    if (state.selectedCodexSession && !app.sessionBelongsToCurrentProject(state.selectedCodexSession)) return true;
     return !state.selectedCodexJobId && !state.selectedCodexSession;
   };
 
@@ -690,7 +700,7 @@ export function installCodex(app) {
       elements.projectCreateName.value = "";
       elements.projectCreateForm.hidden = true;
       await app.refreshCodex();
-      app.selectProject(workspace.id);
+      await app.selectProject(workspace.id);
       elements.projectSheetStatus.textContent = `已创建 ${app.workspaceLabel(workspace)}`;
       app.toast(`已新建并切换到 ${app.workspaceLabel(workspace)}`);
       app.closeProjectSwitcher();
@@ -821,17 +831,34 @@ export function installCodex(app) {
     }
   };
 
-  app.selectProject = function selectProject(projectId) {
+  app.selectProject = async function selectProject(projectId) {
     if (!projectId) return;
     const previous = elements.codexProject.value;
     elements.codexProject.value = projectId;
     localStorage.setItem("echoCodexProject", projectId);
+    if (previous !== projectId) {
+      state.composingNewSession = false;
+      state.selectedCodexJobId = "";
+      state.selectedCodexSession = null;
+      app.closeCodexSessionStream?.();
+      app.applyRuntimeDraft(state.runtimePreferences, { persist: false, dirty: false });
+      app.renderEmptySessionDetail({ title: "切换工程", body: "正在打开这个工程的最近会话。" });
+    }
     app.syncProjectPicker();
     app.updateComposerAvailability();
     if (previous && previous !== projectId) {
       app.toast(`已切换到 ${app.workspaceLabel(state.codexWorkspaces.find((workspace) => workspace.id === projectId) || { id: projectId })}`);
     }
     app.closeProjectSwitcher();
+    if (previous !== projectId) {
+      try {
+        await app.loadCodexJobs();
+      } catch (error) {
+        if (!app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
+          app.toast(error.message);
+        }
+      }
+    }
   };
 
   app.syncProjectPicker = function syncProjectPicker() {

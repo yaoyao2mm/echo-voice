@@ -59,7 +59,8 @@ export function enqueueCodexSessionMessage(id, input = {}) {
     text: input.text || input.prompt || "",
     attachments: input.attachments,
     runtime: input.runtime || {},
-    mode: input.mode
+    mode: input.mode,
+    projectId: input.projectId
   });
   events.emit("codex-session-command");
   notifySessionChanged(session?.id);

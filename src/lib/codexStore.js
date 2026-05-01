@@ -546,14 +546,23 @@ export function createSession({ projectId, prompt, attachments, runtime, mode })
 export function listSessions(limit = 20, options = {}) {
   refreshInteractiveSessionState();
   const archived = Boolean(options.archived);
+  const projectId = String(options.projectId || "").trim();
+  const clauses = [`archived_at ${archived ? "IS NOT NULL" : "IS NULL"}`];
+  const params = {
+    limit: Math.max(1, Math.min(Number(limit) || 20, 100))
+  };
+  if (projectId) {
+    clauses.push("project_id = @projectId");
+    params.projectId = projectId;
+  }
 
   return db.prepare(`
     SELECT ${summarizeSessionColumns}
     FROM codex_sessions
-    WHERE archived_at ${archived ? "IS NOT NULL" : "IS NULL"}
+    WHERE ${clauses.join(" AND ")}
     ORDER BY updated_at DESC, created_at DESC
-    LIMIT ?
-  `).all(Math.max(1, Math.min(Number(limit) || 20, 100))).map(summarizeSession);
+    LIMIT @limit
+  `).all(params).map(summarizeSession);
 }
 
 export function getSession(id) {
@@ -619,6 +628,10 @@ export function enqueueSessionMessage(sessionId, input = {}) {
   refreshInteractiveSessionState();
   const session = getSessionSummary(sessionId);
   if (!session) return notFound("Codex session not found.");
+  const expectedProjectId = String(input.projectId || input.expectedProjectId || "").trim();
+  if (expectedProjectId && session.projectId !== expectedProjectId) {
+    return conflict("This Codex session belongs to a different project.");
+  }
   if (session.archivedAt) return conflict("Restore this Codex session before continuing it.");
   const recoverableFailure = session.status === "failed" && sessionCanRecoverFailure(session);
   if (["cancelled", "closed", "stale"].includes(session.status) || (session.status === "failed" && !recoverableFailure)) {
@@ -1457,6 +1470,9 @@ function migrate() {
 
     CREATE INDEX IF NOT EXISTS idx_codex_sessions_archived_updated
       ON codex_sessions(archived_at, updated_at);
+
+    CREATE INDEX IF NOT EXISTS idx_codex_sessions_project_archived_updated
+      ON codex_sessions(project_id, archived_at, updated_at);
 
     CREATE INDEX IF NOT EXISTS idx_codex_session_commands_status_created
       ON codex_session_commands(status, created_at);

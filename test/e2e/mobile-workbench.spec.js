@@ -241,6 +241,67 @@ test("mobile login, pairing, sidebar, and session creation", async ({ page, requ
   }
 });
 
+test("mobile switches projects to that project's latest conversation", async ({ page, request }) => {
+  const suffix = Date.now();
+  const echoProjectId = `echo-switch-${suffix}`;
+  const metioProjectId = `metio-switch-${suffix}`;
+  const workspaces = [
+    { id: echoProjectId, label: "echo-switch", path: process.cwd() },
+    { id: metioProjectId, label: "metio-switch", path: `/tmp/metio-${suffix}` }
+  ];
+  await touchMockAgent(request, {}, workspaces);
+
+  const headers = await authHeadersForSessionRequests(request);
+  const echoPrompt = `echo 工程会话 ${suffix}`;
+  const metioPrompt = `metio 工程会话 ${suffix}`;
+  const followUp = `继续 metio 工程 ${suffix}`;
+
+  const echoResponse = await request.post("/api/codex/sessions", {
+    headers,
+    data: {
+      projectId: echoProjectId,
+      prompt: echoPrompt,
+      runtime: {}
+    }
+  });
+  expect(echoResponse.ok()).toBeTruthy();
+  const echoSession = (await echoResponse.json()).session;
+
+  const metioResponse = await request.post("/api/codex/sessions", {
+    headers,
+    data: {
+      projectId: metioProjectId,
+      prompt: metioPrompt,
+      runtime: {}
+    }
+  });
+  expect(metioResponse.ok()).toBeTruthy();
+  const metioSession = (await metioResponse.json()).session;
+
+  await loginToWorkbench(page);
+  await expect(page.locator("#activeSessionTitle")).toContainText(echoPrompt);
+
+  await page.locator("#projectSwitcherButton").click();
+  await page.locator(".project-option", { hasText: "metio-switch" }).click();
+
+  await expect(page.locator("#activeSessionTitle")).toContainText(metioPrompt);
+  await expect(page.locator("#codexRunSummary")).toContainText(metioPrompt);
+  await expect(page.locator("#codexRunSummary")).not.toContainText(echoPrompt);
+
+  await page.locator("#codexPrompt").fill(followUp);
+  await page.locator("#sendCodexButton").click();
+
+  const metioDetailResponse = await request.get(`/api/codex/sessions/${metioSession.id}`, { headers });
+  expect(metioDetailResponse.ok()).toBeTruthy();
+  const metioDetail = await metioDetailResponse.json();
+  expect(metioDetail.session.messages.some((message) => message.text === followUp)).toBeTruthy();
+
+  const echoDetailResponse = await request.get(`/api/codex/sessions/${echoSession.id}`, { headers });
+  expect(echoDetailResponse.ok()).toBeTruthy();
+  const echoDetail = await echoDetailResponse.json();
+  expect(echoDetail.session.messages.some((message) => message.text === followUp)).toBeFalsy();
+});
+
 test("mobile composer defaults to GPT-5.5 and remembers the last chosen model", async ({ page, request }) => {
   await touchMockAgent(request);
   const keepAlive = setInterval(() => {

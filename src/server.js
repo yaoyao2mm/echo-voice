@@ -247,7 +247,12 @@ app.get("/api/codex/sessions", (req, res) => {
     return res.status(400).json({ error: "Codex interactive sessions are only available in relay mode." });
   }
 
-  res.json({ items: listCodexSessions(30, { archived: req.query.archived === "true" }) });
+  res.json({
+    items: listCodexSessions(30, {
+      archived: req.query.archived === "true",
+      projectId: req.query.projectId
+    })
+  });
 });
 
 app.post("/api/codex/sessions", (req, res) => {
@@ -357,7 +362,8 @@ app.post("/api/codex/sessions/:id/messages", (req, res) => {
       text: req.body.text || req.body.prompt,
       attachments: req.body.attachments,
       runtime: req.body.runtime || {},
-      mode: req.body.mode
+      mode: req.body.mode,
+      projectId: req.body.projectId
     });
     res.json({ session });
   } catch (error) {

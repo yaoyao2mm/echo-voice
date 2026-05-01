@@ -57,6 +57,43 @@ test("status advertises only online agent workspaces", () => {
   assert.equal(onlineStatus.agents.filter((agent) => agent.online).length, 2);
 });
 
+test("interactive Codex sessions are scoped to one project", () => {
+  store.resetStoreForTest();
+
+  const echoSession = queue.createCodexSession({
+    projectId: "echo",
+    prompt: "echo 项目的会话"
+  });
+  const metioSession = queue.createCodexSession({
+    projectId: "metio",
+    prompt: "metio 项目的会话"
+  });
+
+  assert.deepEqual(
+    queue.listCodexSessions(10, { projectId: "echo" }).map((session) => session.id),
+    [echoSession.id]
+  );
+  assert.deepEqual(
+    queue.listCodexSessions(10, { projectId: "metio" }).map((session) => session.id),
+    [metioSession.id]
+  );
+  assert.throws(
+    () =>
+      queue.enqueueCodexSessionMessage(echoSession.id, {
+        projectId: "metio",
+        text: "这条消息不能接到 echo 会话里"
+      }),
+    /different project/
+  );
+
+  const continued = queue.enqueueCodexSessionMessage(echoSession.id, {
+    projectId: "echo",
+    text: "这条消息属于 echo"
+  });
+  assert.equal(continued.projectId, "echo");
+  assert.equal(continued.messages.filter((message) => message.role === "user").length, 2);
+});
+
 test("interactive Codex sessions lease commands and keep thread state", async () => {
   store.resetStoreForTest();
 

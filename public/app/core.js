@@ -599,6 +599,15 @@ export function installCore(app) {
     );
   };
 
+  app.currentProjectId = function currentProjectId() {
+    return String(elements.codexProject?.value || "").trim();
+  };
+
+  app.sessionBelongsToCurrentProject = function sessionBelongsToCurrentProject(session) {
+    const projectId = app.currentProjectId();
+    return Boolean(session?.id && projectId && session.projectId === projectId);
+  };
+
   app.sessionRuntimeLabel = function sessionRuntimeLabel(runtime = {}) {
     const normalized = app.normalizeRuntimeChoice(runtime);
     const parts = [];

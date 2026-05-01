@@ -1,7 +1,7 @@
-import { installAuth } from "./auth.js?v=67";
-import { installCodex } from "./codex.js?v=67";
-import { createAppContext, installCore } from "./core.js?v=67";
-import { installSessions } from "./sessions.js?v=67";
+import { installAuth } from "./auth.js?v=68";
+import { installCodex } from "./codex.js?v=68";
+import { createAppContext, installCore } from "./core.js?v=68";
+import { installSessions } from "./sessions.js?v=68";
 
 export function createApp(windowRef = window, documentRef = document) {
   const app = createAppContext(windowRef, documentRef);
@@ -39,10 +39,11 @@ export function createApp(windowRef = window, documentRef = document) {
     elements.codexRunSummary.addEventListener("click", app.handleConversationAction);
     elements.sidebarUserToggle.addEventListener("click", app.toggleSidebarUserMenu);
     elements.codexProject.addEventListener("change", () => {
-      localStorage.setItem("echoCodexProject", elements.codexProject.value);
-      app.syncProjectPicker();
-      app.refreshActiveSessionHeader();
-      app.updateComposerAvailability();
+      app.selectProject(elements.codexProject.value).catch((error) => {
+        if (!app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
+          app.toast(error.message);
+        }
+      });
     });
     elements.codexPermissionMode.addEventListener("change", app.handleRuntimeControlChange);
     elements.codexModel.addEventListener("change", app.handleRuntimeControlChange);
