@@ -20,6 +20,7 @@ export class CodexInteractiveRuntime {
     this.threadToSession = new Map();
     this.activeTurns = new Map();
     this.attachmentDirs = new Map();
+    this.eventFlushes = new Map();
   }
 
   async handleCommand(command) {
@@ -43,6 +44,7 @@ export class CodexInteractiveRuntime {
     this.sessions.clear();
     this.threadToSession.clear();
     this.activeTurns.clear();
+    this.eventFlushes.clear();
   }
 
   async #startSession(command, workspace) {
@@ -450,7 +452,16 @@ export class CodexInteractiveRuntime {
   }
 
   async #emit(sessionId, events) {
-    await this.onEvents(sessionId, events);
+    const previous = this.eventFlushes.get(sessionId) || Promise.resolve();
+    const current = previous.catch(() => {}).then(() => this.onEvents(sessionId, events));
+    this.eventFlushes.set(sessionId, current);
+    try {
+      await current;
+    } finally {
+      if (this.eventFlushes.get(sessionId) === current) {
+        this.eventFlushes.delete(sessionId);
+      }
+    }
   }
 
   async #emitTurnCompleted(sessionId, threadId, event) {

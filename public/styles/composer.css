@@ -91,10 +91,19 @@ body.topbar-collapsed .topbar {
 .composer-shell {
   display: grid;
   gap: 0;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .turn-activity-line {
   display: none;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 
 .turn-activity-line[hidden] {

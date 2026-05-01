@@ -322,6 +322,81 @@ test("mobile shows a compact terminal activity line while a command runs", async
     await expect(page.locator("#turnActivityLine")).toBeVisible();
     await expect(page.locator("#turnActivityText")).toContainText("正在运行 pnpm test");
     await expect(page.locator("#turnActivityText")).toContainText("12 passed");
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          window.__echoThreadNode = document.querySelector(".conversation-thread");
+          return Boolean(window.__echoThreadNode);
+        })
+      )
+      .toBeTruthy();
+
+    const outputResponse = await request.post("/api/agent/codex/sessions/events", {
+      headers: {
+        "X-Echo-Token": pairingToken
+      },
+      data: {
+        id: command.sessionId,
+        agentId: "mobile-e2e-agent",
+        events: [
+          {
+            type: "item/commandExecution/outputDelta",
+            text: "running tests\n13 passed",
+            raw: {
+              method: "item/commandExecution/outputDelta",
+              params: { threadId: appThreadId, turnId: "turn_terminal", delta: "running tests\n13 passed" }
+            }
+          }
+        ]
+      }
+    });
+    expect(outputResponse.ok()).toBeTruthy();
+    await expect(page.locator("#turnActivityText")).toContainText("13 passed");
+    await expect
+      .poll(() => page.evaluate(() => window.__echoThreadNode === document.querySelector(".conversation-thread")))
+      .toBeTruthy();
+
+    const longOutput = `very-long-terminal-output-${"x".repeat(260)}`;
+    const longOutputResponse = await request.post("/api/agent/codex/sessions/events", {
+      headers: {
+        "X-Echo-Token": pairingToken
+      },
+      data: {
+        id: command.sessionId,
+        agentId: "mobile-e2e-agent",
+        events: [
+          {
+            type: "item/commandExecution/outputDelta",
+            text: longOutput,
+            raw: {
+              method: "item/commandExecution/outputDelta",
+              params: { threadId: appThreadId, turnId: "turn_terminal", delta: longOutput }
+            }
+          }
+        ]
+      }
+    });
+    expect(longOutputResponse.ok()).toBeTruthy();
+    await expect(page.locator("#turnActivityText")).toContainText("very-long-terminal-output");
+
+    const layout = await page.evaluate(() => {
+      const composer = document.querySelector(".composer")?.getBoundingClientRect();
+      const activity = document.querySelector("#turnActivityLine")?.getBoundingClientRect();
+      const send = document.querySelector("#sendCodexButton")?.getBoundingClientRect();
+      return {
+        viewportWidth: window.innerWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+        composerRight: composer?.right || 0,
+        activityRight: activity?.right || 0,
+        sendRight: send?.right || 0,
+        sendWidth: send?.width || 0
+      };
+    });
+    expect(layout.scrollWidth).toBeLessThanOrEqual(layout.viewportWidth + 1);
+    expect(layout.composerRight).toBeLessThanOrEqual(layout.viewportWidth + 1);
+    expect(layout.activityRight).toBeLessThanOrEqual(layout.viewportWidth + 1);
+    expect(layout.sendRight).toBeLessThanOrEqual(layout.viewportWidth + 1);
+    expect(layout.sendWidth).toBeGreaterThan(40);
 
     const completeEventsResponse = await request.post("/api/agent/codex/sessions/events", {
       headers: {

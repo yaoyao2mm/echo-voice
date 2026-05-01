@@ -578,7 +578,8 @@
   body.mobile-ui .conversation-thread,
   body.mobile-ui .composer-shell {
     width: 100%;
-    max-width: none;
+    max-width: 100%;
+    min-width: 0;
   }
 
   body.mobile-ui .shell {
@@ -757,7 +758,12 @@
     display: flex;
     align-items: center;
     gap: 7px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
     min-height: 26px;
+    box-sizing: border-box;
+    overflow: hidden;
     padding: 5px var(--mobile-chat-rail) 4px;
     border-bottom: 1px solid rgba(126, 106, 84, 0.08);
     background: rgba(248, 244, 237, 0.94);
@@ -803,7 +809,9 @@
   }
 
   body.mobile-ui .turn-activity-text {
+    flex: 1 1 0;
     min-width: 0;
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

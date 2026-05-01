@@ -213,6 +213,55 @@ test("mobile relay flow runs an interactive Codex session end to end", async () 
   }
 });
 
+test("interactive Codex runtime flushes session events in notification order", async () => {
+  store.resetStoreForTest();
+  resetFakeCodexArtifacts();
+
+  const agent = {
+    id: "agent-event-order",
+    workspaces: runner.publicWorkspaces(),
+    runtime: runner.publicCodexRuntime()
+  };
+  const observedTypes = [];
+  const runtime = new CodexInteractiveRuntime({
+    agentId: agent.id,
+    onEvents: async (id, events) => {
+      if (events[0]?.type === "turn/started") await delay(40);
+      observedTypes.push(events[0]?.type || "");
+      const ok = queue.appendCodexSessionEvents(id, events, { agentId: agent.id });
+      assert.equal(ok, true);
+    }
+  });
+  try {
+    queue.updateCodexAgent(agent);
+
+    const created = queue.createCodexSession({
+      projectId: "e2e",
+      prompt: "验证流式事件顺序"
+    });
+    const command = await queue.waitForCodexSessionCommand({ waitMs: 2000, agent });
+    const result = await runtime.handleCommand(command);
+    assert.equal(result.ok, true);
+    assert.equal(queue.completeCodexSessionCommand(command.id, result, { agentId: agent.id }), true);
+
+    await waitForSessionState(() => {
+      const session = queue.getCodexSession(created.id);
+      return session?.events.some((event) => event.type === "turn/completed") ? session : null;
+    });
+
+    const turnStartedAt = observedTypes.indexOf("turn/started");
+    const deltaAt = observedTypes.indexOf("item/agentMessage/delta");
+    const completedAt = observedTypes.indexOf("item/completed");
+    assert.notEqual(turnStartedAt, -1);
+    assert.notEqual(deltaAt, -1);
+    assert.notEqual(completedAt, -1);
+    assert.equal(turnStartedAt < deltaAt, true);
+    assert.equal(deltaAt < completedAt, true);
+  } finally {
+    runtime.stop();
+  }
+});
+
 test("mobile relay flow recovers when an old Codex thread disappears", async () => {
   store.resetStoreForTest();
   resetFakeCodexArtifacts();
@@ -289,6 +338,10 @@ async function waitForSessionState(read, timeoutMs = 2000) {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error("Timed out waiting for Codex session to reach expected state.");
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function resetFakeCodexArtifacts() {

@@ -232,6 +232,7 @@ export function installSessions(app) {
       state.renderedCodexSessionSignature === renderSignature;
 
     if (canSkipDetailRender) {
+      app.renderCodexLog(job, errorText);
       app.refreshActiveSessionHeader();
       app.updateComposerAvailability();
       app.updateStopButton();
@@ -249,14 +250,7 @@ export function installSessions(app) {
     state.renderedCodexSessionId = job.id;
     state.renderedCodexSessionSignature = renderSignature;
     app.renderApprovals(job);
-    const lines = [
-      `# ${job.status} · ${job.projectId}`,
-      errorText ? `ERROR: ${errorText}` : "",
-      job.finalMessage ? `\nFinal:\n${job.finalMessage}` : "",
-      "\nEvents:",
-      ...(job.events || []).slice(-80).map((event) => `${event.at || ""} ${event.type || ""}\n${event.text || ""}`)
-    ].filter(Boolean);
-    elements.codexLog.textContent = lines.join("\n\n");
+    app.renderCodexLog(job, errorText);
     app.refreshActiveSessionHeader();
     app.updateComposerAvailability();
     app.updateStopButton();
@@ -325,6 +319,17 @@ export function installSessions(app) {
       state.sessionListRefreshTimer = null;
       if (app.isLoggedIn() && state.token) app.loadCodexJobs().catch(() => {});
     }, 1200);
+  };
+
+  app.renderCodexLog = function renderCodexLog(job, errorText = "") {
+    const lines = [
+      `# ${job.status} · ${job.projectId}`,
+      errorText ? `ERROR: ${errorText}` : "",
+      job.finalMessage ? `\nFinal:\n${job.finalMessage}` : "",
+      "\nEvents:",
+      ...(job.events || []).slice(-80).map((event) => `${event.at || ""} ${event.type || ""}\n${event.text || ""}`)
+    ].filter(Boolean);
+    elements.codexLog.textContent = lines.join("\n\n");
   };
 
   app.conversationScrollTarget = function conversationScrollTarget() {
@@ -625,12 +630,6 @@ export function installSessions(app) {
         prompt: approval.prompt || "",
         title: app.approvalTitle(approval),
         detail: app.approvalDetail(approval)
-      })),
-      logEvents: (job.events || []).slice(-80).map((event) => ({
-        at: event.at || "",
-        type: event.type || "",
-        text: event.text || "",
-        error: event.error || ""
       }))
     });
   };
