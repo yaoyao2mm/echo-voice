@@ -15,8 +15,8 @@
         if (localStorage.getItem("echoTheme") === "dark") document.documentElement.dataset.theme = "dark";
       } catch {}
     </script>
-    <link rel="manifest" href="/manifest.webmanifest?v=72" />
-    <link rel="stylesheet" href="/styles.css?v=72" />
+    <link rel="manifest" href="/manifest.webmanifest?v=73" />
+    <link rel="stylesheet" href="/styles.css?v=73" />
   </head>
   <body>
     <main class="shell">
@@ -259,6 +259,7 @@
               <p id="activeSessionMeta" class="codex-runtime">选择权限、模型和推理强度后直接发送。</p>
             </div>
           </section>
+          <div id="sessionStatusRail" class="session-status-rail" aria-live="polite" hidden></div>
 
           <section id="codexJobDetail" class="codex-job-detail">
             <div id="codexRunSummary" class="codex-run-summary"></div>
@@ -391,6 +392,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=72" type="module"></script>
+    <script src="/app.js?v=73" type="module"></script>
   </body>
 </html>

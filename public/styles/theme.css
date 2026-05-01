@@ -238,6 +238,20 @@
   color: var(--ink);
 }
 
+:root[data-theme="dark"] .session-status-rail {
+  border-color: rgba(139, 154, 174, 0.14);
+  background: rgba(16, 20, 26, 0.94);
+  color: var(--muted);
+}
+
+:root[data-theme="dark"] .session-status-mode {
+  color: var(--ink);
+}
+
+:root[data-theme="dark"] .session-status-ref {
+  color: var(--muted-2);
+}
+
 :root[data-theme="dark"] .thread-attachment-pill,
 :root[data-theme="dark"] .composer-attachment-pill {
   border-color: rgba(139, 154, 174, 0.16);
