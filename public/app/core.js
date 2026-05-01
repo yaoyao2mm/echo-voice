@@ -67,6 +67,8 @@ export function createAppContext(windowRef = window, documentRef = document) {
       sessionEventSource: null,
       sessionEventSourceId: "",
       sessionListRefreshTimer: null,
+      sessionStreamRenderFrame: 0,
+      pendingSessionStreamRender: null,
       composingNewSession: false,
       codexWorkspaces: [],
       codexAgentOnline: false,

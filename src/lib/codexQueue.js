@@ -13,6 +13,7 @@ import {
   decideSessionApproval as decideStoredSessionApproval,
   enqueueSessionMessage as enqueueStoredSessionMessage,
   getWorkspaceCommand as getStoredWorkspaceCommand,
+  getSessionCommandSessionId as getStoredSessionCommandSessionId,
   getSessionAttachmentContent as getStoredSessionAttachmentContent,
   getSession as getStoredSession,
   listSessions as listStoredSessions,
@@ -71,8 +72,8 @@ export function listCodexSessions(limit = 20, options = {}) {
   return listStoredSessions(limit, options);
 }
 
-export function getCodexSession(id) {
-  return getStoredSession(id);
+export function getCodexSession(id, options = {}) {
+  return getStoredSession(id, options);
 }
 
 export function getCodexSessionAttachmentContent(id) {
@@ -220,9 +221,10 @@ export async function waitForCodexSessionApproval(id, input = {}) {
 export function completeCodexSessionCommand(id, result = {}, options = {}) {
   if (options.agent) updateCodexAgent(options.agent);
   else if (options.agentId) touchAgent(options.agentId);
+  const sessionId = result?.sessionId || getStoredSessionCommandSessionId(id);
   const ok = completeStoredSessionCommand(id, result, { agentId: options.agentId || options.agent?.id });
   if (ok) events.emit("codex-session-command");
-  if (ok && result?.sessionId) notifySessionChanged(result.sessionId);
+  if (ok && sessionId) notifySessionChanged(sessionId);
   return ok;
 }
 

@@ -565,17 +565,26 @@ export function listSessions(limit = 20, options = {}) {
   `).all(params).map(summarizeSession);
 }
 
-export function getSession(id) {
+export function getSession(id, options = {}) {
   refreshInteractiveSessionState();
 
   const session = getSessionSummary(id);
   if (!session) return null;
-  return {
+  const result = {
     ...session,
-    messages: listSessionMessages(id),
-    events: listSessionEvents(id),
-    approvals: listSessionApprovals(id)
+    events: listSessionEvents(id, {
+      maxEvents: options.maxEvents,
+      rawMode: options.rawMode,
+      includeRaw: options.includeRaw
+    })
   };
+  if (options.includeMessages !== false) result.messages = listSessionMessages(id);
+  if (options.includeApprovals !== false) result.approvals = listSessionApprovals(id);
+  return result;
+}
+
+export function getSessionCommandSessionId(id) {
+  return getSessionCommandSummary(id)?.sessionId || "";
 }
 
 export function getSessionAttachmentContent(id) {
@@ -2003,13 +2012,27 @@ function listEvents(jobId) {
   `).all(jobId).map(parseEvent);
 }
 
-function listSessionEvents(sessionId) {
+function listSessionEvents(sessionId, options = {}) {
+  const maxEvents = Number(options.maxEvents || 0);
+  if (maxEvents > 0) {
+    return db.prepare(`
+      SELECT at, type, text, rawJson
+      FROM (
+        SELECT at, type, text, raw_json AS rawJson, id
+        FROM codex_session_events
+        WHERE session_id = ?
+        ORDER BY id DESC
+        LIMIT ?
+      )
+      ORDER BY id ASC
+    `).all(sessionId, Math.min(Math.max(1, Math.round(maxEvents)), config.codex.maxEvents)).map((row) => parseEvent(row, options));
+  }
   return db.prepare(`
     SELECT at, type, text, raw_json AS rawJson
     FROM codex_session_events
     WHERE session_id = ?
     ORDER BY id ASC
-  `).all(sessionId).map(parseEvent);
+  `).all(sessionId).map((row) => parseEvent(row, options));
 }
 
 function listSessionMessages(sessionId) {
@@ -2176,11 +2199,132 @@ function normalizeSessionEvent(sessionId, event = {}, fallbackAt) {
 }
 
 function parseEvent(row, options = {}) {
+  const raw = options.includeRaw === false ? null : parseJson(row.rawJson);
   return {
     at: row.at,
     type: row.type,
     text: row.text,
-    raw: options.includeRaw === false ? null : parseJson(row.rawJson)
+    raw: options.rawMode === "client" ? compactClientEventRaw(row.type, raw) : raw
+  };
+}
+
+function compactClientEventRaw(type, raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const method = String(raw.method || type || "");
+  const params = raw.params && typeof raw.params === "object" ? raw.params : {};
+  if (method === "git.summary" || raw.gitSummary) {
+    const summary = raw.gitSummary || {};
+    const changedFiles = Array.isArray(summary.changedFiles) ? summary.changedFiles : [];
+    return {
+      source: raw.source || "",
+      gitSummary: {
+        root: summary.root || "",
+        branch: summary.branch || "",
+        commit: summary.commit || "",
+        changedFileCount: Number.isFinite(Number(summary.changedFileCount)) ? Number(summary.changedFileCount) : changedFiles.length,
+        changedFiles: changedFiles.slice(0, 20)
+      }
+    };
+  }
+  if (method === "thread/status/changed") return { method };
+  if (method === "turn/started" || method === "turn/completed") {
+    return { method, params: compactTurnParams(params) };
+  }
+  if (method === "turn/plan/updated") {
+    return {
+      method,
+      params: {
+        threadId: params.threadId || "",
+        turnId: params.turnId || params.turn?.id || ""
+      }
+    };
+  }
+  if (isDeltaEventType(method)) {
+    return {
+      method,
+      params: {
+        threadId: params.threadId || "",
+        turnId: params.turnId || "",
+        itemId: params.itemId || ""
+      }
+    };
+  }
+  if (method === "item/completed" || method === "item/started") {
+    return { method, params: compactItemParams(params) };
+  }
+  if (method === "item/commandExecution/requestApproval") {
+    return {
+      method,
+      params: {
+        threadId: params.threadId || "",
+        turnId: params.turnId || "",
+        command: compactCommand(params.command)
+      }
+    };
+  }
+  if (method === "thread/start" || method === "thread/resume") {
+    return { method };
+  }
+  if (Array.isArray(raw.attachments)) {
+    return {
+      attachments: raw.attachments.map(compactClientAttachment).filter(Boolean)
+    };
+  }
+  return { method };
+}
+
+function compactTurnParams(params = {}) {
+  const turn = params.turn && typeof params.turn === "object" ? params.turn : {};
+  return {
+    threadId: params.threadId || "",
+    turn: {
+      id: turn.id || params.turnId || "",
+      status: turn.status || "",
+      error: turn.error?.message ? { message: String(turn.error.message).slice(0, 1000) } : null
+    }
+  };
+}
+
+function compactItemParams(params = {}) {
+  const item = params.item && typeof params.item === "object" ? params.item : {};
+  const compactItem = {
+    id: item.id || "",
+    type: item.type || "",
+    status: item.status || ""
+  };
+  if (item.type === "agentMessage" || item.type === "plan") compactItem.text = String(item.text || "").slice(0, 12000);
+  if (item.type === "commandExecution") {
+    compactItem.command = compactCommand(item.command);
+    compactItem.aggregatedOutput = String(item.aggregatedOutput || "").slice(-1200);
+  }
+  return {
+    threadId: params.threadId || "",
+    turnId: params.turnId || params.turn?.id || "",
+    item: compactItem
+  };
+}
+
+function isDeltaEventType(method) {
+  return (
+    method === "item/agentMessage/delta" ||
+    method === "item/plan/delta" ||
+    method === "command/exec/outputDelta" ||
+    method === "item/commandExecution/outputDelta"
+  );
+}
+
+function compactCommand(command) {
+  if (Array.isArray(command)) return command.map((part) => String(part || "").slice(0, 200)).slice(0, 40);
+  return String(command || "").slice(0, 1000);
+}
+
+function compactClientAttachment(attachment) {
+  if (!attachment || typeof attachment !== "object") return null;
+  return {
+    type: attachment.type || "",
+    name: attachment.name || "",
+    id: attachment.id || "",
+    downloadPath: attachment.downloadPath || ""
   };
 }
 
@@ -2257,6 +2401,7 @@ function deriveSessionUpdate(events, session) {
     finalMessage: null
   };
   let agentMessageCompleted = hasCompletedAgentMessage(session.id);
+  let nextFinalMessage = String(session.finalMessage || "");
 
   for (const event of events || []) {
     const raw = event.raw || {};
@@ -2282,10 +2427,12 @@ function deriveSessionUpdate(events, session) {
       if (message) update.lastError = String(message).slice(0, 12000);
     }
     if (method === "item/agentMessage/delta" && event.text && !agentMessageCompleted) {
-      update.finalMessage = `${session.finalMessage || ""}${event.text}`.slice(0, 12000);
+      nextFinalMessage = `${nextFinalMessage}${event.text}`.slice(0, 12000);
+      update.finalMessage = nextFinalMessage;
     }
     if (method === "item/completed" && raw.params?.item?.type === "agentMessage") {
-      update.finalMessage = String(raw.params.item.text || "").slice(0, 12000);
+      nextFinalMessage = String(raw.params.item.text || "").slice(0, 12000);
+      update.finalMessage = nextFinalMessage;
       agentMessageCompleted = true;
     }
   }

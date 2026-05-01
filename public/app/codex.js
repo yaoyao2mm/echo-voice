@@ -31,7 +31,7 @@ export function installCodex(app) {
     try {
       const data = await app.apiGet("/api/codex/status");
       app.renderCodexStatus(data);
-      await app.loadCodexJobs();
+      await app.loadCodexJobs({ skipSelectedDetailLoad: Boolean(state.sessionEventSourceId) });
     } catch (error) {
       if (app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) return;
       elements.codexStatusText.textContent = "Codex 未连接";
@@ -284,6 +284,7 @@ export function installCodex(app) {
       state.composingNewSession = false;
       state.runtimeDirty = false;
       app.applyRuntimeDraft(state.selectedCodexSession.runtime || runtime, { persist: false, dirty: false });
+      app.renderCodexJob(data.session, { keepSelection: true, scrollToBottom: true });
       elements.codexPrompt.value = "";
       app.syncComposerInputHeight();
       await app.loadCodexJobs();
@@ -335,6 +336,7 @@ export function installCodex(app) {
       state.composingNewSession = false;
       state.runtimeDirty = false;
       app.applyRuntimeDraft(state.selectedCodexSession.runtime || runtime, { persist: false, dirty: false });
+      app.renderCodexJob(data.session, { keepSelection: true, scrollToBottom: true });
       await app.loadCodexJobs();
       await app.showCodexJob(data.session.id);
       await app.refreshStatus({ silentAuthFailure: true });

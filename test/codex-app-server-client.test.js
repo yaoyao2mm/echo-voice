@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { CodexAppServerClient, buildUserInputs } from "../src/lib/codexAppServerClient.js";
+import { buildCodexEnv } from "../src/lib/codexRunner.js";
 
 test("CodexAppServerClient speaks newline-delimited app-server JSON-RPC", async () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "echo-app-server-client-"));
@@ -76,4 +77,31 @@ test("buildUserInputs supports local image attachments", () => {
     { type: "text", text: "hi", text_elements: [] },
     { type: "localImage", path: "/tmp/example.png" }
   ]);
+});
+
+test("buildCodexEnv exposes API key stored by codex login --with-api-key", () => {
+  const previousHome = process.env.HOME;
+  const previousCodexHome = process.env.CODEX_HOME;
+  const previousOpenAiApiKey = process.env.OPENAI_API_KEY;
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "echo-codex-env-"));
+  const codexHome = path.join(tempRoot, ".codex");
+  fs.mkdirSync(codexHome, { recursive: true });
+  fs.writeFileSync(path.join(codexHome, "auth.json"), JSON.stringify({ OPENAI_API_KEY: "sk-test-from-auth" }), "utf8");
+
+  try {
+    process.env.HOME = tempRoot;
+    delete process.env.CODEX_HOME;
+    delete process.env.OPENAI_API_KEY;
+
+    const env = buildCodexEnv();
+    assert.equal(env.CODEX_HOME, codexHome);
+    assert.equal(env.OPENAI_API_KEY, "sk-test-from-auth");
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = previousCodexHome;
+    if (previousOpenAiApiKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousOpenAiApiKey;
+  }
 });

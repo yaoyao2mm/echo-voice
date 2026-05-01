@@ -9,6 +9,8 @@ import { codexCompatibleModel } from "./codexRuntime.js";
 import { httpFetch } from "./http.js";
 
 const maxDownloadedAttachmentBytes = 10 * 1024 * 1024;
+const streamDeltaFlushDelayMs = 80;
+const streamDeltaFlushMaxChars = 1200;
 
 export class CodexInteractiveRuntime {
   constructor(options = {}) {
@@ -21,18 +23,17 @@ export class CodexInteractiveRuntime {
     this.activeTurns = new Map();
     this.attachmentDirs = new Map();
     this.eventFlushes = new Map();
+    this.deltaBuffers = new Map();
   }
 
   async handleCommand(command) {
-    await this.#ensureClient();
-    const workspace = this.#workspaceFor(command);
-    this.#rememberCommand(command);
-
-    if (command.type === "start") return this.#startSession(command, workspace);
-    if (command.type === "message") return this.#sendMessage(command, workspace);
-    if (command.type === "stop") return this.#stopTurn(command);
-    if (command.type === "compact") return this.#compactThread(command, workspace);
-    throw new Error(`Unsupported Codex session command: ${command.type}`);
+    try {
+      return await this.#handleCommandWithClient(command);
+    } catch (error) {
+      if (!isCodexAuthRefreshError(error)) throw error;
+      this.#restartClientAfterAuthChange();
+      return this.#handleCommandWithClient(command);
+    }
   }
 
   stop() {
@@ -45,6 +46,10 @@ export class CodexInteractiveRuntime {
     this.threadToSession.clear();
     this.activeTurns.clear();
     this.eventFlushes.clear();
+    for (const buffer of this.deltaBuffers.values()) {
+      if (buffer.timer) clearTimeout(buffer.timer);
+    }
+    this.deltaBuffers.clear();
   }
 
   async #startSession(command, workspace) {
@@ -79,6 +84,26 @@ export class CodexInteractiveRuntime {
       runtime
     });
     return { ok: true, appThreadId, activeTurnId: turn.id, sessionStatus: "running" };
+  }
+
+  async #handleCommandWithClient(command) {
+    await this.#ensureClient();
+    const workspace = this.#workspaceFor(command);
+    this.#rememberCommand(command);
+
+    if (command.type === "start") return this.#startSession(command, workspace);
+    if (command.type === "message") return this.#sendMessage(command, workspace);
+    if (command.type === "stop") return this.#stopTurn(command);
+    if (command.type === "compact") return this.#compactThread(command, workspace);
+    throw new Error(`Unsupported Codex session command: ${command.type}`);
+  }
+
+  #restartClientAfterAuthChange() {
+    this.client?.stop();
+    this.client = null;
+    this.sessions.clear();
+    this.threadToSession.clear();
+    this.activeTurns.clear();
   }
 
   async #sendMessage(command, workspace) {
@@ -313,6 +338,10 @@ export class CodexInteractiveRuntime {
       this.sessions.clear();
       this.threadToSession.clear();
       this.activeTurns.clear();
+      for (const buffer of this.deltaBuffers.values()) {
+        if (buffer.timer) clearTimeout(buffer.timer);
+      }
+      this.deltaBuffers.clear();
     });
     this.client.on("error", (error) => {
       console.error(`[codex app-server] ${error.message}`);
@@ -410,7 +439,11 @@ export class CodexInteractiveRuntime {
       });
       return;
     }
-    this.#emit(sessionId, [event]).catch((error) => {
+    if (bufferedDeltaKey(event)) {
+      this.#bufferDeltaEvent(sessionId, event);
+      return;
+    }
+    this.#emitAfterPendingDeltas(sessionId, [event]).catch((error) => {
       console.error(`[codex app-server event] ${error.message}`);
     });
   }
@@ -452,27 +485,96 @@ export class CodexInteractiveRuntime {
   }
 
   async #emit(sessionId, events) {
+    return this.#enqueueEventTask(sessionId, () => this.onEvents(sessionId, events));
+  }
+
+  #enqueueEventTask(sessionId, task) {
     const previous = this.eventFlushes.get(sessionId) || Promise.resolve();
-    const current = previous.catch(() => {}).then(() => this.onEvents(sessionId, events));
+    const current = previous.catch(() => {}).then(task);
     this.eventFlushes.set(sessionId, current);
-    try {
-      await current;
-    } finally {
+    const cleanup = () => {
       if (this.eventFlushes.get(sessionId) === current) {
         this.eventFlushes.delete(sessionId);
       }
+    };
+    current.then(cleanup, cleanup);
+    return current;
+  }
+
+  async #emitAfterPendingDeltas(sessionId, events) {
+    const pendingDelta = this.#takePendingDelta(sessionId);
+    return this.#enqueueEventTask(sessionId, async () => {
+      if (pendingDelta) await this.onEvents(sessionId, [pendingDelta]);
+      await this.onEvents(sessionId, events);
+    });
+  }
+
+  #bufferDeltaEvent(sessionId, event) {
+    const key = bufferedDeltaKey(event);
+    if (!key) {
+      this.#emitAfterPendingDeltas(sessionId, [event]).catch((error) => {
+        console.error(`[codex app-server event] ${error.message}`);
+      });
+      return;
     }
+
+    const existing = this.deltaBuffers.get(sessionId);
+    if (existing && existing.key !== key) {
+      this.#flushPendingDelta(sessionId)?.catch((error) => {
+        console.error(`[codex app-server event] ${error.message}`);
+      });
+    }
+
+    const buffer = this.deltaBuffers.get(sessionId);
+    if (buffer && buffer.key === key) {
+      appendDeltaEvent(buffer.event, event);
+      if (String(buffer.event.text || "").length >= streamDeltaFlushMaxChars) {
+        this.#flushPendingDelta(sessionId)?.catch((error) => {
+          console.error(`[codex app-server event] ${error.message}`);
+        });
+      }
+      return;
+    }
+
+    const nextBuffer = {
+      key,
+      event: cloneDeltaEvent(event),
+      timer: setTimeout(() => {
+        this.#flushPendingDelta(sessionId)?.catch((error) => {
+          console.error(`[codex app-server event] ${error.message}`);
+        });
+      }, streamDeltaFlushDelayMs)
+    };
+    this.deltaBuffers.set(sessionId, nextBuffer);
+  }
+
+  #flushPendingDelta(sessionId) {
+    const pendingDelta = this.#takePendingDelta(sessionId);
+    if (!pendingDelta) return null;
+    return this.#enqueueEventTask(sessionId, () => this.onEvents(sessionId, [pendingDelta]));
+  }
+
+  #takePendingDelta(sessionId) {
+    const buffer = this.deltaBuffers.get(sessionId);
+    if (!buffer) return null;
+    this.deltaBuffers.delete(sessionId);
+    if (buffer.timer) clearTimeout(buffer.timer);
+    return buffer.event;
   }
 
   async #emitTurnCompleted(sessionId, threadId, event) {
-    const events = [event];
-    try {
-      const gitSummary = await this.#gitSummaryEvent(sessionId, threadId);
-      if (gitSummary) events.push(gitSummary);
-    } catch (error) {
-      console.error(`[codex git summary] ${error.message}`);
-    }
-    await this.#emit(sessionId, events);
+    const pendingDelta = this.#takePendingDelta(sessionId);
+    return this.#enqueueEventTask(sessionId, async () => {
+      if (pendingDelta) await this.onEvents(sessionId, [pendingDelta]);
+      const events = [event];
+      try {
+        const gitSummary = await this.#gitSummaryEvent(sessionId, threadId);
+        if (gitSummary) events.push(gitSummary);
+      } catch (error) {
+        console.error(`[codex git summary] ${error.message}`);
+      }
+      await this.onEvents(sessionId, events);
+    });
   }
 
   async #gitSummaryEvent(sessionId, threadId) {
@@ -682,6 +784,47 @@ function getThreadId(message) {
   return message.params?.threadId || message.params?.thread?.id || message.params?.item?.threadId || "";
 }
 
+function bufferedDeltaKey(event) {
+  const method = event?.raw?.method || event?.type || "";
+  if (!isBufferedDeltaMethod(method)) return "";
+  const params = event.raw?.params || {};
+  const threadId = params.threadId || params.thread?.id || params.item?.threadId || event.appThreadId || "";
+  const turnId = params.turnId || params.turn?.id || event.activeTurnId || "";
+  const itemId = params.itemId || params.item?.id || "";
+  return [method, threadId, turnId, itemId].join("\u001f");
+}
+
+function isBufferedDeltaMethod(method) {
+  return (
+    method === "item/agentMessage/delta" ||
+    method === "item/plan/delta" ||
+    method === "command/exec/outputDelta" ||
+    method === "item/commandExecution/outputDelta"
+  );
+}
+
+function cloneDeltaEvent(event) {
+  return {
+    ...event,
+    raw: event.raw
+      ? {
+          ...event.raw,
+          params: event.raw.params ? { ...event.raw.params } : event.raw.params
+        }
+      : event.raw
+  };
+}
+
+function appendDeltaEvent(target, event) {
+  const delta = String(event.text || event.raw?.params?.delta || "");
+  const finalDelta = String(event.finalMessage || "");
+  target.text = `${target.text || ""}${delta}`;
+  if (finalDelta) target.finalMessage = `${target.finalMessage || ""}${finalDelta}`;
+  if (target.raw?.params) {
+    target.raw.params.delta = `${target.raw.params.delta || ""}${delta}`;
+  }
+}
+
 function notificationToEvent(message) {
   const type = message.method || "codex";
   const event = {
@@ -768,6 +911,11 @@ function declineApprovalResponse(method) {
   if (method === "execCommandApproval") return { decision: "denied" };
   if (method === "applyPatchApproval") return { decision: "denied" };
   return null;
+}
+
+function isCodexAuthRefreshError(error) {
+  const message = String(error?.message || error || "");
+  return /access token could not be refreshed|logged out or signed in to another account|sign in again/i.test(message);
 }
 
 async function defaultApprovalHandler(approval) {

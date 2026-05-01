@@ -94,6 +94,68 @@ test("interactive Codex sessions are scoped to one project", () => {
   assert.equal(continued.messages.filter((message) => message.role === "user").length, 2);
 });
 
+test("session delta batches append to the visible assistant draft", async () => {
+  store.resetStoreForTest();
+
+  const agent = {
+    id: "session-agent",
+    workspaces: [{ id: "echo", label: "Echo", path: "/workspace/echo" }],
+    runtime: { command: "fake-codex" }
+  };
+  queue.updateCodexAgent(agent);
+  const created = queue.createCodexSession({
+    projectId: "echo",
+    prompt: "write a long answer"
+  });
+  const command = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  assert.equal(command.sessionId, created.id);
+
+  assert.equal(
+    queue.appendCodexSessionEvents(
+      created.id,
+      [
+        {
+          type: "turn/started",
+          text: "Turn started.",
+          raw: { method: "turn/started", params: { threadId: "thr_1", turn: { id: "turn_1" } } }
+        },
+        {
+          type: "item/agentMessage/delta",
+          text: "Hello ",
+          finalMessage: "Hello ",
+          raw: { method: "item/agentMessage/delta", params: { threadId: "thr_1", turnId: "turn_1", delta: "Hello " } }
+        },
+        {
+          type: "item/agentMessage/delta",
+          text: "from ",
+          finalMessage: "from ",
+          raw: { method: "item/agentMessage/delta", params: { threadId: "thr_1", turnId: "turn_1", delta: "from " } }
+        },
+        {
+          type: "item/agentMessage/delta",
+          text: "Echo",
+          finalMessage: "Echo",
+          raw: { method: "item/agentMessage/delta", params: { threadId: "thr_1", turnId: "turn_1", delta: "Echo" } }
+        }
+      ],
+      { agentId: "session-agent" }
+    ),
+    true
+  );
+
+  assert.equal(queue.getCodexSession(created.id).finalMessage, "Hello from Echo");
+  const streamSnapshot = queue.getCodexSession(created.id, {
+    rawMode: "client",
+    maxEvents: 2,
+    includeMessages: false
+  });
+  assert.equal(streamSnapshot.messages, undefined);
+  assert.equal(streamSnapshot.events.length, 2);
+  assert.equal(streamSnapshot.events[0].raw.params.delta, undefined);
+  assert.equal(streamSnapshot.events[1].raw.params.delta, undefined);
+  assert.equal(streamSnapshot.finalMessage, "Hello from Echo");
+});
+
 test("interactive Codex sessions lease commands and keep thread state", async () => {
   store.resetStoreForTest();
 

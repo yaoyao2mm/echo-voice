@@ -1,4 +1,5 @@
 import os from "node:os";
+import fs from "node:fs";
 import path from "node:path";
 import { config } from "../config.js";
 import { resolveDesktopCodexCommand } from "./codexCommand.js";
@@ -49,6 +50,8 @@ export function publicCodexRuntime() {
 export function buildCodexEnv() {
   const userInfo = os.userInfo();
   const home = process.env.HOME || os.homedir();
+  const codexHome = process.env.CODEX_HOME || path.join(home, ".codex");
+  const codexAuthApiKey = process.env.OPENAI_API_KEY ? "" : readCodexAuthApiKey(codexHome);
   return buildProxyEnv({
     ...process.env,
     PATH: process.env.PATH || "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
@@ -56,7 +59,18 @@ export function buildCodexEnv() {
     USER: process.env.USER || userInfo.username,
     LOGNAME: process.env.LOGNAME || userInfo.username,
     SHELL: process.env.SHELL || "/bin/zsh",
-    CODEX_HOME: process.env.CODEX_HOME || path.join(home, ".codex"),
+    CODEX_HOME: codexHome,
+    OPENAI_API_KEY: process.env.OPENAI_API_KEY || codexAuthApiKey || "",
     LANG: process.env.LANG || "en_US.UTF-8"
   });
+}
+
+function readCodexAuthApiKey(codexHome) {
+  try {
+    const authPath = path.join(codexHome, "auth.json");
+    const auth = JSON.parse(fs.readFileSync(authPath, "utf8"));
+    return String(auth.OPENAI_API_KEY || "").trim();
+  } catch {
+    return "";
+  }
 }

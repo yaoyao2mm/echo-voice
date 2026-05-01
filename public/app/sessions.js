@@ -1,7 +1,7 @@
 export function installSessions(app) {
   const { document, elements, navigator, state, window: windowRef } = app;
 
-  app.loadCodexJobs = async function loadCodexJobs() {
+  app.loadCodexJobs = async function loadCodexJobs(options = {}) {
     const projectId = app.currentProjectId();
     if (!projectId) {
       await app.renderProjectSessionList([]);
@@ -19,10 +19,10 @@ export function installSessions(app) {
     });
     const data = await app.apiGet(`/api/codex/sessions?${params.toString()}`);
     const jobs = data.items.slice(0, 30);
-    await app.renderProjectSessionList(jobs);
+    await app.renderProjectSessionList(jobs, options);
   };
 
-  app.renderProjectSessionList = async function renderProjectSessionList(jobs) {
+  app.renderProjectSessionList = async function renderProjectSessionList(jobs, options = {}) {
     elements.codexJobs.innerHTML = "";
     if (jobs.length === 0) {
       const emptyCopy = state.showArchivedSessions ? "还没有归档会话" : "还没有 Codex 会话";
@@ -60,6 +60,12 @@ export function installSessions(app) {
     }
 
     if (state.selectedCodexJobId) {
+      if (options.skipSelectedDetailLoad && state.selectedCodexSession?.id === state.selectedCodexJobId) {
+        app.refreshActiveSessionHeader();
+        app.updateComposerAvailability();
+        app.updateStopButton();
+        return;
+      }
       await app.showCodexJob(state.selectedCodexJobId, { keepSelection: true });
       return;
     }
@@ -292,8 +298,7 @@ export function installSessions(app) {
       }
       const session = data?.session;
       if (!session?.id || session.id !== state.selectedCodexJobId) return;
-      app.renderCodexJob(session, { keepSelection: true, scrollToBottom: false });
-      app.scheduleSessionListRefresh();
+      app.queueCodexSessionStreamRender(session, { partial: Boolean(data.partial) });
     });
 
     source.onerror = () => {
@@ -313,13 +318,84 @@ export function installSessions(app) {
       state.sessionListRefreshTimer = null;
     }
     state.sessionEventSourceId = "";
+    if (state.sessionStreamRenderFrame) {
+      windowRef.cancelAnimationFrame?.(state.sessionStreamRenderFrame);
+      state.sessionStreamRenderFrame = 0;
+    }
+    state.pendingSessionStreamRender = null;
+  };
+
+  app.queueCodexSessionStreamRender = function queueCodexSessionStreamRender(session, options = {}) {
+    state.pendingSessionStreamRender = {
+      session,
+      partial: Boolean(options.partial)
+    };
+    if (state.sessionStreamRenderFrame) return;
+
+    const render = () => {
+      state.sessionStreamRenderFrame = 0;
+      const pending = state.pendingSessionStreamRender;
+      state.pendingSessionStreamRender = null;
+      const nextSession = pending?.partial
+        ? app.mergeCodexSessionStreamUpdate(state.selectedCodexSession, pending.session)
+        : pending?.session;
+      if (!nextSession?.id || nextSession.id !== state.selectedCodexJobId) return;
+      app.renderCodexJob(nextSession, { keepSelection: true, scrollToBottom: false });
+      if (!app.sessionHasPendingWork(nextSession)) app.scheduleSessionListRefresh();
+    };
+
+    if (windowRef.requestAnimationFrame) {
+      state.sessionStreamRenderFrame = windowRef.requestAnimationFrame(render);
+    } else {
+      render();
+    }
+  };
+
+  app.mergeCodexSessionStreamUpdate = function mergeCodexSessionStreamUpdate(current, incoming) {
+    if (!current || current.id !== incoming?.id) return incoming;
+    return {
+      ...current,
+      ...incoming,
+      messages: Array.isArray(incoming.messages) ? incoming.messages : current.messages || [],
+      approvals: Array.isArray(incoming.approvals) ? incoming.approvals : current.approvals || [],
+      events: app.mergeCodexSessionEvents(current.events || [], incoming.events || [])
+    };
+  };
+
+  app.mergeCodexSessionEvents = function mergeCodexSessionEvents(currentEvents, incomingEvents) {
+    const merged = [];
+    const seen = new Set();
+    for (const event of [...currentEvents, ...incomingEvents]) {
+      const key = app.sessionEventKey(event);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(event);
+    }
+    return merged.slice(-160);
+  };
+
+  app.sessionEventKey = function sessionEventKey(event) {
+    const raw = event?.raw || {};
+    const params = raw.params || {};
+    const item = params.item || {};
+    return [
+      event?.at || "",
+      event?.type || "",
+      raw.method || "",
+      params.threadId || "",
+      params.turnId || params.turn?.id || "",
+      params.itemId || item.id || "",
+      String(event?.text || "").slice(0, 160)
+    ].join("\u001f");
   };
 
   app.scheduleSessionListRefresh = function scheduleSessionListRefresh() {
     if (state.sessionListRefreshTimer) return;
     state.sessionListRefreshTimer = windowRef.setTimeout(() => {
       state.sessionListRefreshTimer = null;
-      if (app.isLoggedIn() && state.token) app.loadCodexJobs().catch(() => {});
+      if (app.isLoggedIn() && state.token) {
+        app.loadCodexJobs({ skipSelectedDetailLoad: Boolean(state.sessionEventSourceId) }).catch(() => {});
+      }
     }, 1200);
   };
 
@@ -860,12 +936,17 @@ export function installSessions(app) {
     if (!inWorktree && !latestGitEvent) return null;
 
     const changedFiles = Array.isArray(summary.changedFiles) ? summary.changedFiles : null;
+    const changedFileCount = Number.isFinite(Number(summary.changedFileCount))
+      ? Number(summary.changedFileCount)
+      : changedFiles
+        ? changedFiles.length
+        : null;
     const branch = String(summary.branch || execution.branchName || "").trim();
     const commit = app.shortCommit(summary.commit || execution.baseCommit || "");
     const refText = [branch, commit].filter(Boolean).join(" @ ");
-    const gitLabel = changedFiles
-      ? changedFiles.length > 0
-        ? `Git 变更 ${changedFiles.length}`
+    const gitLabel = Number.isFinite(changedFileCount)
+      ? changedFileCount > 0
+        ? `Git 变更 ${changedFileCount}`
         : "Git 无变更"
       : app.sessionStatusGitPendingLabel(session);
     const modeLabel = inWorktree ? "隔离 worktree" : "主工作区";
@@ -873,7 +954,7 @@ export function installSessions(app) {
 
     return {
       mode: inWorktree ? "worktree" : "workspace",
-      gitState: changedFiles && changedFiles.length > 0 ? "dirty" : changedFiles ? "clean" : "pending",
+      gitState: Number.isFinite(changedFileCount) && changedFileCount > 0 ? "dirty" : Number.isFinite(changedFileCount) ? "clean" : "pending",
       modeLabel,
       gitLabel,
       refText,

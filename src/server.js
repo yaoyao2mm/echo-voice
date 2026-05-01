@@ -279,7 +279,7 @@ app.get("/api/codex/sessions/:id", (req, res) => {
     return res.status(400).json({ error: "Codex interactive sessions are only available in relay mode." });
   }
 
-  const session = getCodexSession(req.params.id);
+  const session = getCodexSession(req.params.id, streamSessionOptions({ initial: true }));
   if (!session) return res.status(404).json({ error: "Codex session not found." });
   res.json({ session });
 });
@@ -289,7 +289,12 @@ app.post("/api/codex/sessions/:id/events-ticket", (req, res) => {
     return res.status(400).json({ error: "Codex interactive session events are only available in relay mode." });
   }
 
-  const session = getCodexSession(req.params.id);
+  const session = getCodexSession(req.params.id, {
+    includeMessages: false,
+    includeApprovals: false,
+    includeRaw: false,
+    maxEvents: 1
+  });
   if (!session) return res.status(404).json({ error: "Codex session not found." });
 
   const ticket = createSseTicket(req.params.id);
@@ -310,7 +315,7 @@ app.get("/api/codex/sessions/:id/events", (req, res) => {
     });
   }
 
-  const session = getCodexSession(req.params.id);
+  const session = getCodexSession(req.params.id, streamSessionOptions({ initial: true }));
   if (!session) return res.status(404).json({ error: "Codex session not found." });
 
   res.writeHead(200, {
@@ -320,11 +325,11 @@ app.get("/api/codex/sessions/:id/events", (req, res) => {
     "X-Accel-Buffering": "no"
   });
   res.write(": connected\n\n");
-  writeSse(res, "session", { session });
+  writeSse(res, "session", { session, partial: false });
 
   const unsubscribe = subscribeCodexSession(req.params.id, () => {
-    const updated = getCodexSession(req.params.id);
-    if (updated) writeSse(res, "session", { session: updated });
+    const updated = getCodexSession(req.params.id, streamSessionOptions({ initial: false }));
+    if (updated) writeSse(res, "session", { session: updated, partial: true });
   });
   const heartbeat = setInterval(() => {
     res.write(": keep-alive\n\n");
@@ -613,6 +618,15 @@ function handleError(res, error) {
 function writeSse(res, event, data) {
   res.write(`event: ${event}\n`);
   res.write(`data: ${JSON.stringify(data)}\n\n`);
+}
+
+function streamSessionOptions({ initial = false } = {}) {
+  return {
+    rawMode: "client",
+    maxEvents: initial ? 160 : 80,
+    includeMessages: initial,
+    includeApprovals: true
+  };
 }
 
 function createSseTicket(sessionId) {
