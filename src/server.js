@@ -334,11 +334,18 @@ app.get("/api/codex/sessions/:id/events", (req, res) => {
   const heartbeat = setInterval(() => {
     res.write(": keep-alive\n\n");
   }, 25000);
+  heartbeat.unref?.();
 
-  req.on("close", () => {
+  let closed = false;
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
     clearInterval(heartbeat);
     unsubscribe();
-  });
+  };
+  res.on("close", cleanup);
+  res.on("error", cleanup);
+  req.on("aborted", cleanup);
 });
 
 app.get("/api/codex/attachments/:id", (req, res) => {
