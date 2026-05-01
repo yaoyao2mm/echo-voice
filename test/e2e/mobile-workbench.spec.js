@@ -873,7 +873,9 @@ test("mobile quick deploy sends the fixed deployment prompt", async ({ page, req
 
     await page.locator("#quickDeployButton").click();
 
-    await expect(page.locator("#codexRunSummary")).toContainText("请把当前对话中已经完成且适合发布的代码改动提交、推送");
+    await expect(page.locator("#codexRunSummary")).toContainText(
+      "请把当前对话中已经完成且适合发布的代码改动提交、推送，然后把本次结果合入主部署分支"
+    );
     await expect(page.locator(".toast", { hasText: "已发送部署指令" })).toHaveCount(0);
     await expect(page.locator("#quickDeployButton")).toBeDisabled();
 
@@ -883,6 +885,11 @@ test("mobile quick deploy sends the fixed deployment prompt", async ({ page, req
     expect(
       sessionData.session.messages.some(
         (message) => message.role === "user" && String(message.text || "").includes("不要强行运行与项目技术栈无关的检查")
+      )
+    ).toBeTruthy();
+    expect(
+      sessionData.session.messages.some(
+        (message) => message.role === "user" && String(message.text || "").includes("基于主部署分支的部署流程")
       )
     ).toBeTruthy();
   } finally {
