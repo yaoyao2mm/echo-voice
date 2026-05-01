@@ -91,6 +91,10 @@
   outline-offset: 3px;
 }
 
+.theme-switch input:disabled + .theme-switch-track {
+  opacity: 0.58;
+}
+
 :root[data-theme="dark"] {
   color-scheme: dark;
   --bg: #0d1014;

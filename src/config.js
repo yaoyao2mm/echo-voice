@@ -82,7 +82,8 @@ export const config = {
     leaseMs: Number(process.env.ECHO_CODEX_LEASE_MS || 10 * 60 * 1000),
     maxEvents: Number(process.env.ECHO_CODEX_MAX_EVENTS || 500),
     worktreeMode: normalizeWorktreeMode(process.env.ECHO_CODEX_WORKTREE_MODE || "off"),
-    worktreeRoot: path.resolve(expandHome(process.env.ECHO_CODEX_WORKTREE_ROOT || path.join(os.homedir(), ".echo-voice", "worktrees")))
+    worktreeRoot: path.resolve(expandHome(process.env.ECHO_CODEX_WORKTREE_ROOT || path.join(os.homedir(), ".echo-voice", "worktrees"))),
+    worktreeRetentionDays: Number(process.env.ECHO_CODEX_WORKTREE_RETENTION_DAYS || 14)
   }
 };
 

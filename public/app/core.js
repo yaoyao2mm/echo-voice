@@ -57,6 +57,7 @@ export function createAppContext(windowRef = window, documentRef = document) {
       currentUser: readStoredUser(windowRef.localStorage),
       authEnabled: true,
       themeMode: windowRef.localStorage.getItem("echoTheme") === "dark" ? "dark" : "light",
+      worktreePreferenceEnabled: readStoredWorktreePreference(windowRef.localStorage),
       codexTimer: null,
       pairingStream: null,
       pairingScanActive: false,
@@ -152,6 +153,10 @@ export function installCore(app) {
 
   app.toggleThemeMode = function toggleThemeMode() {
     app.applyThemeMode(elements.themeModeToggle?.checked ? "dark" : "light");
+  };
+
+  app.toggleWorktreeModePreference = function toggleWorktreeModePreference() {
+    app.applyWorktreeModePreference(elements.worktreeModeToggle?.checked !== false);
   };
 
   app.bindTopbarScrollState = function bindTopbarScrollState() {
@@ -402,11 +407,25 @@ export function installCore(app) {
     app.refreshComposerMeta();
   };
 
+  app.applyWorktreeModePreference = function applyWorktreeModePreference(enabled, options = {}) {
+    state.worktreePreferenceEnabled = enabled !== false;
+    if (options.persist !== false) {
+      localStorage.setItem("echoCodexWorktreeEnabled", state.worktreePreferenceEnabled ? "true" : "false");
+    }
+    state.runtimeDirty = true;
+    state.runtimePreferences = app.currentRuntimeDraft();
+    app.writeStoredRuntimePreferences(state.runtimePreferences);
+    app.refreshWorktreeModeControls();
+    app.refreshActiveSessionHeader();
+    app.refreshComposerMeta();
+  };
+
   app.currentRuntimeDraft = function currentRuntimeDraft() {
     const next = app.normalizeRuntimeChoice({
       permissionMode: elements.codexPermissionMode.value,
       model: elements.codexModel.value,
-      reasoningEffort: elements.codexReasoningEffort.value
+      reasoningEffort: elements.codexReasoningEffort.value,
+      worktreeMode: app.requestedWorktreeMode()
     });
     const preset = app.permissionRuntimeForMode(next.permissionMode);
     return {
@@ -427,7 +446,8 @@ export function installCore(app) {
       sandbox: permissionMode ? preset.sandbox : next.sandbox || base.sandbox,
       approvalPolicy: permissionMode ? preset.approvalPolicy : next.approvalPolicy || base.approvalPolicy,
       model: next.model || base.model,
-      reasoningEffort: next.reasoningEffort || base.reasoningEffort
+      reasoningEffort: next.reasoningEffort || base.reasoningEffort,
+      worktreeMode: next.worktreeMode || base.worktreeMode || app.requestedWorktreeMode()
     };
   };
 
@@ -449,12 +469,16 @@ export function installCore(app) {
     elements.codexPermissionMode.value = next.permissionMode;
     elements.codexModel.value = next.model;
     elements.codexReasoningEffort.value = next.reasoningEffort;
+    if (next.worktreeMode) {
+      state.worktreePreferenceEnabled = next.worktreeMode !== "off";
+    }
     state.runtimeDirty = Boolean(options.dirty);
     if (options.persist !== false) {
       state.runtimePreferences = next;
       app.writeStoredRuntimePreferences(next);
     }
     app.refreshRuntimeDefaultOptions();
+    app.refreshWorktreeModeControls();
   };
 
   app.refreshRuntimeDefaultOptions = function refreshRuntimeDefaultOptions() {
@@ -528,7 +552,8 @@ export function installCore(app) {
       sandbox: app.normalizeSandboxModeValue(runtime.sandbox),
       approvalPolicy: app.normalizeApprovalPolicyValue(runtime.approvalPolicy),
       model: knownModelValues.has(model) || model ? model : "",
-      reasoningEffort: knownReasoningValues.has(reasoningEffort) || reasoningEffort ? reasoningEffort : ""
+      reasoningEffort: knownReasoningValues.has(reasoningEffort) || reasoningEffort ? reasoningEffort : "",
+      worktreeMode: app.normalizeWorktreeModeValue(runtime.worktreeMode)
     };
   };
 
@@ -540,6 +565,32 @@ export function installCore(app) {
     else localStorage.removeItem("echoCodexModel");
     if (next.reasoningEffort) localStorage.setItem("echoCodexReasoningEffort", next.reasoningEffort);
     else localStorage.removeItem("echoCodexReasoningEffort");
+  };
+
+  app.requestedWorktreeMode = function requestedWorktreeMode() {
+    const agentMode = app.normalizeWorktreeModeValue(state.codexAgentRuntime.worktreeMode);
+    if (agentMode === "always") return "always";
+    if (agentMode === "optional") return state.worktreePreferenceEnabled ? "always" : "off";
+    return "off";
+  };
+
+  app.refreshWorktreeModeControls = function refreshWorktreeModeControls() {
+    const toggle = elements.worktreeModeToggle;
+    if (!toggle) return;
+    const agentMode = app.normalizeWorktreeModeValue(state.codexAgentRuntime.worktreeMode);
+    const forced = agentMode === "always";
+    const available = forced || agentMode === "optional";
+    const checked = forced || (available && state.worktreePreferenceEnabled);
+    toggle.checked = checked;
+    toggle.disabled = !available || forced;
+    toggle.setAttribute("aria-checked", checked ? "true" : "false");
+    if (elements.worktreeModeSubtitle) {
+      elements.worktreeModeSubtitle.textContent = forced
+        ? "桌面端强制开启"
+        : available
+          ? "新会话默认独立执行"
+          : "桌面端未启用";
+    }
   };
 
   app.workspaceLabel = function workspaceLabel(workspace) {
@@ -617,6 +668,7 @@ export function installCore(app) {
     if (normalized.permissionMode) parts.push(app.permissionModeDisplayName(normalized.permissionMode));
     if (normalized.model) parts.push(app.modelDisplayName(normalized.model));
     if (normalized.reasoningEffort) parts.push(`推理 ${app.reasoningDisplayName(normalized.reasoningEffort)}`);
+    if (normalized.worktreeMode === "always") parts.push("隔离 worktree");
     return parts.join(" · ");
   };
 
@@ -656,6 +708,11 @@ export function installCore(app) {
 
   app.normalizeApprovalPolicyValue = function normalizeApprovalPolicyValue(value) {
     return String(value || "").trim().toLowerCase();
+  };
+
+  app.normalizeWorktreeModeValue = function normalizeWorktreeModeValue(value) {
+    const mode = String(value || "").trim().toLowerCase();
+    return ["off", "optional", "always"].includes(mode) ? mode : "";
   };
 
   app.permissionModeDisplayName = function permissionModeDisplayName(value) {
@@ -813,8 +870,13 @@ function readStoredRuntimePreferences(localStorageRef) {
   return {
     permissionMode: localStorageRef.getItem("echoCodexPermissionMode") || "",
     model: localStorageRef.getItem("echoCodexModel") || DEFAULT_CODEX_MODEL,
-    reasoningEffort: localStorageRef.getItem("echoCodexReasoningEffort") || ""
+    reasoningEffort: localStorageRef.getItem("echoCodexReasoningEffort") || "",
+    worktreeMode: readStoredWorktreePreference(localStorageRef) ? "always" : "off"
   };
+}
+
+function readStoredWorktreePreference(localStorageRef) {
+  return localStorageRef.getItem("echoCodexWorktreeEnabled") !== "false";
 }
 
 function queryElements(documentRef) {
@@ -829,6 +891,8 @@ function queryElements(documentRef) {
     openPairingButton: documentRef.querySelector("#openPairingButton"),
     refreshStatus: documentRef.querySelector("#refreshStatus"),
     themeModeToggle: documentRef.querySelector("#themeModeToggle"),
+    worktreeModeToggle: documentRef.querySelector("#worktreeModeToggle"),
+    worktreeModeSubtitle: documentRef.querySelector("#worktreeModeSubtitle"),
     loginPanel: documentRef.querySelector("#loginPanel"),
     loginForm: documentRef.querySelector("#loginForm"),
     loginStatus: documentRef.querySelector("#loginStatus"),

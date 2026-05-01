@@ -22,6 +22,7 @@ function defaultMockRuntime(runtimeOverrides = {}) {
     approvalPolicy: "on-request",
     model: "gpt-5.4-mini",
     reasoningEffort: "medium",
+    worktreeMode: "optional",
     ...runtimeOverrides
   };
 }
@@ -143,6 +144,7 @@ async function loginToWorkbench(page) {
   await expect(page.locator("#quickDeployButton")).toBeVisible();
   await expect(page.locator("#composerPlanModeButton")).toBeVisible();
   await expect(page.locator("#compactContextButton")).toBeVisible();
+  await expect(page.locator("#worktreeModeToggle")).toBeVisible();
   await expect(page.locator("#composerAttachmentButton")).toHaveCSS("width", "24px");
   await expect(page.locator("#composerPlanModeButton")).toHaveCSS("width", "24px");
   await expect(page.locator("#compactContextButton")).toHaveCSS("width", "24px");
@@ -165,6 +167,8 @@ async function loginToWorkbench(page) {
   expect(topbarIconLayout.deployRightOfContext).toBeTruthy();
   await expect(page.locator(".composer-status-scope")).toHaveCount(0);
   await expect(page.locator("#codexStatusText")).toContainText("本机 Codex 在线");
+  await expect(page.locator("#worktreeModeToggle")).toBeChecked();
+  await expect(page.locator("#worktreeModeSubtitle")).toContainText("新会话默认独立执行");
   await expect(page.locator("#projectPickerLabel")).toContainText("echo");
 }
 
@@ -277,6 +281,7 @@ test("mobile shows a compact terminal activity line while a command runs", async
     await page.locator("#sendCodexButton").click();
 
     const command = await leaseCodexCommandForPrompt(request, prompt);
+    expect(command.runtime.worktreeMode).toBe("always");
     const appThreadId = `thr_${command.sessionId}`;
     const eventsResponse = await request.post("/api/agent/codex/sessions/events", {
       headers: {
@@ -548,6 +553,7 @@ test("mobile plan mode sends planning instructions without polluting the visible
 
     const command = await leaseNextCodexCommand(request);
     expect(command.type).toBe("start");
+    expect(command.runtime.worktreeMode).toBe("always");
     expect(command.payload.mode).toBe("plan");
     expect(command.payload.displayText).toBe(prompt);
     expect(command.payload.prompt).toContain("请先进入计划模式");
@@ -814,7 +820,7 @@ test("mobile sidebar toggles and persists dark mode", async ({ page, request }) 
     await expect(page.locator("#themeModeToggle")).toBeVisible();
     await expect(page.locator("#themeModeToggle")).not.toBeChecked();
 
-    await page.locator(".theme-switch").click();
+    await page.locator('label[for="themeModeToggle"]').click();
 
     await expect(page.locator("#themeModeToggle")).toBeChecked();
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");

@@ -1,7 +1,7 @@
-import { installAuth } from "./auth.js?v=71";
-import { installCodex } from "./codex.js?v=71";
-import { createAppContext, installCore } from "./core.js?v=71";
-import { installSessions } from "./sessions.js?v=71";
+import { installAuth } from "./auth.js?v=72";
+import { installCodex } from "./codex.js?v=72";
+import { createAppContext, installCore } from "./core.js?v=72";
+import { installSessions } from "./sessions.js?v=72";
 
 export function createApp(windowRef = window, documentRef = document) {
   const app = createAppContext(windowRef, documentRef);
@@ -19,6 +19,7 @@ export function createApp(windowRef = window, documentRef = document) {
     elements.openPairingButton.addEventListener("click", () => app.showPairingPanel({ focus: true }));
     elements.refreshStatus.addEventListener("click", app.refreshStatus);
     elements.themeModeToggle?.addEventListener("change", app.toggleThemeMode);
+    elements.worktreeModeToggle?.addEventListener("change", app.toggleWorktreeModePreference);
     elements.scanPairingButton.addEventListener("click", app.startPairingScanner);
     elements.stopScanButton.addEventListener("click", app.stopPairingScanner);
     elements.savePairingButton.addEventListener("click", app.pairFromInput);
@@ -73,6 +74,7 @@ export function createApp(windowRef = window, documentRef = document) {
 
     app.renderComposerAttachments();
     app.updateComposerModeControls?.();
+    app.refreshWorktreeModeControls?.();
     app.syncComposerInputHeight();
     app.updateSessionSidebarToggle(false);
 

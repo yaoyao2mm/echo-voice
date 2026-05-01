@@ -208,6 +208,7 @@ function renderRuntime(runtime, localCodex) {
     ["permission", runtimePermission(runtime)],
     ["sandbox", runtime.sandbox || "-"],
     ["approval", runtime.approvalPolicy || "-"],
+    ["worktree", runtime.worktreeMode || "off"],
     ["supported models", supportedModels.length ? `${supportedModels.length}` : "not probed"],
     ["unsupported", unsupportedModels.length ? unsupportedModels.join(", ") : "-"],
     ["probe", runtime.modelCapabilityError || runtime.modelCapabilitySource || "-"]
@@ -544,7 +545,8 @@ function formatState(state) {
     `env: ${state.envFile}`,
     `relay: ${valueOf(fields, "ECHO_RELAY_URL") || "-"}`,
     `proxy: ${valueOf(fields, "ECHO_PROXY_URL") || "direct"}`,
-    `codex: ${valueOf(fields, "ECHO_CODEX_ENABLED") || "true"}`
+    `codex: ${valueOf(fields, "ECHO_CODEX_ENABLED") || "true"}`,
+    `worktree: ${valueOf(fields, "ECHO_CODEX_WORKTREE_MODE") || "off"}`
   ];
   return lines.join("\n");
 }

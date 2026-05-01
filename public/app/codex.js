@@ -39,6 +39,7 @@ export function installCodex(app) {
       state.codexAllowedPermissionModes = [];
       state.codexAgentRuntime = {};
       app.refreshRuntimeDefaultOptions();
+      app.refreshWorktreeModeControls?.();
       elements.codexProject.innerHTML = "";
       app.renderProjectPicker(false);
       app.updateComposerAvailability();
@@ -70,6 +71,7 @@ export function installCodex(app) {
       dirty: state.runtimeDirty
     });
     app.refreshRuntimeDefaultOptions();
+    app.refreshWorktreeModeControls?.();
     elements.codexStatusText.textContent = codex.agentOnline ? "本机 Codex 在线" : "等待桌面 agent";
     elements.codexQueueMeta.textContent = codex.agentOnline
       ? `会话 ${codex.interactive?.activeSessions || 0} · 待审批 ${codex.interactive?.pendingApprovals || 0} · 归档 ${codex.interactive?.archivedSessions || 0} · 项目 ${workspaces.length}`

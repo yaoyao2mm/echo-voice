@@ -3,7 +3,7 @@ import { loadDesktopAgentId } from "./lib/agentIdentity.js";
 import { CodexInteractiveRuntime } from "./lib/codexInteractiveRunner.js";
 import { probeCodexModels } from "./lib/codexModelProbe.js";
 import { publicCodexRuntime, publicWorkspaces } from "./lib/codexRunner.js";
-import { prepareCodexSessionWorktree } from "./lib/codexWorktree.js";
+import { maybeCleanupCodexSessionWorktrees, prepareCodexSessionWorktree } from "./lib/codexWorktree.js";
 import { createManagedWorkspace, workspaceCreationRoot } from "./lib/codexWorkspaceManager.js";
 import { describeHttpNetwork, formatFetchError, httpFetch } from "./lib/http.js";
 
@@ -104,6 +104,7 @@ async function runCodexSessionLoop() {
   while (true) {
     let command = null;
     try {
+      await maybeCleanupWorktrees();
       command = await pollNextCodexSessionCommand();
       if (!command) continue;
 
@@ -202,6 +203,17 @@ async function pollNextCodexSessionCommand() {
   });
   const data = await parseApiResponse(response);
   return data.command || null;
+}
+
+async function maybeCleanupWorktrees() {
+  const result = await maybeCleanupCodexSessionWorktrees().catch((error) => {
+    console.error(`[codex worktree cleanup] ${error.message}`);
+    return null;
+  });
+  if (!result?.removed) return;
+  console.log(
+    `[codex worktree cleanup] removed ${result.removed} old clean worktree${result.removed === 1 ? "" : "s"}`
+  );
 }
 
 function startCodexSessionHeartbeat(sessionId) {

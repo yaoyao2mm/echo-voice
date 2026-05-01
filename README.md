@@ -189,8 +189,9 @@ pnpm run desktop:mac:dmg
 | `ECHO_CODEX_WORKSPACES` | Codex 可访问的项目 allowlist | 当前目录 |
 | `ECHO_CODEX_SANDBOX` | Codex sandbox 模式 | `workspace-write` |
 | `ECHO_CODEX_APPROVAL_POLICY` | Codex 审批策略 | `on-request` |
-| `ECHO_CODEX_WORKTREE_MODE` | 是否为新会话创建隔离 Git worktree，`off` 或 `always` | `off` |
+| `ECHO_CODEX_WORKTREE_MODE` | 是否为新会话创建隔离 Git worktree，`off`、`optional` 或 `always` | `off` |
 | `ECHO_CODEX_WORKTREE_ROOT` | 隔离 worktree 根目录 | `~/.echo-voice/worktrees` |
+| `ECHO_CODEX_WORKTREE_RETENTION_DAYS` | 自动清理超过保留期且 Git 状态干净的 worktree | `14` |
 | `ECHO_PROXY_URL` | 出站代理，macOS 可用 `system` | 空 |
 | `POSTPROCESS_PROVIDER` | `auto`、`openai`、`volcengine`、`ollama`、`rules`、`none` | `auto` |
 
@@ -456,8 +457,9 @@ Common environment variables:
 | `ECHO_CODEX_WORKSPACES` | Allowlisted Codex project directories | current directory |
 | `ECHO_CODEX_SANDBOX` | Codex sandbox mode | `workspace-write` |
 | `ECHO_CODEX_APPROVAL_POLICY` | Codex approval policy | `on-request` |
-| `ECHO_CODEX_WORKTREE_MODE` | Create isolated Git worktrees for new sessions, `off` or `always` | `off` |
+| `ECHO_CODEX_WORKTREE_MODE` | Create isolated Git worktrees for new sessions, `off`, `optional`, or `always` | `off` |
 | `ECHO_CODEX_WORKTREE_ROOT` | Isolated worktree root directory | `~/.echo-voice/worktrees` |
+| `ECHO_CODEX_WORKTREE_RETENTION_DAYS` | Prune old clean worktrees after the retention window | `14` |
 | `ECHO_PROXY_URL` | Outbound proxy; `system` follows macOS system proxy | empty |
 | `POSTPROCESS_PROVIDER` | `auto`, `openai`, `volcengine`, `ollama`, `rules`, or `none` | `auto` |
 

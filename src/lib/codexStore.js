@@ -2343,6 +2343,7 @@ function fallbackRuntimeForSanitization() {
     sandbox: config.codex.sandbox,
     approvalPolicy: config.codex.approvalPolicy,
     model: config.codex.model,
+    worktreeMode: config.codex.worktreeMode,
     unsupportedModels: [],
     supportedModels: [],
     allowedPermissionModes: normalizeAllowedPermissionModes()

@@ -15,8 +15,8 @@
         if (localStorage.getItem("echoTheme") === "dark") document.documentElement.dataset.theme = "dark";
       } catch {}
     </script>
-    <link rel="manifest" href="/manifest.webmanifest?v=71" />
-    <link rel="stylesheet" href="/styles.css?v=71" />
+    <link rel="manifest" href="/manifest.webmanifest?v=72" />
+    <link rel="stylesheet" href="/styles.css?v=72" />
   </head>
   <body>
     <main class="shell">
@@ -184,7 +184,7 @@
 
           <section class="sidebar-panel sidebar-panel-appearance">
             <div class="sidebar-panel-head">
-              <strong>外观</strong>
+              <strong>偏好</strong>
             </div>
             <label class="theme-switch" for="themeModeToggle">
               <span class="theme-switch-copy">
@@ -196,6 +196,20 @@
                 <span class="theme-switch-thumb">
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M20 14.2A7.5 7.5 0 0 1 9.8 4a8.5 8.5 0 1 0 10.2 10.2Z" />
+                  </svg>
+                </span>
+              </span>
+            </label>
+            <label class="theme-switch" for="worktreeModeToggle">
+              <span class="theme-switch-copy">
+                <span class="theme-switch-title">隔离 worktree</span>
+                <span id="worktreeModeSubtitle" class="theme-switch-subtitle">新会话默认独立执行</span>
+              </span>
+              <input id="worktreeModeToggle" type="checkbox" role="switch" aria-label="隔离 worktree" />
+              <span class="theme-switch-track" aria-hidden="true">
+                <span class="theme-switch-thumb">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 7.5h6l2 2h8v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-9Z" />
                   </svg>
                 </span>
               </span>
@@ -377,6 +391,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=71" type="module"></script>
+    <script src="/app.js?v=72" type="module"></script>
   </body>
 </html>

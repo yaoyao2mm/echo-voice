@@ -167,6 +167,25 @@
               <span class="fieldHint">这是桌面端的安全边界，不是本次任务选择。模型和推理强度由手机端每次发送时选择。</span>
             </label>
             <label>
+              Worktree 模式
+              <select data-key="ECHO_CODEX_WORKTREE_MODE">
+                <option value="off">关闭</option>
+                <option value="optional">手机端默认开启，可手动关闭</option>
+                <option value="always">始终开启</option>
+              </select>
+              <span class="fieldHint">控制手机端新会话是否运行在独立 Git worktree 中；关闭时手机端不能越权开启。</span>
+            </label>
+            <label>
+              Worktree 根目录
+              <input data-key="ECHO_CODEX_WORKTREE_ROOT" autocomplete="off" placeholder="~/.echo-voice/worktrees" />
+              <span class="fieldHint">只允许桌面端在这个受控目录里创建和清理 worktree。</span>
+            </label>
+            <label>
+              Worktree 保留天数
+              <input data-key="ECHO_CODEX_WORKTREE_RETENTION_DAYS" type="number" min="1" max="365" step="1" />
+              <span class="fieldHint">桌面端会自动删除超过保留期且 Git 状态干净的 worktree；有未提交改动的目录会保留。</span>
+            </label>
+            <label>
               Timeout ms
               <input data-key="ECHO_CODEX_TIMEOUT_MS" type="number" min="10000" max="7200000" step="10000" />
             </label>

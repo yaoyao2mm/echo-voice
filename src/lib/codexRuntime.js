@@ -103,6 +103,7 @@ export function sanitizeRuntimeForAgent(requestedRuntime = {}, agentRuntime = {}
   );
   const model = sanitizeModel(requested.model, { supportedModelIds, unsupportedModelIds, hasSupportedModelList: supportedModels.length > 0 });
   const reasoningEffort = sanitizeReasoningEffort(requested.reasoningEffort || requested.effort, model || normalizedAgent.model, supportedModels);
+  const worktreeMode = sanitizeWorktreeMode(requested.worktreeMode, normalizedAgent.worktreeMode);
 
   return {
     command: "",
@@ -113,6 +114,7 @@ export function sanitizeRuntimeForAgent(requestedRuntime = {}, agentRuntime = {}
     reasoningEffort,
     profile: permissionMode,
     permissionMode,
+    worktreeMode,
     timeoutMs: Number(requested.timeoutMs || 0) || null
   };
 }
@@ -171,4 +173,18 @@ function sanitizeReasoningEffort(value, model, supportedModels) {
   const modelInfo = supportedModels.find((item) => item.id === model || item.model === model);
   if (!modelInfo || modelInfo.supportedReasoningEfforts.length === 0) return reasoningEffort;
   return modelInfo.supportedReasoningEfforts.includes(reasoningEffort) ? reasoningEffort : "";
+}
+
+function normalizeWorktreeMode(value) {
+  const mode = String(value || "").trim().toLowerCase();
+  return ["off", "optional", "always"].includes(mode) ? mode : "off";
+}
+
+function sanitizeWorktreeMode(requestedMode, agentMode) {
+  const desktopMode = normalizeWorktreeMode(agentMode);
+  if (desktopMode === "always") return "always";
+  if (desktopMode === "optional") {
+    return String(requestedMode || "").trim().toLowerCase() === "off" ? "off" : "always";
+  }
+  return "off";
 }

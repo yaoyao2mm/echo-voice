@@ -71,6 +71,9 @@ const fields = [
   },
   { key: "ECHO_CODEX_APPROVAL_TIMEOUT_MS", section: "codex", type: "number", min: 10000, max: 7200000, defaultValue: "300000" },
   { key: "ECHO_CODEX_ALLOWED_PERMISSION_MODES", section: "codex", type: "text", defaultValue: "strict,approve,full" },
+  { key: "ECHO_CODEX_WORKTREE_MODE", section: "codex", type: "choice", choices: ["off", "optional", "always"], defaultValue: "off" },
+  { key: "ECHO_CODEX_WORKTREE_ROOT", section: "codex", type: "text", defaultValue: "~/.echo-voice/worktrees" },
+  { key: "ECHO_CODEX_WORKTREE_RETENTION_DAYS", section: "codex", type: "number", min: 1, max: 365, defaultValue: "14" },
   { key: "ECHO_CODEX_TIMEOUT_MS", section: "codex", type: "number", min: 10000, max: 7200000 }
 ];
 
