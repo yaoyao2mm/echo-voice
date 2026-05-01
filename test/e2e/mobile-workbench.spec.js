@@ -256,10 +256,46 @@ test("mobile login, pairing, sidebar, and session creation", async ({ page, requ
     await expect(page.locator("#codexRunSummary")).toContainText("E2E mobile workbench smoke test");
     await expect(page.locator(".toast", { hasText: "已发送" })).toHaveCount(0);
     await expect(page.locator("#sendCodexButton")).toBeDisabled();
-    await expect(page.locator("#contextUsageIndicator")).toHaveAttribute("aria-label", /上下文使用约/);
+    await expect(page.locator("#contextUsageIndicator")).toHaveAttribute("aria-label", /上下文使用暂未同步/);
     await expect
       .poll(() => page.locator("#contextUsageIndicator").evaluate((node) => Number(node.getAttribute("aria-valuenow"))))
       .toBeGreaterThanOrEqual(0);
+
+    const command = await leaseCodexCommandForPrompt(request, "E2E mobile workbench smoke test");
+    await postCodexSessionEvents(request, command.sessionId, [
+      {
+        type: "thread/tokenUsage/updated",
+        text: "Context usage updated.",
+        raw: {
+          method: "thread/tokenUsage/updated",
+          params: {
+            threadId: `thr_${command.sessionId}`,
+            turnId: "turn_usage",
+            tokenUsage: {
+              total: {
+                totalTokens: 50000,
+                inputTokens: 47000,
+                cachedInputTokens: 3000,
+                outputTokens: 3000,
+                reasoningOutputTokens: 900
+              },
+              last: {
+                totalTokens: 32000,
+                inputTokens: 30000,
+                cachedInputTokens: 1200,
+                outputTokens: 2000,
+                reasoningOutputTokens: 600
+              },
+              modelContextWindow: 128000
+            }
+          }
+        }
+      }
+    ]);
+    await expect(page.locator("#contextUsageIndicator")).toHaveAttribute("aria-label", /上下文使用 25%/);
+    await expect
+      .poll(() => page.locator("#contextUsageIndicator").evaluate((node) => Number(node.getAttribute("aria-valuenow"))))
+      .toBe(25);
 
     const message = page.locator(".thread-message-user", { hasText: "E2E mobile workbench smoke test" }).first();
     const copyAction = message.getByRole("button", { name: "复制消息" });

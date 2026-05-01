@@ -230,6 +230,7 @@ export class CodexInteractiveRuntime {
   async #ensureThread(command, workspace, runtime) {
     if (command.appThreadId) {
       if (!this.threadToSession.has(command.appThreadId)) {
+        this.#rememberSession(command.sessionId, command.appThreadId, workspace, runtime);
         let resumeResult;
         try {
           resumeResult = await this.client.request(
@@ -241,6 +242,7 @@ export class CodexInteractiveRuntime {
             120000
           );
         } catch (error) {
+          this.#forgetThread(command.appThreadId);
           if (!isThreadNotFoundError(error)) throw error;
           return this.#startReplacementThread(command, workspace, runtime, error);
         }
@@ -270,6 +272,7 @@ export class CodexInteractiveRuntime {
     const appThreadId = command.appThreadId || remembered?.appThreadId || "";
     if (!appThreadId) throw new Error("Codex session has no app-server thread id yet.");
     if (!this.threadToSession.has(appThreadId)) {
+      this.#rememberSession(command.sessionId, appThreadId, workspace, runtime);
       try {
         const resumeResult = await this.client.request(
           "thread/resume",
@@ -289,6 +292,7 @@ export class CodexInteractiveRuntime {
           }
         ]);
       } catch (error) {
+        this.#forgetThread(appThreadId);
         if (!isThreadNotFoundError(error)) throw error;
         throw new Error("Codex thread can no longer be compacted because the local app-server thread was not found.");
       }
@@ -405,6 +409,15 @@ export class CodexInteractiveRuntime {
   #rememberSession(sessionId, appThreadId, workspace, runtime) {
     this.sessions.set(sessionId, { appThreadId, projectId: workspace.id, workspace, runtime });
     this.threadToSession.set(appThreadId, sessionId);
+  }
+
+  #forgetThread(appThreadId) {
+    const sessionId = this.threadToSession.get(appThreadId);
+    this.threadToSession.delete(appThreadId);
+    this.activeTurns.delete(appThreadId);
+    if (sessionId && this.sessions.get(sessionId)?.appThreadId === appThreadId) {
+      this.sessions.delete(sessionId);
+    }
   }
 
   #runtimeFor(command = {}) {
@@ -869,11 +882,23 @@ function notificationText(message) {
     const error = params.turn?.error?.message;
     return error ? `Turn ${status}: ${error}` : `Turn ${status}.`;
   }
+  if (message.method === "thread/compacted") return "Context compaction completed.";
+  if (message.method === "thread/tokenUsage/updated") return tokenUsageText(params.tokenUsage);
   if (message.method === "turn/started") return "Codex turn started.";
   if (message.method === "thread/status/changed") return `Thread status changed: ${JSON.stringify(params.status || {})}`;
   if (message.method === "item/started") return itemLabel(params.item, "started");
   if (message.method === "item/completed") return itemLabel(params.item, "completed");
   return `[${message.method}]`;
+}
+
+function tokenUsageText(tokenUsage = {}) {
+  const lastTotal = Number(tokenUsage?.last?.totalTokens);
+  const contextWindow = Number(tokenUsage?.modelContextWindow);
+  if (Number.isFinite(lastTotal) && Number.isFinite(contextWindow) && contextWindow > 0) {
+    return `Context usage updated: ${Math.max(0, Math.round(lastTotal))} / ${Math.round(contextWindow)} tokens.`;
+  }
+  if (Number.isFinite(lastTotal)) return `Context usage updated: ${Math.max(0, Math.round(lastTotal))} tokens.`;
+  return "Context usage updated.";
 }
 
 function itemLabel(item = {}, fallbackStatus = "") {

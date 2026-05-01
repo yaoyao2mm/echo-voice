@@ -112,6 +112,15 @@ const trimSessionEvents = db.prepare(`
     )
 `);
 
+const selectLatestSessionContextUsage = db.prepare(`
+  SELECT at, raw_json AS rawJson
+  FROM codex_session_events
+  WHERE session_id = ?
+    AND type = 'thread/tokenUsage/updated'
+  ORDER BY id DESC
+  LIMIT 1
+`);
+
 const summarizeJobColumns = `
   id,
   project_id AS projectId,
@@ -1111,9 +1120,13 @@ export function completeSessionCommand(commandId, result = {}, options = {}) {
   const error = String(result.error || "");
   const status = ok ? "done" : "failed";
   const resultSessionStatus = ok ? result.sessionStatus || (result.activeTurnId ? "running" : "active") : "failed";
-  const turnAlreadyCompleted = ok && resultSessionStatus === "running" && getLatestSessionEventType(command.sessionId) === "turn/completed";
-  const sessionStatus = turnAlreadyCompleted ? "active" : resultSessionStatus;
-  const activeTurnId = turnAlreadyCompleted ? null : result.activeTurnId || null;
+  const compactAlreadyCompleted =
+    ok &&
+    command.type === "compact" &&
+    resultSessionStatus === "running" &&
+    sessionHasCompletedCompactionSince(command.sessionId, command.updatedAt);
+  const sessionStatus = compactAlreadyCompleted ? "active" : resultSessionStatus;
+  const activeTurnId = compactAlreadyCompleted ? null : result.activeTurnId || null;
   const clearActiveTurnId = sessionStatus !== "running";
   const releaseLease = sessionStatus !== "running";
   const executionJson = result.execution && typeof result.execution === "object" ? JSON.stringify(result.execution) : null;
@@ -1949,10 +1962,27 @@ function summarizeSession(row) {
     ...row,
     runtime: parseJson(row.runtimeJson, {}),
     execution: parseJson(row.executionJson, {}),
+    contextUsage: latestSessionContextUsage(row.id),
     eventCount,
     pendingCommandCount,
     pendingApprovalCount,
     lastEvent: lastEvent ? parseEvent(lastEvent, { includeRaw: false }) : null
+  };
+}
+
+function latestSessionContextUsage(sessionId) {
+  const row = selectLatestSessionContextUsage.get(sessionId);
+  if (!row) return null;
+  const raw = parseJson(row.rawJson, null);
+  const params = raw?.params && typeof raw.params === "object" ? raw.params : {};
+  const tokenUsage = normalizeThreadTokenUsage(params.tokenUsage);
+  if (!tokenUsage) return null;
+  return {
+    source: "codex-app-server",
+    at: row.at || "",
+    threadId: String(params.threadId || "").slice(0, 200),
+    turnId: String(params.turnId || params.turn?.id || "").slice(0, 200),
+    ...tokenUsage
   };
 }
 
@@ -2101,16 +2131,6 @@ function listSessionApprovals(sessionId) {
   `).all(sessionId).map(summarizeSessionApproval);
 }
 
-function getLatestSessionEventType(sessionId) {
-  return db.prepare(`
-    SELECT type
-    FROM codex_session_events
-    WHERE session_id = ?
-    ORDER BY id DESC
-    LIMIT 1
-  `).get(sessionId)?.type || "";
-}
-
 function sessionHasLeasedCommand(sessionId) {
   return (
     db.prepare(`
@@ -2120,6 +2140,24 @@ function sessionHasLeasedCommand(sessionId) {
         AND status = 'leased'
     `).get(sessionId).count > 0
   );
+}
+
+function sessionHasCompletedCompactionSince(sessionId, sinceAt = "") {
+  const rows = db.prepare(`
+    SELECT type, raw_json AS rawJson
+    FROM codex_session_events
+    WHERE session_id = ?
+      AND (? = '' OR at >= ?)
+    ORDER BY id DESC
+    LIMIT 120
+  `).all(sessionId, String(sinceAt || ""), String(sinceAt || ""));
+
+  return rows.some((row) => {
+    const raw = parseJson(row.rawJson, {});
+    const method = raw?.method || row.type || "";
+    const itemType = raw?.params?.item?.type || "";
+    return method === "turn/completed" || method === "thread/compacted" || itemType === "contextCompaction";
+  });
 }
 
 function sessionHasQueuedStopCommand(sessionId) {
@@ -2227,6 +2265,21 @@ function compactClientEventRaw(type, raw) {
     };
   }
   if (method === "thread/status/changed") return { method };
+  if (method === "thread/tokenUsage/updated") {
+    return {
+      method,
+      params: compactTokenUsageParams(params)
+    };
+  }
+  if (method === "thread/compacted") {
+    return {
+      method,
+      params: {
+        threadId: String(params.threadId || "").slice(0, 200),
+        turnId: String(params.turnId || params.turn?.id || "").slice(0, 200)
+      }
+    };
+  }
   if (method === "turn/started" || method === "turn/completed") {
     return { method, params: compactTurnParams(params) };
   }
@@ -2302,6 +2355,43 @@ function compactItemParams(params = {}) {
     turnId: params.turnId || params.turn?.id || "",
     item: compactItem
   };
+}
+
+function compactTokenUsageParams(params = {}) {
+  return {
+    threadId: String(params.threadId || "").slice(0, 200),
+    turnId: String(params.turnId || params.turn?.id || "").slice(0, 200),
+    tokenUsage: normalizeThreadTokenUsage(params.tokenUsage)
+  };
+}
+
+function normalizeThreadTokenUsage(input) {
+  if (!input || typeof input !== "object") return null;
+  const hasTotal = input.total && typeof input.total === "object";
+  const hasLast = input.last && typeof input.last === "object";
+  if (!hasTotal && !hasLast) return null;
+  const modelContextWindow = tokenCount(input.modelContextWindow ?? input.model_context_window);
+  return {
+    total: normalizeTokenUsageBreakdown(input.total),
+    last: normalizeTokenUsageBreakdown(input.last),
+    modelContextWindow: modelContextWindow > 0 ? modelContextWindow : null
+  };
+}
+
+function normalizeTokenUsageBreakdown(input = {}) {
+  const usage = input && typeof input === "object" ? input : {};
+  return {
+    totalTokens: tokenCount(usage.totalTokens ?? usage.total_tokens),
+    inputTokens: tokenCount(usage.inputTokens ?? usage.input_tokens),
+    cachedInputTokens: tokenCount(usage.cachedInputTokens ?? usage.cached_input_tokens),
+    outputTokens: tokenCount(usage.outputTokens ?? usage.output_tokens),
+    reasoningOutputTokens: tokenCount(usage.reasoningOutputTokens ?? usage.reasoning_output_tokens)
+  };
+}
+
+function tokenCount(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.round(number) : 0;
 }
 
 function isDeltaEventType(method) {
@@ -2426,6 +2516,11 @@ function deriveSessionUpdate(events, session) {
       const message = raw.params?.turn?.error?.message;
       if (message) update.lastError = String(message).slice(0, 12000);
     }
+    if (method === "thread/compacted") {
+      update.clearActiveTurnId = true;
+      update.releaseLease = true;
+      update.status = "active";
+    }
     if (method === "item/agentMessage/delta" && event.text && !agentMessageCompleted) {
       nextFinalMessage = `${nextFinalMessage}${event.text}`.slice(0, 12000);
       update.finalMessage = nextFinalMessage;
@@ -2522,7 +2617,7 @@ function sessionCanRecoverFailure(session = {}) {
 }
 
 function sessionCanCompact(session = {}) {
-  if (["queued", "starting", "running", "failed", "closed", "stale"].includes(session.status)) return false;
+  if (["queued", "starting", "running", "failed", "closed", "stale", "cancelled"].includes(session.status)) return false;
   return Number(session.pendingCommandCount || 0) === 0 && Number(session.pendingApprovalCount || 0) === 0;
 }
 

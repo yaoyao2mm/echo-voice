@@ -156,6 +156,82 @@ test("session delta batches append to the visible assistant draft", async () => 
   assert.equal(streamSnapshot.finalMessage, "Hello from Echo");
 });
 
+test("session token usage events expose official context usage", async () => {
+  store.resetStoreForTest();
+
+  const agent = {
+    id: "session-agent",
+    workspaces: [{ id: "echo", label: "Echo", path: "/workspace/echo" }],
+    runtime: { command: "fake-codex" }
+  };
+  queue.updateCodexAgent(agent);
+  const created = queue.createCodexSession({
+    projectId: "echo",
+    prompt: "measure context"
+  });
+  const command = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  assert.equal(command.sessionId, created.id);
+
+  const tokenUsage = {
+    total: {
+      totalTokens: 50000,
+      inputTokens: 47000,
+      cachedInputTokens: 3000,
+      outputTokens: 3000,
+      reasoningOutputTokens: 900
+    },
+    last: {
+      totalTokens: 32000,
+      inputTokens: 30000,
+      cachedInputTokens: 1200,
+      outputTokens: 2000,
+      reasoningOutputTokens: 600
+    },
+    modelContextWindow: 128000
+  };
+
+  assert.equal(
+    queue.appendCodexSessionEvents(
+      created.id,
+      [
+        {
+          type: "thread/tokenUsage/updated",
+          text: "Context usage updated.",
+          raw: {
+            method: "thread/tokenUsage/updated",
+            params: {
+              threadId: "thr_usage",
+              turnId: "turn_usage",
+              tokenUsage
+            }
+          }
+        }
+      ],
+      { agentId: agent.id }
+    ),
+    true
+  );
+
+  const detail = queue.getCodexSession(created.id, {
+    rawMode: "client",
+    includeMessages: false
+  });
+  assert.equal(detail.contextUsage.source, "codex-app-server");
+  assert.equal(detail.contextUsage.threadId, "thr_usage");
+  assert.equal(detail.contextUsage.turnId, "turn_usage");
+  assert.equal(detail.contextUsage.last.totalTokens, 32000);
+  assert.equal(detail.contextUsage.total.totalTokens, 50000);
+  assert.equal(detail.contextUsage.modelContextWindow, 128000);
+
+  const usageEvent = detail.events.find((event) => event.type === "thread/tokenUsage/updated");
+  assert.equal(usageEvent.raw.params.tokenUsage.last.totalTokens, 32000);
+  assert.equal(usageEvent.raw.params.tokenUsage.total.totalTokens, 50000);
+  assert.equal(usageEvent.raw.params.tokenUsage.modelContextWindow, 128000);
+
+  const summary = queue.listCodexSessions(10, { projectId: "echo" })[0];
+  assert.equal(summary.contextUsage.last.totalTokens, 32000);
+});
+
 test("interactive Codex sessions lease commands and keep thread state", async () => {
   store.resetStoreForTest();
 
@@ -649,6 +725,124 @@ test("interactive Codex sessions can request app-server context compaction", asy
   assert.equal(compacted.status, "active");
   assert.equal(compacted.leasedBy, null);
   assert.equal(compacted.events.some((event) => event.raw?.params?.item?.type === "contextCompaction"), true);
+});
+
+test("compact command completion releases after compaction events followed by git summary", async () => {
+  store.resetStoreForTest();
+
+  const agent = {
+    id: "compact-agent",
+    workspaces: [{ id: "demo", path: process.cwd() }]
+  };
+  const session = queue.createCodexSession({ projectId: "demo", prompt: "启动后压缩" });
+  const startCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  queue.appendCodexSessionEvents(session.id, [{ type: "thread.started", text: "started", appThreadId: "thr_compact_race" }], {
+    agentId: agent.id
+  });
+  queue.completeCodexSessionCommand(
+    startCommand.id,
+    { ok: true, appThreadId: "thr_compact_race", sessionStatus: "active" },
+    { agentId: agent.id }
+  );
+
+  queue.compactCodexSession(session.id, { automatic: false, reason: "manual" });
+  const compactCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  assert.equal(compactCommand.type, "compact");
+
+  queue.appendCodexSessionEvents(
+    session.id,
+    [
+      {
+        type: "context.compaction.started",
+        text: "Codex context compaction started.",
+        appThreadId: "thr_compact_race",
+        sessionStatus: "running",
+        raw: { method: "thread/compact/start" }
+      },
+      {
+        type: "item/completed",
+        text: "Context compaction completed.",
+        raw: {
+          method: "item/completed",
+          params: { threadId: "thr_compact_race", turnId: "turn_compact_race", item: { type: "contextCompaction", id: "ctx_race" } }
+        }
+      },
+      {
+        type: "turn/completed",
+        text: "Turn completed.",
+        raw: { method: "turn/completed", params: { threadId: "thr_compact_race", turn: { id: "turn_compact_race", status: "completed" } } }
+      },
+      {
+        type: "git.summary",
+        text: "No git changes.",
+        raw: { source: "desktop-agent", gitSummary: { root: process.cwd(), branch: "main", commit: "abc123", changedFiles: [] } }
+      }
+    ],
+    { agentId: agent.id }
+  );
+
+  assert.equal(
+    queue.completeCodexSessionCommand(
+      compactCommand.id,
+      { ok: true, appThreadId: "thr_compact_race", sessionStatus: "running" },
+      { agentId: agent.id }
+    ),
+    true
+  );
+
+  const completed = queue.getCodexSession(session.id);
+  assert.equal(completed.status, "active");
+  assert.equal(completed.leasedBy, null);
+  assert.equal(completed.activeTurnId, null);
+});
+
+test("thread compacted notifications complete compact sessions", async () => {
+  store.resetStoreForTest();
+
+  const agent = {
+    id: "compact-agent",
+    workspaces: [{ id: "demo", path: process.cwd() }]
+  };
+  const session = queue.createCodexSession({ projectId: "demo", prompt: "启动后压缩" });
+  const startCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  queue.appendCodexSessionEvents(session.id, [{ type: "thread.started", text: "started", appThreadId: "thr_compacted_notice" }], {
+    agentId: agent.id
+  });
+  queue.completeCodexSessionCommand(
+    startCommand.id,
+    { ok: true, appThreadId: "thr_compacted_notice", sessionStatus: "active" },
+    { agentId: agent.id }
+  );
+
+  queue.compactCodexSession(session.id, { automatic: false, reason: "manual" });
+  const compactCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  queue.appendCodexSessionEvents(
+    session.id,
+    [
+      {
+        type: "thread/compacted",
+        text: "Context compaction completed.",
+        raw: { method: "thread/compacted", params: { threadId: "thr_compacted_notice", turnId: "turn_compacted_notice" } }
+      }
+    ],
+    { agentId: agent.id }
+  );
+
+  assert.equal(
+    queue.completeCodexSessionCommand(
+      compactCommand.id,
+      { ok: true, appThreadId: "thr_compacted_notice", sessionStatus: "running" },
+      { agentId: agent.id }
+    ),
+    true
+  );
+
+  const completed = queue.getCodexSession(session.id, { rawMode: "client" });
+  assert.equal(completed.status, "active");
+  assert.equal(completed.leasedBy, null);
+  const compactedEvent = completed.events.find((event) => event.type === "thread/compacted");
+  assert.equal(compactedEvent.raw.params.threadId, "thr_compacted_notice");
+  assert.equal(compactedEvent.raw.params.turnId, "turn_compacted_notice");
 });
 
 test("interactive Codex sessions can queue mobile cancellation for the active turn", async () => {

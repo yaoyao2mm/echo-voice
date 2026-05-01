@@ -911,6 +911,9 @@ export function installSessions(app) {
     if (event.type === "context.compaction.started") {
       return { kind: "system", text: "上下文压缩中", at: event.at || "" };
     }
+    if (event.type === "thread/compacted") {
+      return { kind: "system", text: "上下文已压缩", at: event.at || "" };
+    }
     if (itemType === "contextCompaction") {
       return { kind: "system", text: "上下文已压缩", at: event.at || "" };
     }

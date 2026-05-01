@@ -1,7 +1,7 @@
-import { installAuth } from "./auth.js?v=79";
-import { installCodex } from "./codex.js?v=79";
-import { createAppContext, installCore } from "./core.js?v=79";
-import { installSessions } from "./sessions.js?v=79";
+import { installAuth } from "./auth.js?v=81";
+import { installCodex } from "./codex.js?v=81";
+import { createAppContext, installCore } from "./core.js?v=81";
+import { installSessions } from "./sessions.js?v=81";
 
 export function createApp(windowRef = window, documentRef = document) {
   const app = createAppContext(windowRef, documentRef);

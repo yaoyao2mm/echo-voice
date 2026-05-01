@@ -1,8 +1,6 @@
 const MAX_COMPOSER_ATTACHMENTS = 3;
 const MAX_COMPOSER_ATTACHMENT_BYTES = 6 * 1024 * 1024;
 const DEFAULT_CODEX_MODEL = "gpt-5.5";
-const DEFAULT_CONTEXT_TOKEN_LIMIT = 128000;
-const ATTACHMENT_CONTEXT_TOKEN_ESTIMATE = 1200;
 const AUTO_COMPACT_CONTEXT_PERCENT = 85;
 
 const MODEL_OPTIONS = [
@@ -308,58 +306,95 @@ export function installCore(app) {
     const indicator = elements.contextUsageIndicator;
     if (!indicator) return;
 
-    const usage = app.estimateContextUsage();
-    const rawPercent = usage.limitTokens > 0 ? Math.round((usage.estimatedTokens / usage.limitTokens) * 100) : 0;
+    const usage = app.currentContextUsage();
+    if (!usage) {
+      const label = "上下文使用暂未同步";
+      indicator.style.setProperty("--context-used", "0%");
+      indicator.dataset.state = "unknown";
+      indicator.title = label;
+      indicator.setAttribute("aria-label", label);
+      indicator.setAttribute("aria-valuenow", "0");
+      indicator.setAttribute("aria-valuetext", label);
+      return;
+    }
+
+    const hasLimit = usage.limitTokens > 0;
+    const rawPercent = hasLimit ? Math.round((usage.usedTokens / usage.limitTokens) * 100) : 0;
     const percent = Math.max(0, Math.min(100, rawPercent));
-    const visiblePercent = usage.estimatedTokens > 0 ? Math.max(1, percent) : 0;
-    const stateName = percent >= AUTO_COMPACT_CONTEXT_PERCENT ? "full" : percent >= 65 ? "warn" : "normal";
-    const label = `上下文使用约 ${percent}% · 估算 ${usage.estimatedTokens.toLocaleString("zh-CN")} / ${usage.limitTokens.toLocaleString("zh-CN")} tokens`;
+    const visiblePercent = hasLimit && usage.usedTokens > 0 ? Math.max(1, percent) : 0;
+    const stateName = !hasLimit ? "unknown" : percent >= AUTO_COMPACT_CONTEXT_PERCENT ? "full" : percent >= 65 ? "warn" : "normal";
+    const usedLabel = usage.usedTokens.toLocaleString("zh-CN");
+    const label = hasLimit
+      ? `上下文使用 ${percent}% · 窗口 ${usedLabel} / ${usage.limitTokens.toLocaleString("zh-CN")} tokens`
+      : `上下文使用已同步 · 窗口 ${usedLabel} tokens · 模型窗口未知`;
 
     indicator.style.setProperty("--context-used", `${visiblePercent}%`);
     indicator.dataset.state = stateName;
     indicator.title = label;
     indicator.setAttribute("aria-label", label);
     indicator.setAttribute("aria-valuenow", String(percent));
-    app.maybeAutoCompactContext?.(usage, percent);
+    indicator.setAttribute("aria-valuetext", label);
+    if (hasLimit) app.maybeAutoCompactContext?.(usage, percent);
   };
 
-  app.estimateContextUsage = function estimateContextUsage() {
+  app.currentContextUsage = function currentContextUsage() {
     const session = state.composingNewSession ? null : state.selectedCodexSession;
-    const parts = [];
-    let attachmentCount = 0;
+    return app.normalizeContextUsage(session?.contextUsage) || app.latestContextUsageFromEvents(session?.events || []);
+  };
 
-    for (const message of session?.messages || []) {
-      if (message?.text) parts.push(message.text);
-      attachmentCount += Array.isArray(message?.attachments) ? message.attachments.length : 0;
+  app.latestContextUsageFromEvents = function latestContextUsageFromEvents(events) {
+    for (const event of [...(events || [])].reverse()) {
+      const raw = event?.raw || {};
+      const method = raw.method || event?.type || "";
+      if (method !== "thread/tokenUsage/updated") continue;
+      const usage = app.normalizeContextUsage({
+        source: "codex-app-server",
+        at: event.at || "",
+        threadId: raw.params?.threadId || "",
+        turnId: raw.params?.turnId || raw.params?.turn?.id || "",
+        tokenUsage: raw.params?.tokenUsage
+      });
+      if (usage) return usage;
     }
-    if ((!session?.messages || session.messages.length === 0) && Array.isArray(session?.events)) {
-      for (const event of session.events) {
-        if (event?.text) parts.push(event.text);
-      }
-    }
-    if (session?.finalMessage) parts.push(session.finalMessage);
-    if (elements.codexPrompt?.value) parts.push(elements.codexPrompt.value);
-    attachmentCount += state.composerAttachments.length;
+    return null;
+  };
 
-    const textTokens = app.estimateTextTokens(parts.join("\n"));
-    const estimatedTokens = textTokens + attachmentCount * ATTACHMENT_CONTEXT_TOKEN_ESTIMATE;
+  app.normalizeContextUsage = function normalizeContextUsage(value) {
+    if (!value || typeof value !== "object") return null;
+    const officialUsage = value.tokenUsage && typeof value.tokenUsage === "object" ? value.tokenUsage : value;
+    const hasUsage = officialUsage.total || officialUsage.last;
+    if (!hasUsage) return null;
+    const total = app.normalizeTokenUsageBreakdown(officialUsage.total);
+    const last = app.normalizeTokenUsageBreakdown(officialUsage.last);
     return {
-      estimatedTokens,
-      limitTokens: app.contextTokenLimit()
+      source: String(value.source || "codex-app-server"),
+      at: String(value.at || ""),
+      threadId: String(value.threadId || ""),
+      turnId: String(value.turnId || ""),
+      totalTokens: total.totalTokens,
+      usedTokens: last.totalTokens,
+      inputTokens: last.inputTokens,
+      cachedInputTokens: last.cachedInputTokens,
+      outputTokens: last.outputTokens,
+      reasoningOutputTokens: last.reasoningOutputTokens,
+      limitTokens: app.tokenCount(officialUsage.modelContextWindow ?? officialUsage.model_context_window)
     };
   };
 
-  app.estimateTextTokens = function estimateTextTokens(value) {
-    const text = String(value || "");
-    if (!text) return 0;
-    const cjkMatches = text.match(/[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]/g) || [];
-    const cjkCount = cjkMatches.length;
-    const nonCjkLength = text.replace(/[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]/g, "").replace(/\s+/g, " ").trim().length;
-    return cjkCount + Math.ceil(nonCjkLength / 4);
+  app.normalizeTokenUsageBreakdown = function normalizeTokenUsageBreakdown(value = {}) {
+    const usage = value && typeof value === "object" ? value : {};
+    return {
+      totalTokens: app.tokenCount(usage.totalTokens ?? usage.total_tokens),
+      inputTokens: app.tokenCount(usage.inputTokens ?? usage.input_tokens),
+      cachedInputTokens: app.tokenCount(usage.cachedInputTokens ?? usage.cached_input_tokens),
+      outputTokens: app.tokenCount(usage.outputTokens ?? usage.output_tokens),
+      reasoningOutputTokens: app.tokenCount(usage.reasoningOutputTokens ?? usage.reasoning_output_tokens)
+    };
   };
 
-  app.contextTokenLimit = function contextTokenLimit() {
-    return DEFAULT_CONTEXT_TOKEN_LIMIT;
+  app.tokenCount = function tokenCount(value) {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? Math.round(number) : 0;
   };
 
   app.setTopbarStatus = function setTopbarStatus(label, indicatorState = "idle") {

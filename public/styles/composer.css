@@ -198,6 +198,10 @@ body.topbar-collapsed .topbar {
   --context-color: #b85c50;
 }
 
+.context-usage-ring[data-state="unknown"] {
+  --context-color: #9aa1aa;
+}
+
 .composer-status-text {
   display: block;
   min-width: 0;

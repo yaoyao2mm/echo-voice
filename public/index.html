@@ -15,8 +15,8 @@
         if (localStorage.getItem("echoTheme") === "dark") document.documentElement.dataset.theme = "dark";
       } catch {}
     </script>
-    <link rel="manifest" href="/manifest.webmanifest?v=79" />
-    <link rel="stylesheet" href="/styles.css?v=79" />
+    <link rel="manifest" href="/manifest.webmanifest?v=81" />
+    <link rel="stylesheet" href="/styles.css?v=81" />
   </head>
   <body>
     <main class="shell">
@@ -313,12 +313,14 @@
                   <span
                     id="contextUsageIndicator"
                     class="context-usage-ring"
+                    data-state="unknown"
                     role="meter"
-                    aria-label="上下文使用 0%"
+                    aria-label="上下文使用暂未同步"
                     aria-valuemin="0"
                     aria-valuemax="100"
                     aria-valuenow="0"
-                    title="上下文使用 0%"
+                    aria-valuetext="上下文使用暂未同步"
+                    title="上下文使用暂未同步"
                   ></span>
                   <button
                     id="compactContextButton"
@@ -392,6 +394,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=79" type="module"></script>
+    <script src="/app.js?v=81" type="module"></script>
   </body>
 </html>

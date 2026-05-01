@@ -273,6 +273,105 @@ try {
   assert.equal(result.status, 0, [result.stdout, result.stderr].filter(Boolean).join("\n"));
 });
 
+test("CodexInteractiveRuntime keeps restored token usage notifications mapped to the session", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "echo-runtime-token-usage-"));
+  const homePath = path.join(tempRoot, "home");
+  const workspacePath = path.join(tempRoot, "workspace");
+  const fakeCodexPath = path.join(tempRoot, "fake-codex-app");
+
+  fs.mkdirSync(homePath, { recursive: true });
+  fs.mkdirSync(workspacePath, { recursive: true });
+  fs.writeFileSync(
+    fakeCodexPath,
+    `#!/usr/bin/env node
+import readline from "node:readline";
+
+const rl = readline.createInterface({ input: process.stdin });
+const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+const tokenUsage = {
+  total: { totalTokens: 64000, inputTokens: 60000, cachedInputTokens: 1000, outputTokens: 4000, reasoningOutputTokens: 500 },
+  last: { totalTokens: 42000, inputTokens: 40000, cachedInputTokens: 800, outputTokens: 2000, reasoningOutputTokens: 300 },
+  modelContextWindow: 128000
+};
+
+rl.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") {
+    send({ id: message.id, result: { userAgent: "fake", codexHome: "/tmp/codex", platformFamily: "unix", platformOs: "macos" } });
+    return;
+  }
+  if (message.method === "initialized") return;
+  if (message.method === "thread/resume") {
+    send({ method: "thread/tokenUsage/updated", params: { threadId: message.params.threadId, turnId: "turn_restored", tokenUsage } });
+    send({ id: message.id, result: { thread: { id: message.params.threadId, preview: "", ephemeral: false, modelProvider: "openai", createdAt: 1, cwd: message.params.cwd } } });
+    return;
+  }
+  if (message.method === "turn/start") {
+    send({ id: message.id, result: { turn: { id: "turn_after_resume", items: [], status: "inProgress", error: null, startedAt: 1, completedAt: null, durationMs: null } } });
+  }
+});
+`,
+    "utf8"
+  );
+  fs.chmodSync(fakeCodexPath, 0o755);
+
+  const script = `
+import assert from "node:assert/strict";
+
+process.env.HOME = ${JSON.stringify(homePath)};
+process.env.ECHO_MODE = "relay";
+process.env.ECHO_TOKEN = "test-token";
+process.env.ECHO_RELAY_URL = "https://example.test";
+process.env.ECHO_CODEX_COMMAND = ${JSON.stringify(fakeCodexPath)};
+process.env.ECHO_CODEX_APP_PATH = ${JSON.stringify(fakeCodexPath)};
+process.env.ECHO_CODEX_WORKSPACES = ${JSON.stringify(`demo=${workspacePath}`)};
+
+const { CodexInteractiveRuntime } = await import(${JSON.stringify(path.join(process.cwd(), "src/lib/codexInteractiveRunner.js"))});
+
+const events = [];
+let resolveUsage;
+const usageSeen = new Promise((resolve) => {
+  resolveUsage = resolve;
+});
+const runtime = new CodexInteractiveRuntime({
+  onEvents: async (_id, batch) => {
+    events.push(...batch);
+    if (batch.some((event) => event.type === "thread/tokenUsage/updated")) resolveUsage();
+  }
+});
+
+try {
+  const result = await runtime.handleCommand({
+    sessionId: "session-resume",
+    type: "message",
+    projectId: "demo",
+    appThreadId: "thr_resume",
+    payload: { text: "continue", attachments: [], history: [] },
+    runtime: {}
+  });
+  assert.equal(result.ok, true);
+  await Promise.race([
+    usageSeen,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("timed out waiting for token usage")), 2000))
+  ]);
+
+  const event = events.find((item) => item.type === "thread/tokenUsage/updated");
+  assert.equal(event.appThreadId, "thr_resume");
+  assert.equal(event.raw.params.tokenUsage.last.totalTokens, 42000);
+} finally {
+  runtime.stop();
+}
+`;
+
+  const result = spawnSync(process.execPath, ["--input-type=module", "-"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    input: script
+  });
+
+  assert.equal(result.status, 0, [result.stdout, result.stderr].filter(Boolean).join("\n"));
+});
+
 test("CodexInteractiveRuntime restarts app-server once after stale Codex auth", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "echo-runtime-auth-retry-"));
   const homePath = path.join(tempRoot, "home");

@@ -427,8 +427,8 @@ export function installCodex(app) {
     }
   };
 
-  app.maybeAutoCompactContext = function maybeAutoCompactContext(_usage, percent) {
-    if (percent < 85) return;
+  app.maybeAutoCompactContext = function maybeAutoCompactContext(usage, percent) {
+    if (usage?.source !== "codex-app-server" || !Number.isFinite(percent) || percent < 85) return;
     const session = app.selectedSessionForComposer();
     if (!session || state.autoCompactedSessionIds.has(session.id) || app.sessionHasCompactionEvent(session)) return;
     if (elements.codexPrompt.value.trim() || state.composerAttachments.length > 0 || app.hasPendingComposerAttachments()) return;
@@ -441,6 +441,7 @@ export function installCodex(app) {
       session &&
         session.appThreadId &&
         app.sessionCanAcceptFollowUp(session) &&
+        !["failed", "closed", "stale", "cancelled"].includes(session.status) &&
         !app.sessionHasPendingWork(session) &&
         Number(session.pendingApprovalCount || 0) === 0
     );
@@ -448,8 +449,9 @@ export function installCodex(app) {
 
   app.sessionHasCompactionEvent = function sessionHasCompactionEvent(session) {
     return (session?.events || []).some((event) => {
+      const eventType = String(event.type || "");
       const itemType = event.raw?.params?.item?.type || "";
-      return String(event.type || "").includes("compaction") || itemType === "contextCompaction";
+      return eventType.includes("compaction") || eventType === "thread/compacted" || itemType === "contextCompaction";
     });
   };
 
