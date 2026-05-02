@@ -679,6 +679,11 @@
   box-shadow: 0 0 0 3px rgba(91, 88, 84, 0.1);
 }
 
+.session-status-rail[data-git-state="risk"] .session-status-dot {
+  background: #b74b4b;
+  box-shadow: 0 0 0 3px rgba(183, 75, 75, 0.12);
+}
+
 .session-status-mode {
   flex: 0 0 auto;
   color: var(--ink);
@@ -688,6 +693,15 @@
 
 .session-status-git {
   flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.session-status-health {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -941,6 +955,40 @@
   line-height: 1.62;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.thread-test-card .thread-plan-card-head {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.thread-test-card .thread-message-time {
+  margin-left: auto;
+}
+
+.thread-test-command {
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.thread-test-failures {
+  display: grid;
+  gap: 6px;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.thread-test-artifact {
+  justify-self: start;
+  color: var(--accent-strong);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
 }
 
 .thread-welcome {

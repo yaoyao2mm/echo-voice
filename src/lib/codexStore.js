@@ -15,8 +15,10 @@ import {
 
 const dbPath = path.join(config.dataDir, "echo.sqlite");
 const attachmentStorageDir = path.join(config.dataDir, "codex-attachments");
+const artifactStorageDir = path.join(config.dataDir, "codex-artifacts");
 fs.mkdirSync(config.dataDir, { recursive: true });
 fs.mkdirSync(attachmentStorageDir, { recursive: true });
+fs.mkdirSync(artifactStorageDir, { recursive: true });
 
 const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");
@@ -63,6 +65,14 @@ const insertSessionAttachment = db.prepare(`
     id, session_id, message_id, type, original_name, mime_type, size_bytes, sha256, storage_key, created_at
   ) VALUES (
     @id, @sessionId, @messageId, @type, @originalName, @mimeType, @sizeBytes, @sha256, @storageKey, @createdAt
+  )
+`);
+
+const insertSessionArtifact = db.prepare(`
+  INSERT INTO codex_session_artifacts (
+    id, session_id, event_id, kind, label, mime_type, size_bytes, sha256, storage_key, created_at
+  ) VALUES (
+    @id, @sessionId, @eventId, @kind, @label, @mimeType, @sizeBytes, @sha256, @storageKey, @createdAt
   )
 `);
 
@@ -160,7 +170,8 @@ const summarizeSessionColumns = `
   lease_expires_at AS leaseExpiresAt,
   archived_at AS archivedAt,
   runtime_json AS runtimeJson,
-  execution_json AS executionJson
+  execution_json AS executionJson,
+  memory_json AS memoryJson
 `;
 
 const summarizeSessionCommandColumns = `
@@ -239,6 +250,19 @@ const summarizeSessionAttachmentColumns = `
   message_id AS messageId,
   type,
   original_name AS originalName,
+  mime_type AS mimeType,
+  size_bytes AS sizeBytes,
+  sha256,
+  storage_key AS storageKey,
+  created_at AS createdAt
+`;
+
+const summarizeSessionArtifactColumns = `
+  id,
+  session_id AS sessionId,
+  event_id AS eventId,
+  kind,
+  label,
   mime_type AS mimeType,
   size_bytes AS sizeBytes,
   sha256,
@@ -504,7 +528,7 @@ export function completeJob(jobId, result = {}, options = {}) {
   return true;
 }
 
-export function createSession({ projectId, prompt, attachments, runtime, mode }) {
+export function createSession({ projectId, prompt, attachments, runtime, mode, sourceSessionId, threadMode }) {
   const now = nowIso();
   const sessionId = crypto.randomUUID();
   const commandId = crypto.randomUUID();
@@ -512,6 +536,9 @@ export function createSession({ projectId, prompt, attachments, runtime, mode })
   const normalizedPrompt = String(prompt || "").trim();
   const normalizedProjectId = String(projectId || "").trim();
   const commandMode = normalizeSessionMode(mode);
+  const normalizedThreadMode = normalizeThreadMode(threadMode);
+  const sourceMemory = normalizedThreadMode === "fork-summary" ? sourceSessionMemory(sourceSessionId, normalizedProjectId) : null;
+  const contextPrompt = sourceMemory ? forkSummaryPrompt(normalizedPrompt, sourceMemory) : "";
   const stagedAttachments = stageSessionAttachments({ sessionId, messageId, attachments, createdAt: now });
   const normalizedRuntime = sanitizeSessionRuntimeForProject(runtime, normalizedProjectId);
   if (!normalizedPrompt && stagedAttachments.length === 0) {
@@ -539,7 +566,13 @@ export function createSession({ projectId, prompt, attachments, runtime, mode })
       id: commandId,
       sessionId,
       type: "start",
-      payloadJson: JSON.stringify({ messageId, mode: commandMode }),
+      payloadJson: JSON.stringify({
+        messageId,
+        mode: commandMode,
+        threadMode: sourceMemory ? "fork-summary" : normalizedThreadMode,
+        sourceSessionId: sourceMemory?.sourceSessionId || "",
+        contextPrompt
+      }),
       now
     });
 
@@ -562,7 +595,16 @@ export function createSession({ projectId, prompt, attachments, runtime, mode })
       normalizeSessionEvent(sessionId, {
         type: "user.message",
         text: normalizedPrompt,
-        raw: { source: "mobile", commandId, type: "start", messageId, mode: commandMode, attachments: attachmentRefsFromRows(stagedAttachments) }
+        raw: {
+          source: "mobile",
+          commandId,
+          type: "start",
+          messageId,
+          mode: commandMode,
+          threadMode: sourceMemory ? "fork-summary" : normalizedThreadMode,
+          sourceSessionId: sourceMemory?.sourceSessionId || "",
+          attachments: attachmentRefsFromRows(stagedAttachments)
+        }
       }, now)
     );
   });
@@ -608,6 +650,7 @@ export function getSession(id, options = {}) {
     ...session,
     events: listSessionEvents(id, {
       maxEvents: options.maxEvents,
+      afterEventId: options.afterEventId,
       rawMode: options.rawMode,
       includeRaw: options.includeRaw
     })
@@ -615,6 +658,7 @@ export function getSession(id, options = {}) {
   if (options.includeMessages !== false) result.messages = listSessionMessages(id);
   if (options.includeApprovals !== false) result.approvals = listSessionApprovals(id);
   if (options.includeInteractions !== false) result.interactions = listSessionInteractions(id);
+  if (options.includeArtifacts !== false) result.artifacts = listSessionArtifacts(id, options.maxArtifacts);
   return result;
 }
 
@@ -628,6 +672,15 @@ export function getSessionAttachmentContent(id) {
   return {
     ...attachment,
     filePath: attachmentAbsolutePath(attachment.storageKey)
+  };
+}
+
+export function getSessionArtifactContent(id) {
+  const artifact = getSessionArtifact(id);
+  if (!artifact) return null;
+  return {
+    ...artifact,
+    filePath: artifactAbsolutePath(artifact.storageKey)
   };
 }
 
@@ -1092,11 +1145,39 @@ export function appendSessionEvents(sessionId, incomingEvents = [], options = {}
 
   const now = nowIso();
   const leaseExpiresAt = new Date(Date.now() + config.codex.leaseMs).toISOString();
-  const events = incomingEvents.slice(0, 80).map((event) => normalizeSessionEvent(sessionId, event, now));
-  const update = deriveSessionUpdate(incomingEvents, session);
+  const baseIncomingEvents = incomingEvents.slice(0, 80);
+  const events = [];
+  const eventsForMemory = [...baseIncomingEvents];
+  for (const event of baseIncomingEvents) {
+    const normalized = normalizeSessionEventForStorage(sessionId, event, now);
+    events.push(normalized);
+    const storedEvent = {
+      ...event,
+      at: normalized.row.at,
+      text: normalized.row.text,
+      raw: parseJson(normalized.row.rawJson, event.raw || {})
+    };
+    const testSummary = testSummaryFromEvent(storedEvent);
+    if (testSummary) {
+      const testEvent = {
+        at: storedEvent.at,
+        type: "test.summary",
+        text: formatTestSummaryEventText(testSummary),
+        raw: {
+          source: "relay",
+          method: "test.summary",
+          testSummary
+        }
+      };
+      eventsForMemory.push(testEvent);
+      events.push(normalizeSessionEventForStorage(sessionId, testEvent, now));
+    }
+  }
+  const update = deriveSessionUpdate(baseIncomingEvents, session);
   const releaseLease = update.releaseLease && !sessionHasLeasedCommand(sessionId);
-  const assistantMessages = buildAssistantMessages(sessionId, incomingEvents, now);
-  const resolvedServerRequests = serverRequestResolutionsFromEvents(incomingEvents);
+  const assistantMessages = buildAssistantMessages(sessionId, baseIncomingEvents, now);
+  const resolvedServerRequests = serverRequestResolutionsFromEvents(baseIncomingEvents);
+  const nextMemory = shouldRefreshSessionMemory(eventsForMemory) ? buildSessionMemory(sessionId, session, eventsForMemory, now) : null;
 
   const write = db.transaction(() => {
     db.prepare(`
@@ -1108,7 +1189,8 @@ export function appendSessionEvents(sessionId, incomingEvents = [], options = {}
           app_thread_id = COALESCE(@appThreadId, app_thread_id),
           active_turn_id = CASE WHEN @clearActiveTurnId = 1 THEN NULL ELSE COALESCE(@activeTurnId, active_turn_id) END,
           last_error = COALESCE(@lastError, last_error),
-          final_message = COALESCE(@finalMessage, final_message)
+          final_message = COALESCE(@finalMessage, final_message),
+          memory_json = COALESCE(@memoryJson, memory_json)
       WHERE id = @sessionId
         AND leased_by = @leasedBy
     `).run({
@@ -1122,10 +1204,21 @@ export function appendSessionEvents(sessionId, incomingEvents = [], options = {}
       clearActiveTurnId: update.clearActiveTurnId ? 1 : 0,
       releaseLease: releaseLease ? 1 : 0,
       lastError: update.lastError,
-      finalMessage: update.finalMessage
+      finalMessage: update.finalMessage,
+      memoryJson: nextMemory ? JSON.stringify(nextMemory).slice(0, 30000) : null
     });
 
-    for (const event of events) insertSessionEvent.run(event);
+    for (const event of events) {
+      const inserted = insertSessionEvent.run(event.row);
+      for (const artifact of event.artifacts) {
+        persistSessionArtifact({
+          ...artifact,
+          sessionId,
+          eventId: Number(inserted.lastInsertRowid),
+          createdAt: event.row.at
+        });
+      }
+    }
     for (const resolution of resolvedServerRequests) {
       resolvePendingServerRequest(sessionId, resolution.requestId, now);
     }
@@ -1429,6 +1522,7 @@ export function waitForSessionInteractionDecision(id, options = {}) {
 
 export function resetStoreForTest() {
   db.prepare("DELETE FROM codex_workspace_commands").run();
+  db.prepare("DELETE FROM codex_session_artifacts").run();
   db.prepare("DELETE FROM codex_session_attachments").run();
   db.prepare("DELETE FROM codex_session_messages").run();
   db.prepare("DELETE FROM codex_session_interactions").run();
@@ -1440,7 +1534,9 @@ export function resetStoreForTest() {
   db.prepare("DELETE FROM codex_jobs").run();
   db.prepare("DELETE FROM codex_agents").run();
   fs.rmSync(attachmentStorageDir, { recursive: true, force: true });
+  fs.rmSync(artifactStorageDir, { recursive: true, force: true });
   fs.mkdirSync(attachmentStorageDir, { recursive: true });
+  fs.mkdirSync(artifactStorageDir, { recursive: true });
 }
 
 function migrate() {
@@ -1501,7 +1597,8 @@ function migrate() {
       lease_expires_at TEXT,
       archived_at TEXT,
       runtime_json TEXT NOT NULL DEFAULT '{}',
-      execution_json TEXT NOT NULL DEFAULT '{}'
+      execution_json TEXT NOT NULL DEFAULT '{}',
+      memory_json TEXT NOT NULL DEFAULT '{}'
     );
 
     CREATE INDEX IF NOT EXISTS idx_codex_sessions_status_updated
@@ -1589,6 +1686,26 @@ function migrate() {
     CREATE INDEX IF NOT EXISTS idx_codex_session_attachments_message
       ON codex_session_attachments(message_id, created_at, id);
 
+    CREATE TABLE IF NOT EXISTS codex_session_artifacts (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES codex_sessions(id) ON DELETE CASCADE,
+      event_id INTEGER REFERENCES codex_session_events(id) ON DELETE SET NULL,
+      kind TEXT NOT NULL,
+      label TEXT NOT NULL DEFAULT '',
+      mime_type TEXT NOT NULL DEFAULT 'text/plain; charset=utf-8',
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      sha256 TEXT NOT NULL DEFAULT '',
+      storage_key TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(storage_key)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_codex_session_artifacts_session
+      ON codex_session_artifacts(session_id, created_at, id);
+
+    CREATE INDEX IF NOT EXISTS idx_codex_session_artifacts_event
+      ON codex_session_artifacts(event_id);
+
     CREATE TABLE IF NOT EXISTS codex_session_approvals (
       id TEXT PRIMARY KEY,
       session_id TEXT NOT NULL REFERENCES codex_sessions(id) ON DELETE CASCADE,
@@ -1640,6 +1757,7 @@ function migrate() {
   ensureColumn("codex_sessions", "archived_at", "TEXT");
   ensureColumn("codex_sessions", "runtime_json", "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn("codex_sessions", "execution_json", "TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn("codex_sessions", "memory_json", "TEXT NOT NULL DEFAULT '{}'");
   ensureSessionStatuses();
   repairSessionForeignKeyReferences();
   ensureSessionCommandTypes();
@@ -1671,6 +1789,12 @@ function migrate() {
 
     CREATE INDEX IF NOT EXISTS idx_codex_session_attachments_message
       ON codex_session_attachments(message_id, created_at, id);
+
+    CREATE INDEX IF NOT EXISTS idx_codex_session_artifacts_session
+      ON codex_session_artifacts(session_id, created_at, id);
+
+    CREATE INDEX IF NOT EXISTS idx_codex_session_artifacts_event
+      ON codex_session_artifacts(event_id);
 
     CREATE INDEX IF NOT EXISTS idx_codex_session_approvals_session
       ON codex_session_approvals(session_id, status, created_at);
@@ -1715,7 +1839,8 @@ function ensureSessionStatuses() {
       lease_expires_at TEXT,
       archived_at TEXT,
       runtime_json TEXT NOT NULL DEFAULT '{}',
-      execution_json TEXT NOT NULL DEFAULT '{}'
+      execution_json TEXT NOT NULL DEFAULT '{}',
+      memory_json TEXT NOT NULL DEFAULT '{}'
     );
     INSERT INTO codex_sessions (
       id,
@@ -1732,7 +1857,8 @@ function ensureSessionStatuses() {
       lease_expires_at,
       archived_at,
       runtime_json,
-      execution_json
+      execution_json,
+      memory_json
     )
     SELECT
       id,
@@ -1749,7 +1875,8 @@ function ensureSessionStatuses() {
       lease_expires_at,
       archived_at,
       runtime_json,
-      execution_json
+      execution_json,
+      COALESCE(memory_json, '{}') AS memory_json
     FROM codex_sessions_old;
     DROP TABLE codex_sessions_old;
     COMMIT;
@@ -1848,6 +1975,23 @@ function sessionChildTableSchema(name) {
         type TEXT NOT NULL CHECK (type IN ('image')),
         original_name TEXT NOT NULL DEFAULT '',
         mime_type TEXT NOT NULL DEFAULT '',
+        size_bytes INTEGER NOT NULL DEFAULT 0,
+        sha256 TEXT NOT NULL DEFAULT '',
+        storage_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(storage_key)
+      )
+    `;
+  }
+  if (name === "codex_session_artifacts") {
+    return `
+      CREATE TABLE codex_session_artifacts (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES codex_sessions(id) ON DELETE CASCADE,
+        event_id INTEGER REFERENCES codex_session_events(id) ON DELETE SET NULL,
+        kind TEXT NOT NULL,
+        label TEXT NOT NULL DEFAULT '',
+        mime_type TEXT NOT NULL DEFAULT 'text/plain; charset=utf-8',
         size_bytes INTEGER NOT NULL DEFAULT 0,
         sha256 TEXT NOT NULL DEFAULT '',
         storage_key TEXT NOT NULL,
@@ -2058,7 +2202,7 @@ function getJobSummary(id) {
 
 function summarizeJob(row) {
   const lastEvent = db.prepare(`
-    SELECT at, type, text, raw_json AS rawJson
+    SELECT id, at, type, text, raw_json AS rawJson
     FROM codex_events
     WHERE job_id = ?
     ORDER BY id DESC
@@ -2122,7 +2266,7 @@ function getSessionCommandSummary(id) {
 
 function summarizeSession(row) {
   const lastEvent = db.prepare(`
-    SELECT at, type, text, raw_json AS rawJson
+    SELECT id, at, type, text, raw_json AS rawJson
     FROM codex_session_events
     WHERE session_id = ?
     ORDER BY id DESC
@@ -2160,13 +2304,36 @@ function summarizeSession(row) {
       AND status = 'pending'
       AND kind = 'user_input'
   `).get(row.id).count;
+  const messageCount = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM codex_session_messages
+    WHERE session_id = ?
+  `).get(row.id).count;
+  const artifactStats = db.prepare(`
+    SELECT COUNT(*) AS count, COALESCE(SUM(size_bytes), 0) AS sizeBytes
+    FROM codex_session_artifacts
+    WHERE session_id = ?
+  `).get(row.id);
+  const contextUsage = latestSessionContextUsage(row.id);
 
   return {
     ...row,
     runtime: parseJson(row.runtimeJson, {}),
     execution: parseJson(row.executionJson, {}),
-    contextUsage: latestSessionContextUsage(row.id),
+    memory: parseJson(row.memoryJson, {}),
+    contextUsage,
     eventCount,
+    lastEventId: lastEvent?.id || 0,
+    messageCount,
+    artifactCount: artifactStats.count || 0,
+    artifactBytes: artifactStats.sizeBytes || 0,
+    metrics: sessionMetrics(row, {
+      eventCount,
+      messageCount,
+      artifactCount: artifactStats.count || 0,
+      artifactBytes: artifactStats.sizeBytes || 0,
+      contextUsage
+    }),
     pendingCommandCount,
     pendingApprovalCount,
     pendingInteractionCount,
@@ -2221,6 +2388,177 @@ function summarizeSessionAttachment(row) {
   };
 }
 
+function summarizeSessionArtifact(row) {
+  return {
+    ...row,
+    name: row.label,
+    downloadPath: `/api/codex/artifacts/${encodeURIComponent(row.id)}`
+  };
+}
+
+function sessionMetrics(row, stats = {}) {
+  const startedAt = row.startedAt || row.createdAt || "";
+  const finishedAt = row.completedAt || "";
+  const startMs = Date.parse(startedAt);
+  const endMs = Date.parse(["queued", "starting", "running"].includes(row.status) ? new Date().toISOString() : finishedAt || row.updatedAt || "");
+  const elapsedMs = Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs ? endMs - startMs : 0;
+  const contextPercent = contextUsagePercent(stats.contextUsage);
+  const risk = sessionRiskLevel({
+    eventCount: stats.eventCount,
+    messageCount: stats.messageCount,
+    artifactBytes: stats.artifactBytes,
+    contextPercent
+  });
+
+  return {
+    elapsedMs,
+    eventCount: stats.eventCount || 0,
+    messageCount: stats.messageCount || 0,
+    artifactCount: stats.artifactCount || 0,
+    artifactBytes: stats.artifactBytes || 0,
+    contextPercent,
+    risk
+  };
+}
+
+function contextUsagePercent(contextUsage) {
+  const used = Number(contextUsage?.last?.totalTokens || 0);
+  const limit = Number(contextUsage?.modelContextWindow || 0);
+  if (!Number.isFinite(used) || !Number.isFinite(limit) || used <= 0 || limit <= 0) return null;
+  return Math.max(0, Math.min(100, Math.round((used / limit) * 100)));
+}
+
+function sessionRiskLevel({ eventCount = 0, messageCount = 0, artifactBytes = 0, contextPercent = null } = {}) {
+  if (Number(contextPercent) >= 85 || Number(eventCount) >= 160 || Number(messageCount) >= 28 || Number(artifactBytes) >= 2 * 1024 * 1024) {
+    return "high";
+  }
+  if (Number(contextPercent) >= 70 || Number(eventCount) >= 100 || Number(messageCount) >= 18 || Number(artifactBytes) >= 768 * 1024) {
+    return "warn";
+  }
+  return "normal";
+}
+
+function shouldRefreshSessionMemory(events = []) {
+  return events.some((event) => {
+    const method = event?.raw?.method || event?.type || "";
+    return method === "turn/completed" || method === "thread/compacted" || method === "git.summary" || method === "test.summary";
+  });
+}
+
+function buildSessionMemory(sessionId, session = {}, events = [], fallbackAt = nowIso()) {
+  const messages = listSessionMessages(sessionId)
+    .filter((message) => ["user", "assistant"].includes(message.role))
+    .filter((message) => String(message.text || "").trim());
+  const userMessages = messages.filter((message) => message.role === "user").map((message) => String(message.text || "").trim());
+  const assistantMessages = messages.filter((message) => message.role === "assistant").map((message) => String(message.text || "").trim());
+  const incomingAssistant = events
+    .map((event) => String(event.finalMessage || (event.raw?.params?.item?.type === "agentMessage" ? event.raw.params.item.text : "") || "").trim())
+    .filter(Boolean)
+    .at(-1);
+  const latestAssistant = incomingAssistant || assistantMessages.at(-1) || session.finalMessage || "";
+  const gitSummary = latestRawValue(events, "git.summary", "gitSummary");
+  const testSummary = latestRawValue(events, "test.summary", "testSummary");
+  const plan = events
+    .map((event) => event.type === "turn/plan/updated" || event.raw?.params?.item?.type === "plan" ? String(event.text || event.raw?.params?.item?.text || "").trim() : "")
+    .filter(Boolean)
+    .at(-1) || "";
+  const previousMemory = parseJson(session.memoryJson, {});
+
+  const memory = {
+    version: 1,
+    sourceSessionId: sessionId,
+    projectId: session.projectId || "",
+    updatedAt: String(fallbackAt || nowIso()),
+    title: session.title || userMessages[0] || "Codex session",
+    goal: previousMemory.goal || userMessages[0] || session.title || "",
+    recentUserRequests: userMessages.slice(-6).map((text) => text.slice(0, 1200)),
+    latestAssistantResult: String(latestAssistant || "").slice(0, 2400),
+    latestPlan: plan.slice(0, 2000),
+    gitSummary: compactMemoryGitSummary(gitSummary),
+    testSummary: compactMemoryTestSummary(testSummary),
+    notes: []
+  };
+  memory.summary = formatSessionMemory(memory);
+  return memory;
+}
+
+function latestRawValue(events, eventType, key) {
+  for (const event of [...(events || [])].reverse()) {
+    if (event.type !== eventType) continue;
+    const raw = event.raw && typeof event.raw === "object" ? event.raw : {};
+    if (raw[key]) return raw[key];
+    if (raw.method === eventType && raw[key]) return raw[key];
+  }
+  return null;
+}
+
+function compactMemoryGitSummary(summary) {
+  if (!summary || typeof summary !== "object") return null;
+  const changedDuringTurn = summary.changedDuringTurn && typeof summary.changedDuringTurn === "object" ? summary.changedDuringTurn : null;
+  return {
+    branch: String(summary.branch || "").slice(0, 120),
+    commit: String(summary.commit || "").slice(0, 80),
+    changedFiles: (changedDuringTurn?.changedFiles || summary.changedFiles || []).slice(0, 40),
+    changedThisTurn: Boolean(changedDuringTurn),
+    worktreeRoot: String(summary.root || "").slice(0, 500)
+  };
+}
+
+function compactMemoryTestSummary(summary) {
+  if (!summary || typeof summary !== "object") return null;
+  return {
+    level: String(summary.level || "").slice(0, 80),
+    status: String(summary.status || "").slice(0, 80),
+    command: String(summary.command || "").slice(0, 500),
+    failures: Array.isArray(summary.failures) ? summary.failures.slice(0, 5) : []
+  };
+}
+
+function formatSessionMemory(memory) {
+  const lines = [];
+  if (memory.goal) lines.push(`Goal: ${memory.goal}`);
+  if (memory.recentUserRequests?.length) {
+    lines.push("Recent user requests:");
+    for (const request of memory.recentUserRequests.slice(-4)) lines.push(`- ${request}`);
+  }
+  if (memory.latestAssistantResult) lines.push(`Latest Codex result: ${memory.latestAssistantResult}`);
+  if (memory.latestPlan) lines.push(`Latest plan: ${memory.latestPlan}`);
+  if (memory.gitSummary) {
+    const files = memory.gitSummary.changedFiles || [];
+    lines.push(`Git: ${memory.gitSummary.branch || "unknown"} ${memory.gitSummary.commit || ""}`.trim());
+    if (files.length) lines.push(`Changed files: ${files.slice(0, 12).join(", ")}`);
+  }
+  if (memory.testSummary) {
+    lines.push(`Tests: ${memory.testSummary.level || "checks"} ${memory.testSummary.status || ""} ${memory.testSummary.command || ""}`.trim());
+    for (const failure of memory.testSummary.failures || []) lines.push(`- ${failure}`);
+  }
+  return lines.join("\n").slice(0, 8000);
+}
+
+function sourceSessionMemory(sourceSessionId, projectId) {
+  const sourceId = String(sourceSessionId || "").trim();
+  if (!sourceId) return null;
+  const source = getSessionSummary(sourceId);
+  if (!source || source.projectId !== projectId) return null;
+  const memory = source.memory && typeof source.memory === "object" && source.memory.summary ? source.memory : buildSessionMemory(source.id, source, [], nowIso());
+  return {
+    ...memory,
+    sourceSessionId: source.id
+  };
+}
+
+function forkSummaryPrompt(prompt, memory) {
+  return [
+    "这是从 Echo 长会话摘要继续的新 Codex thread。完整历史不可见，请只依赖下面摘要和当前用户请求继续；不要要求用户重复上下文，除非摘要不足以安全执行。",
+    "",
+    "旧会话摘要：",
+    memory.summary || formatSessionMemory(memory),
+    "",
+    "当前用户请求：",
+    String(prompt || "").trim() || "（本条消息只有附件或截图，请结合附件继续。）"
+  ].join("\n").slice(0, 12000);
+}
+
 function getSessionApprovalSummary(id) {
   const row = db.prepare(`
     SELECT ${summarizeSessionApprovalColumns}
@@ -2257,7 +2595,7 @@ function summarizeSessionInteraction(row) {
 
 function listEvents(jobId) {
   return db.prepare(`
-    SELECT at, type, text, raw_json AS rawJson
+    SELECT id, at, type, text, raw_json AS rawJson
     FROM codex_events
     WHERE job_id = ?
     ORDER BY id ASC
@@ -2266,11 +2604,23 @@ function listEvents(jobId) {
 
 function listSessionEvents(sessionId, options = {}) {
   const maxEvents = Number(options.maxEvents || 0);
+  const afterEventId = Math.max(0, Math.floor(Number(options.afterEventId || 0) || 0));
+  if (afterEventId > 0) {
+    const limit = Math.min(Math.max(1, Math.round(maxEvents || config.codex.maxEvents)), config.codex.maxEvents);
+    return db.prepare(`
+      SELECT id, at, type, text, raw_json AS rawJson
+      FROM codex_session_events
+      WHERE session_id = ?
+        AND id > ?
+      ORDER BY id ASC
+      LIMIT ?
+    `).all(sessionId, afterEventId, limit).map((row) => parseEvent(row, options));
+  }
   if (maxEvents > 0) {
     return db.prepare(`
-      SELECT at, type, text, rawJson
+      SELECT id, at, type, text, rawJson
       FROM (
-        SELECT at, type, text, raw_json AS rawJson, id
+        SELECT id, at, type, text, raw_json AS rawJson
         FROM codex_session_events
         WHERE session_id = ?
         ORDER BY id DESC
@@ -2280,7 +2630,7 @@ function listSessionEvents(sessionId, options = {}) {
     `).all(sessionId, Math.min(Math.max(1, Math.round(maxEvents)), config.codex.maxEvents)).map((row) => parseEvent(row, options));
   }
   return db.prepare(`
-    SELECT at, type, text, raw_json AS rawJson
+    SELECT id, at, type, text, raw_json AS rawJson
     FROM codex_session_events
     WHERE session_id = ?
     ORDER BY id ASC
@@ -2317,6 +2667,15 @@ function getSessionAttachment(id) {
   return row ? summarizeSessionAttachment(row) : null;
 }
 
+function getSessionArtifact(id) {
+  const row = db.prepare(`
+    SELECT ${summarizeSessionArtifactColumns}
+    FROM codex_session_artifacts
+    WHERE id = ?
+  `).get(id);
+  return row ? summarizeSessionArtifact(row) : null;
+}
+
 function listMessageAttachments(messageId) {
   return db.prepare(`
     SELECT ${summarizeSessionAttachmentColumns}
@@ -2341,6 +2700,16 @@ function listSessionAttachmentsBySession(sessionId) {
     byMessageId.set(attachment.messageId, existing);
   }
   return byMessageId;
+}
+
+function listSessionArtifacts(sessionId, limit = 30) {
+  return db.prepare(`
+    SELECT ${summarizeSessionArtifactColumns}
+    FROM codex_session_artifacts
+    WHERE session_id = ?
+    ORDER BY created_at DESC, id DESC
+    LIMIT ?
+  `).all(sessionId, Math.max(1, Math.min(Number(limit) || 30, 100))).map(summarizeSessionArtifact);
 }
 
 function listSessionApprovals(sessionId) {
@@ -2489,6 +2858,72 @@ function serverRequestResolutionsFromEvents(events = []) {
     .filter(Boolean);
 }
 
+function testSummaryFromEvent(event = {}) {
+  const raw = event.raw && typeof event.raw === "object" ? event.raw : {};
+  const method = raw.method || event.type || "";
+  if (method !== "item/completed") return null;
+  const item = raw.params?.item;
+  if (!item || item.type !== "commandExecution") return null;
+
+  const command = Array.isArray(item.command) ? item.command.join(" ") : String(item.command || "");
+  if (!isTestCommand(command)) return null;
+
+  const statusText = String(item.status || "").toLowerCase();
+  const output = String(item.aggregatedOutput || "");
+  const failed = statusText.includes("fail") || statusText.includes("error") || /(^|\n)\s*(FAIL|Failed|Error:|AssertionError|TimeoutError)\b/.test(output);
+  const outputArtifact = item.outputArtifact && typeof item.outputArtifact === "object" ? compactArtifactRef(item.outputArtifact) : null;
+  return {
+    level: testCommandLevel(command),
+    command: command.slice(0, 1000),
+    status: failed ? "failed" : statusText.includes("cancel") ? "cancelled" : "passed",
+    outputBytes: byteLength(output),
+    outputArtifact,
+    failures: extractTestFailures(output),
+    turnId: String(raw.params?.turnId || raw.params?.turn?.id || "").slice(0, 200)
+  };
+}
+
+function isTestCommand(command) {
+  const text = String(command || "").toLowerCase();
+  return /\b(pnpm|npm|yarn|bun)\s+(run\s+)?(test|check|lint|typecheck|tsc)\b/.test(text) ||
+    /\b(node\s+--test|pytest|vitest|jest|playwright|cypress|ava|mocha|tap)\b/.test(text);
+}
+
+function testCommandLevel(command) {
+  const text = String(command || "").toLowerCase();
+  if (/\b(e2e|playwright|cypress)\b/.test(text)) return "e2e";
+  if (/\b(smoke|browser)\b/.test(text)) return "browser-smoke";
+  if (/\b(integration|integ)\b/.test(text)) return "integration";
+  return "quick";
+}
+
+function extractTestFailures(output) {
+  const lines = String(output || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const failures = [];
+  for (const line of lines) {
+    if (!/(FAIL|Failed|Error:|AssertionError|TimeoutError|expected|received|not ok)/i.test(line)) continue;
+    failures.push(line.replace(/\b(token|secret|password|api[_-]?key)\b\s*[:=]\s*[^,\s]+/gi, "$1=***").slice(0, 240));
+    if (failures.length >= 8) break;
+  }
+  return failures;
+}
+
+function formatTestSummaryEventText(summary) {
+  const label = {
+    quick: "Quick checks",
+    integration: "Integration checks",
+    "browser-smoke": "Browser smoke",
+    e2e: "E2E"
+  }[summary.level] || "Checks";
+  const lines = [`${label}: ${summary.status}`, summary.command];
+  if (summary.failures?.length) lines.push(...summary.failures.slice(0, 5).map((failure) => `- ${failure}`));
+  if (summary.outputArtifact?.downloadPath) lines.push(`Full output: ${summary.outputArtifact.downloadPath}`);
+  return lines.filter(Boolean).join("\n");
+}
+
 function resolvePendingServerRequest(sessionId, appRequestId, now) {
   const requestId = String(appRequestId || "");
   if (!requestId) return;
@@ -2574,9 +3009,173 @@ function normalizeSessionEvent(sessionId, event = {}, fallbackAt) {
   };
 }
 
+function normalizeSessionEventForStorage(sessionId, event = {}, fallbackAt) {
+  const at = String(event.at || fallbackAt || nowIso());
+  const type = String(event.type || "output").slice(0, 120);
+  const artifacts = [];
+  let text = String(event.text || "");
+  let raw = event.raw && typeof event.raw === "object" ? cloneJson(event.raw) : undefined;
+
+  const commandOutput = commandOutputFromRaw(raw);
+  if (commandOutput && byteLength(commandOutput) > 4096) {
+    const artifact = buildTextArtifact({
+      sessionId,
+      kind: "command_output",
+      label: commandArtifactLabel(raw),
+      content: commandOutput,
+      createdAt: at
+    });
+    artifacts.push(artifact);
+    const preview = tailPreview(commandOutput, 1600);
+    raw = rawWithCommandOutputArtifact(raw, artifact, preview);
+    text = commandEventText(raw, preview);
+  }
+
+  if (byteLength(text) > 12000) {
+    const artifact = buildTextArtifact({
+      sessionId,
+      kind: "event_text",
+      label: `${type} text`,
+      content: text,
+      createdAt: at
+    });
+    artifacts.push(artifact);
+    text = `${headPreview(text, 800)}\n\n[Full text saved as artifact ${artifact.id}; ${artifact.sizeBytes} bytes]`;
+  }
+
+  let rawJson = raw ? JSON.stringify(raw) : null;
+  if (rawJson && byteLength(rawJson) > 60000) {
+    const artifact = buildTextArtifact({
+      sessionId,
+      kind: "event_raw",
+      label: `${type} raw JSON`,
+      content: rawJson,
+      mimeType: "application/json",
+      createdAt: at
+    });
+    artifacts.push(artifact);
+    rawJson = JSON.stringify({
+      method: raw.method || type,
+      artifact: artifactRef(artifact),
+      truncated: true
+    });
+  }
+
+  return {
+    row: {
+      sessionId,
+      at,
+      type,
+      text: text.slice(0, 12000),
+      rawJson
+    },
+    artifacts
+  };
+}
+
+function commandOutputFromRaw(raw) {
+  const item = raw?.params?.item;
+  if (!item || item.type !== "commandExecution") return "";
+  return String(item.aggregatedOutput || "");
+}
+
+function commandArtifactLabel(raw) {
+  const item = raw?.params?.item || {};
+  const command = compactCommand(item.command);
+  const text = Array.isArray(command) ? command.join(" ") : command;
+  return text ? `Command output: ${String(text).slice(0, 160)}` : "Command output";
+}
+
+function commandEventText(raw, preview) {
+  const item = raw?.params?.item || {};
+  const command = compactCommand(item.command);
+  const commandText = Array.isArray(command) ? command.join(" ") : command || "command";
+  const status = item.status || "completed";
+  return `${commandText} ${status}\n${preview}`;
+}
+
+function rawWithCommandOutputArtifact(raw, artifact, preview) {
+  const next = cloneJson(raw || {});
+  const item = next?.params?.item;
+  if (item && item.type === "commandExecution") {
+    item.aggregatedOutput = preview;
+    item.aggregatedOutputTruncated = true;
+    item.outputArtifact = artifactRef(artifact);
+  }
+  return next;
+}
+
+function buildTextArtifact({ sessionId, kind, label, content, mimeType = "text/plain; charset=utf-8", createdAt }) {
+  const id = crypto.randomUUID();
+  const buffer = Buffer.from(String(content || ""), "utf8");
+  const extension = mimeType.includes("json") ? "json" : "txt";
+  return {
+    id,
+    sessionId,
+    eventId: null,
+    kind: String(kind || "text").slice(0, 80),
+    label: String(label || kind || "artifact").slice(0, 240),
+    mimeType,
+    sizeBytes: buffer.length,
+    sha256: crypto.createHash("sha256").update(buffer).digest("hex"),
+    storageKey: artifactStorageKey(sessionId, id, extension),
+    createdAt: createdAt || nowIso(),
+    content: buffer
+  };
+}
+
+function persistSessionArtifact(artifact) {
+  const absolutePath = artifactAbsolutePath(artifact.storageKey);
+  fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+  fs.writeFileSync(absolutePath, artifact.content, { mode: 0o600 });
+  insertSessionArtifact.run({
+    id: artifact.id,
+    sessionId: artifact.sessionId,
+    eventId: artifact.eventId,
+    kind: artifact.kind,
+    label: artifact.label,
+    mimeType: artifact.mimeType,
+    sizeBytes: artifact.sizeBytes,
+    sha256: artifact.sha256,
+    storageKey: artifact.storageKey,
+    createdAt: artifact.createdAt
+  });
+}
+
+function artifactRef(artifact) {
+  return {
+    id: artifact.id,
+    kind: artifact.kind,
+    label: artifact.label,
+    sizeBytes: artifact.sizeBytes,
+    sha256: artifact.sha256,
+    downloadPath: `/api/codex/artifacts/${encodeURIComponent(artifact.id)}`
+  };
+}
+
+function cloneJson(value) {
+  if (!value || typeof value !== "object") return value;
+  return JSON.parse(JSON.stringify(value));
+}
+
+function byteLength(value) {
+  return Buffer.byteLength(String(value || ""), "utf8");
+}
+
+function headPreview(value, limit) {
+  const text = String(value || "");
+  return text.length > limit ? text.slice(0, limit).trimEnd() : text;
+}
+
+function tailPreview(value, limit) {
+  const text = String(value || "");
+  return text.length > limit ? text.slice(-limit).trimStart() : text;
+}
+
 function parseEvent(row, options = {}) {
   const raw = options.includeRaw === false ? null : parseJson(row.rawJson);
   return {
+    id: Number(row.id || 0) || undefined,
     at: row.at,
     type: row.type,
     text: row.text,
@@ -2591,14 +3190,40 @@ function compactClientEventRaw(type, raw) {
   if (method === "git.summary" || raw.gitSummary) {
     const summary = raw.gitSummary || {};
     const changedFiles = Array.isArray(summary.changedFiles) ? summary.changedFiles : [];
+    const changedDuringTurn = summary.changedDuringTurn && typeof summary.changedDuringTurn === "object" ? summary.changedDuringTurn : null;
     return {
       source: raw.source || "",
       gitSummary: {
         root: summary.root || "",
         branch: summary.branch || "",
         commit: summary.commit || "",
+        changedDuringTurn: changedDuringTurn
+          ? {
+              changedFileCount: Array.isArray(changedDuringTurn.changedFiles) ? changedDuringTurn.changedFiles.length : 0,
+              changedFiles: Array.isArray(changedDuringTurn.changedFiles) ? changedDuringTurn.changedFiles.slice(0, 20) : [],
+              commitChanged: Boolean(changedDuringTurn.commitChanged),
+              commitBefore: changedDuringTurn.commitBefore || "",
+              commitAfter: changedDuringTurn.commitAfter || ""
+            }
+          : null,
         changedFileCount: Number.isFinite(Number(summary.changedFileCount)) ? Number(summary.changedFileCount) : changedFiles.length,
         changedFiles: changedFiles.slice(0, 20)
+      }
+    };
+  }
+  if (method === "test.summary" || raw.testSummary) {
+    const summary = raw.testSummary || {};
+    return {
+      source: raw.source || "",
+      method: "test.summary",
+      testSummary: {
+        level: summary.level || "",
+        status: summary.status || "",
+        command: String(summary.command || "").slice(0, 500),
+        turnId: String(summary.turnId || "").slice(0, 200),
+        outputBytes: Number(summary.outputBytes || 0) || 0,
+        outputArtifact: summary.outputArtifact ? compactArtifactRef(summary.outputArtifact) : null,
+        failures: Array.isArray(summary.failures) ? summary.failures.slice(0, 5) : []
       }
     };
   }
@@ -2687,6 +3312,10 @@ function compactItemParams(params = {}) {
   if (item.type === "commandExecution") {
     compactItem.command = compactCommand(item.command);
     compactItem.aggregatedOutput = String(item.aggregatedOutput || "").slice(-1200);
+    compactItem.aggregatedOutputTruncated = Boolean(item.aggregatedOutputTruncated);
+    if (item.outputArtifact && typeof item.outputArtifact === "object") {
+      compactItem.outputArtifact = compactArtifactRef(item.outputArtifact);
+    }
   }
   return {
     threadId: params.threadId || "",
@@ -2756,18 +3385,30 @@ function compactClientAttachment(attachment) {
   };
 }
 
+function compactArtifactRef(artifact) {
+  return {
+    id: String(artifact.id || "").slice(0, 120),
+    kind: String(artifact.kind || "").slice(0, 80),
+    label: String(artifact.label || "").slice(0, 240),
+    sizeBytes: Number(artifact.sizeBytes || 0) || 0,
+    downloadPath: String(artifact.downloadPath || "").slice(0, 500)
+  };
+}
+
 function buildAgentSessionCommand(command) {
   const parsed = summarizeSessionCommand(command);
   const messageId = String(parsed.payload?.messageId || "").trim();
   const message = messageId ? getSessionMessage(messageId) : null;
   const mode = normalizeSessionMode(parsed.payload?.mode);
   const agentText = message ? String(message.text || "").trim() : "";
+  const contextPrompt = String(parsed.payload?.contextPrompt || "").trim();
+  const commandText = contextPrompt || agentText;
   const payload = {
     ...parsed.payload,
     ...(message
       ? parsed.type === "start"
-        ? { prompt: agentText, displayText: message.text, attachments: commandAttachmentsFromMessage(message) }
-        : { text: agentText, displayText: message.text, attachments: commandAttachmentsFromMessage(message) }
+        ? { prompt: commandText, displayText: message.text, attachments: commandAttachmentsFromMessage(message) }
+        : { text: commandText, displayText: message.text, attachments: commandAttachmentsFromMessage(message) }
       : {})
   };
   if (parsed.type === "message") {
@@ -2790,6 +3431,13 @@ function buildAgentSessionCommand(command) {
 function normalizeSessionMode(value) {
   const mode = String(value || "").trim().toLowerCase();
   return mode === "plan" ? "plan" : "execute";
+}
+
+function normalizeThreadMode(value) {
+  const mode = String(value || "").trim().toLowerCase();
+  if (mode === "fork-summary" || mode === "fork_summary" || mode === "summary") return "fork-summary";
+  if (mode === "fresh" || mode === "new") return "fresh";
+  return "continue";
 }
 
 function commandHistoryForSession(sessionId, currentMessageId) {
@@ -3056,6 +3704,17 @@ function cleanupAttachmentStorageKeys(storageKeys = []) {
   }
 }
 
+function cleanupArtifactStorageKeys(storageKeys = []) {
+  for (const storageKey of storageKeys) {
+    if (!storageKey) continue;
+    try {
+      fs.rmSync(artifactAbsolutePath(storageKey), { force: true });
+    } catch {
+      // Ignore best-effort cleanup errors for persisted artifact files.
+    }
+  }
+}
+
 function attachmentRefsFromRows(rows = []) {
   return rows.map((row) => {
     const attachment = summarizeSessionAttachment(row);
@@ -3092,6 +3751,17 @@ function attachmentStorageKey(sessionId, attachmentId, extension) {
 
 function attachmentAbsolutePath(storageKey) {
   return path.join(attachmentStorageDir, ...String(storageKey || "").split("/"));
+}
+
+function artifactStorageKey(sessionId, artifactId, extension) {
+  const safeSessionId = String(sessionId || "session").replace(/[^a-zA-Z0-9._-]+/g, "-");
+  const safeArtifactId = String(artifactId || "artifact").replace(/[^a-zA-Z0-9._-]+/g, "-");
+  const safeExtension = String(extension || "txt").replace(/[^a-z0-9]+/gi, "").toLowerCase() || "txt";
+  return `${safeSessionId}/${safeArtifactId}.${safeExtension}`;
+}
+
+function artifactAbsolutePath(storageKey) {
+  return path.join(artifactStorageDir, ...String(storageKey || "").split("/"));
 }
 
 function parseAttachmentDataUrl(url, fallbackMimeType = "") {
@@ -3358,17 +4028,25 @@ function trimOldSessions() {
     FROM codex_session_attachments
     WHERE session_id = ?
   `);
+  const artifactStorageKeys = db.prepare(`
+    SELECT storage_key AS storageKey
+    FROM codex_session_artifacts
+    WHERE session_id = ?
+  `);
   const remove = db.prepare("DELETE FROM codex_sessions WHERE id = ?");
   const removeMany = db.transaction((sessionIds) => {
-    const keys = [];
+    const attachmentKeys = [];
+    const artifactKeys = [];
     for (const id of sessionIds) {
-      keys.push(...attachmentStorageKeys.all(id).map((row) => row.storageKey));
+      attachmentKeys.push(...attachmentStorageKeys.all(id).map((row) => row.storageKey));
+      artifactKeys.push(...artifactStorageKeys.all(id).map((row) => row.storageKey));
       remove.run(id);
     }
-    return keys;
+    return { attachmentKeys, artifactKeys };
   });
   const keys = removeMany(ids);
-  cleanupAttachmentStorageKeys(keys);
+  cleanupAttachmentStorageKeys(keys.attachmentKeys);
+  cleanupArtifactStorageKeys(keys.artifactKeys);
 }
 
 function expireOldApprovals() {

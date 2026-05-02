@@ -24,6 +24,7 @@ import {
   compactCodexSession,
   completeCodexSessionCommand,
   completeCodexWorkspaceCommand,
+  getCodexSessionArtifactContent,
   getCodexSessionAttachmentContent,
   createCodexSessionInteraction,
   createCodexSessionApproval,
@@ -269,7 +270,9 @@ app.post("/api/codex/sessions", (req, res) => {
       prompt: req.body.prompt,
       attachments: req.body.attachments,
       runtime: req.body.runtime || {},
-      mode: req.body.mode
+      mode: req.body.mode,
+      sourceSessionId: req.body.sourceSessionId,
+      threadMode: req.body.threadMode
     });
     res.json({ session });
   } catch (error) {
@@ -318,7 +321,8 @@ app.get("/api/codex/sessions/:id/events", (req, res) => {
     });
   }
 
-  const session = getCodexSession(req.params.id, streamSessionOptions({ initial: true }));
+  const afterEventId = sseLastEventId(req);
+  const session = getCodexSession(req.params.id, streamSessionOptions({ initial: afterEventId === 0, afterEventId }));
   if (!session) return res.status(404).json({ error: "Codex session not found." });
 
   res.writeHead(200, {
@@ -328,11 +332,25 @@ app.get("/api/codex/sessions/:id/events", (req, res) => {
     "X-Accel-Buffering": "no"
   });
   res.write(": connected\n\n");
-  writeSse(res, "session", { session, partial: false });
+  let lastEventId = maxSessionEventId(session.events || [], afterEventId);
+  writeSse(
+    res,
+    "session",
+    {
+      session,
+      partial: afterEventId > 0,
+      recovered: afterEventId > 0,
+      lastEventId
+    },
+    { id: lastEventId }
+  );
 
   const unsubscribe = subscribeCodexSession(req.params.id, () => {
-    const updated = getCodexSession(req.params.id, streamSessionOptions({ initial: false }));
-    if (updated) writeSse(res, "session", { session: updated, partial: true });
+    const updated = getCodexSession(req.params.id, streamSessionOptions({ initial: false, afterEventId: lastEventId }));
+    if (!updated) return;
+    const nextEventId = maxSessionEventId(updated.events || [], lastEventId);
+    lastEventId = nextEventId;
+    writeSse(res, "session", { session: updated, partial: true, lastEventId }, { id: lastEventId });
   });
   const heartbeat = setInterval(() => {
     res.write(": keep-alive\n\n");
@@ -357,6 +375,14 @@ app.get("/api/codex/attachments/:id", (req, res) => {
   }
 
   sendCodexAttachment(req, res);
+});
+
+app.get("/api/codex/artifacts/:id", (req, res) => {
+  if (config.mode !== "relay") {
+    return res.status(400).json({ error: "Codex artifacts are only available in relay mode." });
+  }
+
+  sendCodexArtifact(req, res);
 });
 
 app.get("/api/agent/codex/attachments/:id", (req, res) => {
@@ -692,19 +718,37 @@ function handleError(res, error) {
   });
 }
 
-function writeSse(res, event, data) {
+function writeSse(res, event, data, options = {}) {
+  if (options.id) res.write(`id: ${String(options.id)}\n`);
   res.write(`event: ${event}\n`);
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
-function streamSessionOptions({ initial = false } = {}) {
+function streamSessionOptions({ initial = false, afterEventId = 0 } = {}) {
   return {
     rawMode: "client",
+    afterEventId,
     maxEvents: initial ? 160 : 80,
-    includeMessages: initial,
+    includeMessages: initial && afterEventId === 0,
     includeApprovals: true,
-    includeInteractions: true
+    includeInteractions: true,
+    includeArtifacts: true
   };
+}
+
+function sseLastEventId(req) {
+  const value = req.get("last-event-id") || req.query.after || req.query.lastEventId || "";
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
+}
+
+function maxSessionEventId(events = [], fallback = 0) {
+  let max = Number(fallback || 0) || 0;
+  for (const event of events || []) {
+    const id = Number(event?.id || 0);
+    if (Number.isFinite(id) && id > max) max = id;
+  }
+  return max;
 }
 
 function createSseTicket(sessionId) {
@@ -750,6 +794,18 @@ function sendCodexAttachment(req, res) {
   res.setHeader("Cache-Control", "no-store, max-age=0");
   res.type(attachment.mimeType || "application/octet-stream");
   res.sendFile(attachment.filePath);
+}
+
+function sendCodexArtifact(req, res) {
+  const artifact = getCodexSessionArtifactContent(req.params.id);
+  if (!artifact) return res.status(404).json({ error: "Codex artifact not found." });
+  if (!fs.existsSync(artifact.filePath)) {
+    return res.status(410).json({ error: "Codex artifact file is no longer available." });
+  }
+
+  res.setHeader("Cache-Control", "no-store, max-age=0");
+  res.type(artifact.mimeType || "text/plain; charset=utf-8");
+  res.sendFile(artifact.filePath);
 }
 
 function currentSessionUser(req) {

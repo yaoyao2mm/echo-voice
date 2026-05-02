@@ -19,6 +19,7 @@ if (!config.token) {
 
 const agentId = await loadDesktopAgentId();
 let codexRuntimeStatus = publicCodexRuntime();
+const runningSessionHeartbeats = new Map();
 
 console.log("Echo Codex desktop agent is running.");
 console.log(`Relay: ${config.relayUrl}`);
@@ -97,7 +98,7 @@ async function runCodexWorkspaceLoop() {
 async function runCodexSessionLoop() {
   const runtime = new CodexInteractiveRuntime({
     agentId,
-    onEvents: (id, events) => postJson("/api/agent/codex/sessions/events", { id, agentId, events }).catch(() => {}),
+    onEvents: postCodexSessionEvents,
     requestApproval: requestCodexApproval,
     requestInteraction: requestCodexInteraction
   });
@@ -116,9 +117,11 @@ async function runCodexSessionLoop() {
       if (preparedCommand.execution && !result.execution) result.execution = preparedCommand.execution;
       result.sessionId = preparedCommand.sessionId || command.sessionId;
       await postJson("/api/agent/codex/sessions/commands/complete", { id: command.id, agentId, result });
+      updateRunningSessionHeartbeatFromResult(result.sessionId, result);
       console.log(`  session ${command.type} ${result.ok ? "accepted" : "failed"}`);
     } catch (error) {
       console.error(`[codex session ${new Date().toLocaleTimeString()}] ${formatFetchError(error)}`);
+      if (command?.sessionId) stopRunningSessionHeartbeat(command.sessionId);
       if (command?.id) {
         await postJson("/api/agent/codex/sessions/commands/complete", {
           id: command.id,
@@ -133,6 +136,11 @@ async function runCodexSessionLoop() {
       await sleep(2500);
     }
   }
+}
+
+async function postCodexSessionEvents(sessionId, events = []) {
+  updateRunningSessionHeartbeatFromEvents(sessionId, events);
+  return postJson("/api/agent/codex/sessions/events", { id: sessionId, agentId, events }).catch(() => {});
 }
 
 async function handleCodexWorkspaceCommand(command) {
@@ -246,9 +254,50 @@ async function maybeCleanupWorktrees() {
 
 function startCodexSessionHeartbeat(sessionId) {
   const intervalMs = Math.max(15000, Math.min(Math.floor(config.codex.leaseMs / 2), 30000));
-  return setInterval(() => {
+  const heartbeat = setInterval(() => {
     postJson("/api/agent/codex/sessions/events", { id: sessionId, agentId, events: [] }).catch(() => {});
   }, intervalMs);
+  heartbeat.unref?.();
+  return heartbeat;
+}
+
+function startRunningSessionHeartbeat(sessionId) {
+  if (!sessionId || runningSessionHeartbeats.has(sessionId)) return;
+  runningSessionHeartbeats.set(sessionId, startCodexSessionHeartbeat(sessionId));
+}
+
+function stopRunningSessionHeartbeat(sessionId) {
+  const heartbeat = runningSessionHeartbeats.get(sessionId);
+  if (!heartbeat) return;
+  clearInterval(heartbeat);
+  runningSessionHeartbeats.delete(sessionId);
+}
+
+function updateRunningSessionHeartbeatFromResult(sessionId, result = {}) {
+  const status = String(result.sessionStatus || "").toLowerCase();
+  if (result.ok === true && status === "running") {
+    startRunningSessionHeartbeat(sessionId);
+    return;
+  }
+  if (status && status !== "running") stopRunningSessionHeartbeat(sessionId);
+}
+
+function updateRunningSessionHeartbeatFromEvents(sessionId, events = []) {
+  for (const event of events || []) {
+    const method = event?.raw?.method || event?.type || "";
+    if (method === "turn/started" || event?.sessionStatus === "running") {
+      startRunningSessionHeartbeat(sessionId);
+    }
+    if (
+      method === "turn/completed" ||
+      method === "thread/compacted" ||
+      method === "turn/interrupt" ||
+      event?.clearActiveTurnId ||
+      (event?.sessionStatus && event.sessionStatus !== "running")
+    ) {
+      stopRunningSessionHeartbeat(sessionId);
+    }
+  }
 }
 
 async function postJson(path, body) {

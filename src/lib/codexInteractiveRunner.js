@@ -3,7 +3,7 @@ import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { config } from "../config.js";
 import { CodexAppServerClient, buildUserInputs } from "./codexAppServerClient.js";
-import { formatGitSummary, summarizeGitWorkspace } from "./codexGitSummary.js";
+import { formatGitSummary, gitWorkspaceSnapshot, summarizeGitWorkspace } from "./codexGitSummary.js";
 import { publicWorkspaces } from "./codexRunner.js";
 import { codexCompatibleModel } from "./codexRuntime.js";
 import { httpFetch } from "./http.js";
@@ -25,8 +25,10 @@ export class CodexInteractiveRuntime {
     this.attachmentDirs = new Map();
     this.eventFlushes = new Map();
     this.deltaBuffers = new Map();
+    this.turnGitBaselines = new Map();
     this.collaborationModePresets = null;
     this.collaborationModeUnavailable = false;
+    this.expectedClientCloses = new WeakSet();
   }
 
   async handleCommand(command) {
@@ -43,11 +45,13 @@ export class CodexInteractiveRuntime {
     this.#cleanupAllAttachmentDirs().catch((error) => {
       console.error(`[codex attachment cleanup] ${error.message}`);
     });
+    if (this.client) this.expectedClientCloses.add(this.client);
     this.client?.stop();
     this.client = null;
     this.sessions.clear();
     this.threadToSession.clear();
     this.activeTurns.clear();
+    this.turnGitBaselines.clear();
     this.eventFlushes.clear();
     for (const buffer of this.deltaBuffers.values()) {
       if (buffer.timer) clearTimeout(buffer.timer);
@@ -103,11 +107,13 @@ export class CodexInteractiveRuntime {
   }
 
   #restartClientAfterAuthChange() {
+    if (this.client) this.expectedClientCloses.add(this.client);
     this.client?.stop();
     this.client = null;
     this.sessions.clear();
     this.threadToSession.clear();
     this.activeTurns.clear();
+    this.turnGitBaselines.clear();
   }
 
   async #sendMessage(command, workspace) {
@@ -220,6 +226,7 @@ export class CodexInteractiveRuntime {
         runtime,
         mode: requestedMode
       });
+      const gitBaseline = await gitWorkspaceSnapshot(workspace.path).catch(() => null);
       let result;
       try {
         result = await this.client.request("turn/start", turnStartParams.params, 60000);
@@ -249,6 +256,7 @@ export class CodexInteractiveRuntime {
       const turnId = result?.turn?.id;
       if (!turnId) throw new Error("Codex app-server did not return a turn id.");
       this.activeTurns.set(threadId, turnId);
+      if (gitBaseline) this.turnGitBaselines.set(turnGitBaselineKey(threadId, turnId), gitBaseline);
       return { id: turnId };
     } catch (error) {
       await this.#cleanupAttachmentDir(threadId);
@@ -432,26 +440,58 @@ export class CodexInteractiveRuntime {
   async #ensureClient() {
     if (this.client?.initialized) return;
 
-    this.client = new CodexAppServerClient();
-    this.client.on("notification", (message) => this.#handleNotification(message));
-    this.client.on("serverRequest", (message) => this.#handleServerRequest(message));
-    this.client.on("stderr", (line) => this.#handleStderr(line));
-    this.client.on("close", () => {
+    const client = new CodexAppServerClient();
+    this.client = client;
+    client.on("notification", (message) => this.#handleNotification(message));
+    client.on("serverRequest", (message) => this.#handleServerRequest(message));
+    client.on("stderr", (line) => this.#handleStderr(line));
+    client.on("close", () => {
+      const expectedClose = this.expectedClientCloses.has(client);
+      this.expectedClientCloses.delete(client);
+      if (!expectedClose) {
+        this.#emitAppServerClosed().catch((error) => {
+          console.error(`[codex app-server close] ${error.message}`);
+        });
+      }
       this.#cleanupAllAttachmentDirs().catch((error) => {
         console.error(`[codex attachment cleanup] ${error.message}`);
       });
       this.sessions.clear();
       this.threadToSession.clear();
       this.activeTurns.clear();
+      this.turnGitBaselines.clear();
       for (const buffer of this.deltaBuffers.values()) {
         if (buffer.timer) clearTimeout(buffer.timer);
       }
       this.deltaBuffers.clear();
     });
-    this.client.on("error", (error) => {
+    client.on("error", (error) => {
       console.error(`[codex app-server] ${error.message}`);
     });
-    await this.client.start();
+    await client.start();
+  }
+
+  async #emitAppServerClosed() {
+    const eventsBySession = new Map();
+    for (const [threadId, activeTurnId] of this.activeTurns.entries()) {
+      const sessionId = this.threadToSession.get(threadId);
+      if (!sessionId) continue;
+      const events = eventsBySession.get(sessionId) || [];
+      events.push({
+        type: "runtime.closed",
+        text: "Codex app-server exited while a turn was running.",
+        appThreadId: threadId,
+        activeTurnId,
+        clearActiveTurnId: true,
+        sessionStatus: "active",
+        error: "Codex app-server exited while a turn was running.",
+        raw: { method: "codex/app-server/closed", threadId, turnId: activeTurnId }
+      });
+      eventsBySession.set(sessionId, events);
+    }
+    for (const [sessionId, events] of eventsBySession) {
+      await this.#emitAfterPendingDeltas(sessionId, events);
+    }
   }
 
   #threadConfig(workspace, runtime) {
@@ -702,7 +742,7 @@ export class CodexInteractiveRuntime {
       if (pendingDelta) await this.onEvents(sessionId, [pendingDelta]);
       const events = [event];
       try {
-        const gitSummary = await this.#gitSummaryEvent(sessionId, threadId);
+      const gitSummary = await this.#gitSummaryEvent(sessionId, threadId, event);
         if (gitSummary) events.push(gitSummary);
       } catch (error) {
         console.error(`[codex git summary] ${error.message}`);
@@ -711,9 +751,13 @@ export class CodexInteractiveRuntime {
     });
   }
 
-  async #gitSummaryEvent(sessionId, threadId) {
+  async #gitSummaryEvent(sessionId, threadId, event) {
     const workspacePath = this.sessions.get(sessionId)?.workspace?.path;
-    const summary = await summarizeGitWorkspace(workspacePath);
+    const turnId = event?.raw?.params?.turn?.id || event?.raw?.params?.turnId || event?.activeTurnId || "";
+    const baselineKey = turnGitBaselineKey(threadId, turnId);
+    const baseline = this.turnGitBaselines.get(baselineKey) || null;
+    if (baselineKey) this.turnGitBaselines.delete(baselineKey);
+    const summary = await summarizeGitWorkspace(workspacePath, { baseline });
     if (!summary) return null;
     return {
       type: "git.summary",
@@ -926,6 +970,12 @@ function bufferedDeltaKey(event) {
   const turnId = params.turnId || params.turn?.id || event.activeTurnId || "";
   const itemId = params.itemId || params.item?.id || "";
   return [method, threadId, turnId, itemId].join("\u001f");
+}
+
+function turnGitBaselineKey(threadId, turnId) {
+  const thread = String(threadId || "").trim();
+  const turn = String(turnId || "").trim();
+  return thread && turn ? `${thread}\u001f${turn}` : "";
 }
 
 function isBufferedDeltaMethod(method) {

@@ -64,6 +64,9 @@ export function createAppContext(windowRef = window, documentRef = document) {
       selectedCodexSession: null,
       sessionEventSource: null,
       sessionEventSourceId: "",
+      sessionEventReconnectTimer: null,
+      sessionEventReconnectAttempts: 0,
+      sessionLastEventIds: new Map(),
       sessionListRefreshTimer: null,
       sessionStreamRenderFrame: 0,
       pendingSessionStreamRender: null,
@@ -80,6 +83,7 @@ export function createAppContext(windowRef = window, documentRef = document) {
       codexAllowedPermissionModes: [],
       runtimePreferences: readStoredRuntimePreferences(windowRef.localStorage),
       runtimeDirty: false,
+      lastPromptRouting: "",
       lastTopbarScrollY: 0,
       topbarScrollAccumulator: 0,
       topbarCollapsed: false,
@@ -316,6 +320,8 @@ export function installCore(app) {
       status = "等待桌面 agent";
     } else if (!app.currentProjectId()) {
       status = "先选择工程";
+    } else if (app.sessionCancelRequested?.(session)) {
+      status = "正在中断";
     } else if (session?.pendingInteractionCount > 0) {
       status = "等待你的选择";
     } else if (session?.pendingApprovalCount > 0) {
@@ -323,7 +329,7 @@ export function installCore(app) {
     } else if (session?.status === "starting") {
       status = "Codex 正在启动";
     } else if (session?.status === "running") {
-      status = "Codex 正在回复";
+      status = app.runningSessionStatusText?.(session) || "Codex 正在处理";
     } else if (session?.pendingCommandCount > 0) {
       status = "消息已排队";
     } else if (session?.status === "failed" && app.sessionCanRecoverFailure(session)) {

@@ -57,11 +57,11 @@ This section records the current review findings for the Codex turn, Git, deploy
 
 ### High Priority
 
-- [ ] Keep desktop session heartbeats alive for the full Codex turn.
+- [x] Keep desktop session heartbeats alive for the full Codex turn.
   - **Problem:** The desktop agent starts its heartbeat around `runtime.handleCommand()`, but `turn/start` returns once the app-server accepts the turn, not when the turn completes. A long quiet turn can stop renewing the session lease and be reclaimed as `active` even though Codex is still running.
   - **Impact:** The relay can clear `activeTurn`, show the phone as ready, and allow conflicting follow-up work while the local Codex process is still executing.
   - **Refs:** `src/desktop-agent.js`, `src/lib/codexInteractiveRunner.js`, `src/lib/codexStore.js`.
-  - **Fix direction:** Add a running-session heartbeat that starts when a turn is accepted and stops only on `turn/completed`, interrupt, or execution failure.
+  - **Fix:** Desktop now keeps a per-session running heartbeat alive after a turn is accepted and stops it on `turn/completed`, compaction completion, interrupt, or execution failure.
 
 - [ ] Separate command execution failure from result-reporting failure.
   - **Problem:** If Codex finishes successfully but posting `/commands/complete` fails, the desktop agent catch path can report the command as failed or leave the lease to expire.

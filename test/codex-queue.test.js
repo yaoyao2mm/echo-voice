@@ -232,6 +232,173 @@ test("session token usage events expose official context usage", async () => {
   assert.equal(summary.contextUsage.last.totalTokens, 32000);
 });
 
+test("large command outputs are stored as session artifacts", async () => {
+  store.resetStoreForTest();
+
+  const agent = {
+    id: "artifact-agent",
+    workspaces: [{ id: "echo", label: "Echo", path: "/workspace/echo" }],
+    runtime: { command: "fake-codex" }
+  };
+  queue.updateCodexAgent(agent);
+  const created = queue.createCodexSession({
+    projectId: "echo",
+    prompt: "run tests"
+  });
+  const command = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  assert.equal(command.sessionId, created.id);
+
+  const output = `${Array.from({ length: 900 }, (_, index) => `output line ${index}`).join("\n")}\nFAIL test/unit.test.js\nAssertionError: expected true`;
+  assert.equal(
+    queue.appendCodexSessionEvents(
+      created.id,
+      [
+        {
+          type: "item/completed",
+          text: `pnpm test failed\n${output}`,
+          raw: {
+            method: "item/completed",
+            params: {
+              threadId: "thr_artifact",
+              turnId: "turn_artifact",
+              item: {
+                id: "cmd_artifact",
+                type: "commandExecution",
+                status: "failed",
+                command: ["pnpm", "test"],
+                aggregatedOutput: output
+              }
+            }
+          }
+        }
+      ],
+      { agentId: agent.id }
+    ),
+    true
+  );
+
+  const detail = queue.getCodexSession(created.id, {
+    rawMode: "client",
+    includeMessages: false
+  });
+  const event = detail.events.find((item) => item.type === "item/completed");
+  assert.ok(event.id > 0);
+  assert.equal(event.text.includes("output line 0"), false);
+  assert.equal(event.raw.params.item.aggregatedOutputTruncated, true);
+  assert.ok(event.raw.params.item.outputArtifact.id);
+  const testSummary = detail.events.find((item) => item.type === "test.summary");
+  assert.ok(testSummary.id > event.id);
+  assert.equal(testSummary.raw.testSummary.level, "quick");
+  assert.equal(testSummary.raw.testSummary.status, "failed");
+  assert.equal(testSummary.raw.testSummary.turnId, "turn_artifact");
+  assert.equal(testSummary.raw.testSummary.outputArtifact.id, event.raw.params.item.outputArtifact.id);
+  assert.equal(testSummary.raw.testSummary.failures.some((line) => /FAIL test\/unit\.test\.js/.test(line)), true);
+  assert.equal(detail.artifactCount, 1);
+  assert.ok(detail.artifactBytes >= Buffer.byteLength(output));
+  assert.equal(detail.metrics.artifactCount, 1);
+  assert.equal(detail.metrics.risk, "normal");
+  assert.equal(detail.memory.testSummary.status, "failed");
+  assert.equal(detail.memory.testSummary.command, "pnpm test");
+
+  const artifact = detail.artifacts[0];
+  const content = queue.getCodexSessionArtifactContent(artifact.id);
+  assert.equal(content.sizeBytes, Buffer.byteLength(output));
+  assert.equal(fs.readFileSync(content.filePath, "utf8"), output);
+});
+
+test("fork-summary sessions send compact memory to Codex without changing visible user text", async () => {
+  store.resetStoreForTest();
+
+  const agent = {
+    id: "fork-summary-agent",
+    workspaces: [{ id: "demo", path: process.cwd() }]
+  };
+  const source = queue.createCodexSession({
+    projectId: "demo",
+    prompt: "把移动端会话可靠性做完"
+  });
+  const sourceCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  queue.completeCodexSessionCommand(
+    sourceCommand.id,
+    { ok: true, appThreadId: "thr_memory", activeTurnId: "turn_memory", sessionStatus: "running" },
+    { agentId: agent.id }
+  );
+  assert.equal(
+    queue.appendCodexSessionEvents(
+      source.id,
+      [
+        {
+          type: "item/completed",
+          text: "已完成移动端中断和 SSE 恢复。",
+          finalMessage: "已完成移动端中断和 SSE 恢复。",
+          raw: {
+            method: "item/completed",
+            params: {
+              threadId: "thr_memory",
+              turnId: "turn_memory",
+              item: { id: "msg_memory", type: "agentMessage", text: "已完成移动端中断和 SSE 恢复。" }
+            }
+          }
+        },
+        {
+          type: "git.summary",
+          text: "Changed this turn: 2",
+          raw: {
+            source: "desktop-agent",
+            method: "git.summary",
+            gitSummary: {
+              root: process.cwd(),
+              branch: "main",
+              commit: "abc1234",
+              changedFiles: ["public/app/sessions.js", "src/lib/codexStore.js"],
+              changedDuringTurn: {
+                changedFiles: ["public/app/sessions.js", "src/lib/codexStore.js"],
+                commitChanged: false
+              }
+            }
+          }
+        },
+        {
+          type: "turn/completed",
+          text: "Turn completed.",
+          raw: { method: "turn/completed", params: { threadId: "thr_memory", turn: { id: "turn_memory", status: "completed" } } }
+        }
+      ],
+      { agentId: agent.id }
+    ),
+    true
+  );
+
+  const sourceDetail = queue.getCodexSession(source.id);
+  assert.equal(sourceDetail.memory.sourceSessionId, source.id);
+  assert.match(sourceDetail.memory.summary, /移动端会话可靠性/);
+  assert.equal(sourceDetail.memory.gitSummary.changedThisTurn, true);
+  assert.equal(sourceDetail.memory.gitSummary.changedFiles.includes("src/lib/codexStore.js"), true);
+
+  const forked = queue.createCodexSession({
+    projectId: "demo",
+    prompt: "继续按刚才方向收尾",
+    sourceSessionId: source.id,
+    threadMode: "fork-summary"
+  });
+  const forkCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  assert.equal(forkCommand.sessionId, forked.id);
+  assert.equal(forkCommand.type, "start");
+  assert.equal(forkCommand.payload.threadMode, "fork-summary");
+  assert.equal(forkCommand.payload.sourceSessionId, source.id);
+  assert.equal(forkCommand.payload.displayText, "继续按刚才方向收尾");
+  assert.match(forkCommand.payload.prompt, /旧会话摘要/);
+  assert.match(forkCommand.payload.prompt, /移动端会话可靠性/);
+  assert.match(forkCommand.payload.prompt, /src\/lib\/codexStore\.js/);
+  assert.match(forkCommand.payload.prompt, /当前用户请求：\n继续按刚才方向收尾/);
+
+  const forkDetail = queue.getCodexSession(forked.id);
+  assert.equal(forkDetail.messages[0].text, "继续按刚才方向收尾");
+  const userEvent = forkDetail.events.find((event) => event.type === "user.message");
+  assert.equal(userEvent.raw.threadMode, "fork-summary");
+  assert.equal(userEvent.raw.sourceSessionId, source.id);
+});
+
 test("interactive Codex sessions lease commands and keep thread state", async () => {
   store.resetStoreForTest();
 

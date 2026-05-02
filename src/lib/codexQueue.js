@@ -15,6 +15,7 @@ import {
   decideSessionApproval as decideStoredSessionApproval,
   enqueueSessionMessage as enqueueStoredSessionMessage,
   getWorkspaceCommand as getStoredWorkspaceCommand,
+  getSessionArtifactContent as getStoredSessionArtifactContent,
   getSessionCommandSessionId as getStoredSessionCommandSessionId,
   getSessionAttachmentContent as getStoredSessionAttachmentContent,
   getSession as getStoredSession,
@@ -52,7 +53,15 @@ export function createCodexSession(input) {
     throw error;
   }
 
-  const session = createStoredSession({ projectId, prompt, attachments, runtime: input.runtime || {}, mode: input.mode });
+  const session = createStoredSession({
+    projectId,
+    prompt,
+    attachments,
+    runtime: input.runtime || {},
+    mode: input.mode,
+    sourceSessionId: input.sourceSessionId,
+    threadMode: input.threadMode
+  });
   events.emit("codex-session-command");
   notifySessionChanged(session?.id);
   return session;
@@ -81,6 +90,10 @@ export function getCodexSession(id, options = {}) {
 
 export function getCodexSessionAttachmentContent(id) {
   return getStoredSessionAttachmentContent(id);
+}
+
+export function getCodexSessionArtifactContent(id) {
+  return getStoredSessionArtifactContent(id);
 }
 
 export function createCodexWorkspace(input = {}) {

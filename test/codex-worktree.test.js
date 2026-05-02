@@ -19,7 +19,7 @@ process.env.ECHO_CODEX_WORKSPACES = `demo=${workspacePath}`;
 process.env.ECHO_CODEX_WORKTREE_MODE = "optional";
 process.env.ECHO_CODEX_WORKTREE_ROOT = worktreeRoot;
 
-const { formatGitSummary, summarizeGitWorkspace } = await import("../src/lib/codexGitSummary.js");
+const { formatGitSummary, gitWorkspaceSnapshot, summarizeGitWorkspace } = await import("../src/lib/codexGitSummary.js");
 const { sanitizeRuntimeForAgent } = await import("../src/lib/codexRuntime.js");
 const { cleanupCodexSessionWorktrees, prepareCodexSessionWorktree } = await import("../src/lib/codexWorktree.js");
 
@@ -110,6 +110,23 @@ test("summarizeGitWorkspace reports changed files and diff stats", async () => {
   assert.equal(summary.changedFiles.includes("README.md"), true);
   assert.match(summary.diffStat, /README\.md/);
   assert.match(formatGitSummary(summary), /Changed files: 1/);
+});
+
+test("summarizeGitWorkspace reports changes made after a turn baseline", async () => {
+  const repoPath = path.join(tempRoot, "baseline-summary-repo");
+  initRepo(repoPath);
+
+  const baseline = await gitWorkspaceSnapshot(repoPath);
+  fs.appendFileSync(path.join(repoPath, "README.md"), "changed during turn\n", "utf8");
+  fs.writeFileSync(path.join(repoPath, "NEW.md"), "new file\n", "utf8");
+
+  const summary = await summarizeGitWorkspace(repoPath, { baseline });
+  assert.equal(summary.baseline.commit, baseline.commit);
+  assert.equal(summary.changedDuringTurn.changedFiles.includes("README.md"), true);
+  assert.equal(summary.changedDuringTurn.changedFiles.includes("NEW.md"), true);
+  assert.equal(summary.changedDuringTurn.commitChanged, false);
+  assert.equal(summary.changedFileCount, 2);
+  assert.match(formatGitSummary(summary), /Changed this turn: 2/);
 });
 
 function initRepo(repoPath) {

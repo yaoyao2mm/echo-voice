@@ -107,6 +107,54 @@ test("Codex session SSE streams partial updates after the initial snapshot", asy
   assert.equal(update.session.id, sessionId);
   assert.equal(update.session.status, "running");
   assert.equal(update.session.events.some((event) => event.type === "turn/started"), true);
+  assert.ok(update.lastEventId > 0);
+  assert.ok(update.session.events.every((event) => event.id > 0));
+
+  await reader.cancel().catch(() => {});
+
+  const resumedEvent = await apiJson(baseUrl, token, "/api/agent/codex/sessions/events", {
+    method: "POST",
+    body: {
+      id: sessionId,
+      agentId,
+      events: [
+        {
+          type: "item/agentMessage/delta",
+          text: "resumed",
+          finalMessage: "resumed",
+          raw: {
+            method: "item/agentMessage/delta",
+            params: {
+              threadId: "thr_sse_test",
+              turnId: "turn_sse_test",
+              itemId: "msg_resume",
+              delta: "resumed"
+            }
+          }
+        }
+      ]
+    }
+  });
+  assert.equal(resumedEvent.ok, true);
+
+  const resumeTicket = await apiJson(baseUrl, token, `/api/codex/sessions/${encodeURIComponent(sessionId)}/events-ticket`, {
+    method: "POST",
+    body: {}
+  });
+  const resumedStream = await fetch(
+    `${baseUrl}/api/codex/sessions/${encodeURIComponent(sessionId)}/events?ticket=${encodeURIComponent(resumeTicket.ticket)}&after=${encodeURIComponent(update.lastEventId)}`
+  );
+  assert.equal(resumedStream.ok, true);
+  const resumedReader = resumedStream.body.getReader();
+  t.after(() => resumedReader.cancel().catch(() => {}));
+
+  const resumed = await readSseSession(resumedReader);
+  assert.equal(resumed.partial, true);
+  assert.equal(resumed.recovered, true);
+  assert.equal(resumed.session.id, sessionId);
+  assert.equal(resumed.session.events.length, 1);
+  assert.equal(resumed.session.events[0].type, "item/agentMessage/delta");
+  assert.ok(resumed.session.events[0].id > update.lastEventId);
 });
 
 async function apiJson(baseUrl, token, pathName, options = {}) {

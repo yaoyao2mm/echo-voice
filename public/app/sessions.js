@@ -1,3 +1,6 @@
+const RUNNING_ACTIVITY_QUIET_MS = 90 * 1000;
+const RUNNING_ACTIVITY_STALE_MS = 5 * 60 * 1000;
+
 export function installSessions(app) {
   const { document, elements, navigator, state, window: windowRef } = app;
 
@@ -168,8 +171,24 @@ export function installSessions(app) {
     if (!elements.stopCodexTurnButton) return;
     const session = state.composingNewSession ? null : state.selectedCodexSession;
     const canCancel = app.canCancelSession(session);
+    const cancelRequested = app.sessionCancelRequested(session);
     elements.stopCodexTurnButton.hidden = !canCancel;
-    elements.stopCodexTurnButton.disabled = state.composerBusy || !canCancel;
+    elements.stopCodexTurnButton.disabled = state.composerBusy || !canCancel || cancelRequested;
+    const label = cancelRequested ? "正在中断当前 Codex turn" : "中断当前 Codex turn";
+    elements.stopCodexTurnButton.setAttribute("aria-label", label);
+    elements.stopCodexTurnButton.setAttribute("title", label);
+  };
+
+  app.sessionCancelRequested = function sessionCancelRequested(session) {
+    if (!session) return false;
+    const events = session.events || [];
+    const latestCancel = [...events].reverse().find((event) => event.type === "turn.cancel.requested");
+    if (!latestCancel) return false;
+    const latestDone = [...events].reverse().find((event) =>
+      ["turn.interrupted", "turn/completed", "session.cancelled", "command.failed", "command.completed"].includes(event.type)
+    );
+    if (!latestDone) return true;
+    return Number(latestCancel.id || 0) > Number(latestDone.id || 0);
   };
 
   app.preferredSession = function preferredSession(jobs) {
@@ -239,6 +258,7 @@ export function installSessions(app) {
     const forceTopbarVisible = !preserveCurrentView;
     state.selectedCodexJobId = job.id;
     state.selectedCodexSession = job;
+    if (Number(job.lastEventId || 0) > 0) state.sessionLastEventIds.set(job.id, Number(job.lastEventId));
     if (!(options.keepSelection && state.runtimeDirty)) {
       app.applyRuntimeDraft(app.runtimeChoiceWithFallback(job.runtime, state.runtimePreferences), {
         persist: false,
@@ -287,9 +307,9 @@ export function installSessions(app) {
     }
   };
 
-  app.openCodexSessionStream = async function openCodexSessionStream(sessionId) {
+  app.openCodexSessionStream = async function openCodexSessionStream(sessionId, options = {}) {
     if (!windowRef.EventSource || !sessionId || state.sessionEventSourceId === sessionId) return;
-    app.closeCodexSessionStream();
+    app.closeCodexSessionStream({ keepLastEventId: true });
 
     let ticket = "";
     try {
@@ -303,13 +323,16 @@ export function installSessions(app) {
     }
     if (!ticket || state.selectedCodexJobId !== sessionId) return;
 
+    const lastEventId = options.reconnect ? app.lastKnownSessionEventId(sessionId) : 0;
     const params = new URLSearchParams({ ticket });
+    if (lastEventId > 0) params.set("after", String(lastEventId));
     const source = new EventSource(`/api/codex/sessions/${encodeURIComponent(sessionId)}/events?${params.toString()}`);
     state.sessionEventSource = source;
     state.sessionEventSourceId = sessionId;
 
     source.addEventListener("open", () => {
       if (state.sessionEventSource !== source) return;
+      state.sessionEventReconnectAttempts = 0;
       if (state.codexConnectionState === "error") {
         state.codexConnectionState = state.codexAgentOnline ? "online" : "waiting";
         app.setTopbarStatus(state.codexAgentOnline ? "Codex 在线" : "等待桌面 agent", state.codexAgentOnline ? "online" : "idle");
@@ -326,27 +349,53 @@ export function installSessions(app) {
       }
       const session = data?.session;
       if (!session?.id || session.id !== state.selectedCodexJobId) return;
+      const eventId = Number(event.lastEventId || data.lastEventId || session.lastEventId || 0);
+      if (Number.isFinite(eventId) && eventId > 0) state.sessionLastEventIds.set(session.id, eventId);
       app.queueCodexSessionStreamRender(session, { partial: Boolean(data.partial) });
     });
 
     source.onerror = () => {
       if (state.sessionEventSource !== source) return;
       app.markCodexConnectionProblem?.("实时更新中断，当前会话已保留。");
-      app.closeCodexSessionStream();
+      source.close();
+      state.sessionEventSource = null;
+      state.sessionEventSourceId = "";
+      app.scheduleCodexSessionStreamReconnect(sessionId);
       app.scheduleSessionListRefresh();
     };
   };
 
-  app.closeCodexSessionStream = function closeCodexSessionStream() {
+  app.scheduleCodexSessionStreamReconnect = function scheduleCodexSessionStreamReconnect(sessionId) {
+    if (!sessionId || state.sessionEventReconnectTimer) return;
+    const attempts = Math.min(Number(state.sessionEventReconnectAttempts || 0) + 1, 6);
+    state.sessionEventReconnectAttempts = attempts;
+    const delay = Math.min(30000, 1200 * attempts);
+    state.sessionEventReconnectTimer = windowRef.setTimeout(() => {
+      state.sessionEventReconnectTimer = null;
+      if (state.selectedCodexJobId !== sessionId) return;
+      app.openCodexSessionStream(sessionId, { reconnect: true }).catch(() => {
+        app.scheduleCodexSessionStreamReconnect(sessionId);
+      });
+    }, delay);
+  };
+
+  app.closeCodexSessionStream = function closeCodexSessionStream(options = {}) {
     if (state.sessionEventSource) {
       state.sessionEventSource.close();
       state.sessionEventSource = null;
+    }
+    if (state.sessionEventReconnectTimer) {
+      windowRef.clearTimeout(state.sessionEventReconnectTimer);
+      state.sessionEventReconnectTimer = null;
     }
     if (state.sessionListRefreshTimer) {
       windowRef.clearTimeout(state.sessionListRefreshTimer);
       state.sessionListRefreshTimer = null;
     }
     state.sessionEventSourceId = "";
+    if (!options.keepLastEventId && state.selectedCodexJobId) {
+      state.sessionLastEventIds.delete(state.selectedCodexJobId);
+    }
     if (state.sessionStreamRenderFrame) {
       windowRef.cancelAnimationFrame?.(state.sessionStreamRenderFrame);
       state.sessionStreamRenderFrame = 0;
@@ -405,6 +454,7 @@ export function installSessions(app) {
   };
 
   app.sessionEventKey = function sessionEventKey(event) {
+    if (event?.id) return `id:${event.id}`;
     const raw = event?.raw || {};
     const params = raw.params || {};
     const item = params.item || {};
@@ -417,6 +467,14 @@ export function installSessions(app) {
       params.itemId || item.id || "",
       String(event?.text || "").slice(0, 160)
     ].join("\u001f");
+  };
+
+  app.lastKnownSessionEventId = function lastKnownSessionEventId(sessionId) {
+    const stored = Number(state.sessionLastEventIds.get(sessionId) || 0);
+    const session = state.selectedCodexSession?.id === sessionId ? state.selectedCodexSession : null;
+    const fromSession = Number(session?.lastEventId || 0);
+    const fromEvents = Math.max(0, ...(session?.events || []).map((event) => Number(event.id || 0)).filter(Number.isFinite));
+    return Math.max(stored, fromSession, fromEvents);
   };
 
   app.scheduleSessionListRefresh = function scheduleSessionListRefresh() {
@@ -758,6 +816,54 @@ export function installSessions(app) {
     app.syncComposerMetrics?.();
   };
 
+  app.runningSessionStatusText = function runningSessionStatusText(session) {
+    const quietInfo = app.runningSessionQuietInfo(session);
+    if (!quietInfo) return "Codex 正在处理";
+    if (quietInfo.leaseExpired) return "运行状态待刷新";
+    if (quietInfo.stale) return `Codex 运行中 · ${app.formatDurationShort(quietInfo.elapsedMs)}无新日志`;
+    if (quietInfo.quiet) return "Codex 运行中 · 暂无新日志";
+    return "Codex 正在处理";
+  };
+
+  app.runningSessionQuietInfo = function runningSessionQuietInfo(session) {
+    if (!session || session.status !== "running") return null;
+    const lastLogAtMs = app.sessionLastLoggedEventMs(session);
+    if (!lastLogAtMs) return null;
+    const now = Date.now();
+    const elapsedMs = Math.max(0, now - lastLogAtMs);
+    const leaseExpiresAtMs = app.timestampMs(session.leaseExpiresAt);
+    return {
+      elapsedMs,
+      quiet: elapsedMs >= RUNNING_ACTIVITY_QUIET_MS,
+      stale: elapsedMs >= RUNNING_ACTIVITY_STALE_MS,
+      leaseExpired: Boolean(leaseExpiresAtMs && leaseExpiresAtMs < now)
+    };
+  };
+
+  app.sessionLastLoggedEventMs = function sessionLastLoggedEventMs(session) {
+    const candidates = [];
+    if (session?.lastEvent?.at) candidates.push(session.lastEvent.at);
+    if (session?.contextUsage?.at) candidates.push(session.contextUsage.at);
+    for (const event of session?.events || []) {
+      if (event?.at) candidates.push(event.at);
+    }
+    return candidates.reduce((latest, value) => Math.max(latest, app.timestampMs(value)), 0);
+  };
+
+  app.timestampMs = function timestampMs(value) {
+    const time = new Date(value || "").getTime();
+    return Number.isFinite(time) ? time : 0;
+  };
+
+  app.formatDurationShort = function formatDurationShort(ms) {
+    const seconds = Math.max(0, Math.round(Number(ms || 0) / 1000));
+    if (seconds < 60) return "不到 1 分钟";
+    const minutes = Math.max(1, Math.round(seconds / 60));
+    if (minutes < 60) return `${minutes} 分钟`;
+    const hours = Math.max(1, Math.round(minutes / 60));
+    return `${hours} 小时`;
+  };
+
   app.hideTurnActivityLine = function hideTurnActivityLine() {
     if (elements.turnActivityLine.hidden && !elements.turnActivityText.textContent && !elements.turnActivityLine.dataset.state) return;
     elements.turnActivityLine.hidden = true;
@@ -798,9 +904,13 @@ export function installSessions(app) {
   app.turnActivityForSession = function turnActivityForSession(session) {
     if (!session) return null;
     if (!app.turnActivityAvailable(session)) return null;
+    if (app.sessionCancelRequested(session)) {
+      return { state: "queued", text: "正在中断", title: "取消请求已发送到桌面端" };
+    }
 
     const commandActivity = app.latestCommandActivity(session.events || []);
-    if (commandActivity) return commandActivity;
+    const quietInfo = app.runningSessionQuietInfo(session);
+    if (commandActivity && !(quietInfo?.quiet && commandActivity.state === "completed")) return commandActivity;
     if (Number(session.pendingInteractionCount || 0) > 0) {
       return { state: "approval", text: "等待选择", title: "等待你回答 Codex 的结构化问题" };
     }
@@ -814,6 +924,28 @@ export function installSessions(app) {
       return { state: "running", text: "Codex 正在启动", title: "桌面端正在启动 Codex" };
     }
     if (session.status === "running") {
+      if (quietInfo?.leaseExpired) {
+        return {
+          state: "queued",
+          text: "运行状态待刷新",
+          title: "relay 上的运行租约已经过期，正在等待状态刷新"
+        };
+      }
+      if (quietInfo?.stale) {
+        const age = app.formatDurationShort(quietInfo.elapsedMs);
+        return {
+          state: "queued",
+          text: `Codex 运行中 · ${age}无新日志`,
+          title: `最近一次 Codex 事件是 ${age}前。可能只是模型在思考，也可能需要中断后重试。`
+        };
+      }
+      if (quietInfo?.quiet) {
+        return {
+          state: "queued",
+          text: "Codex 运行中 · 暂无新日志",
+          title: "Codex 仍在运行，但最近没有新的日志事件。"
+        };
+      }
       return { state: "running", text: "Codex 正在处理这一轮", title: "Codex 正在执行当前 turn" };
     }
     return null;
@@ -1075,6 +1207,7 @@ export function installSessions(app) {
   app.appendOperationalTimelineEntries = function appendOperationalTimelineEntries(timeline, job) {
     const seenPlans = new Set(timeline.filter((entry) => entry.kind === "plan").map((entry) => entry.text));
     const seenSystem = new Set();
+    const seenTests = new Set();
     const latestPlanByTurn = new Map();
 
     for (const event of job.events || []) {
@@ -1097,6 +1230,15 @@ export function installSessions(app) {
       if (!system?.text || seenSystem.has(system.text)) continue;
       seenSystem.add(system.text);
       timeline.push(system);
+    }
+
+    for (const event of job.events || []) {
+      const testSummary = app.testSummaryEntryFromEvent(event);
+      if (!testSummary?.command) continue;
+      const key = [testSummary.turnId, testSummary.command, testSummary.status, testSummary.at].join("\u001f");
+      if (seenTests.has(key)) continue;
+      seenTests.add(key);
+      timeline.push(testSummary);
     }
   };
 
@@ -1151,6 +1293,48 @@ export function installSessions(app) {
     return null;
   };
 
+  app.testSummaryEntryFromEvent = function testSummaryEntryFromEvent(event) {
+    const raw = event.raw || {};
+    const summary = raw.testSummary || {};
+    if (event.type !== "test.summary" && raw.method !== "test.summary") return null;
+    const command = String(summary.command || "").trim();
+    if (!command) return null;
+    const failures = Array.isArray(summary.failures) ? summary.failures.map((line) => String(line || "").trim()).filter(Boolean) : [];
+    const status = String(summary.status || "").trim() || "completed";
+    const level = String(summary.level || "").trim() || "quick";
+    const outputArtifact = summary.outputArtifact && typeof summary.outputArtifact === "object" ? summary.outputArtifact : null;
+    const lines = [`${app.testLevelLabel(level)} · ${app.testStatusLabel(status)}`, command, ...failures.slice(0, 5)];
+    if (outputArtifact?.downloadPath) lines.push(outputArtifact.downloadPath);
+    return {
+      kind: "test",
+      text: lines.filter(Boolean).join("\n"),
+      level,
+      status,
+      command,
+      failures,
+      outputArtifact,
+      turnId: String(summary.turnId || "").trim(),
+      at: event.at || ""
+    };
+  };
+
+  app.testLevelLabel = function testLevelLabel(level) {
+    return {
+      quick: "快速检查",
+      integration: "集成检查",
+      "browser-smoke": "浏览器冒烟",
+      e2e: "E2E"
+    }[level] || "检查";
+  };
+
+  app.testStatusLabel = function testStatusLabel(status) {
+    const normalized = String(status || "").toLowerCase();
+    if (normalized === "passed") return "通过";
+    if (normalized === "failed") return "失败";
+    if (normalized === "cancelled") return "已取消";
+    return status || "完成";
+  };
+
   app.renderSessionStatusRail = function renderSessionStatusRail(session) {
     const rail = elements.sessionStatusRail;
     if (!rail) return;
@@ -1173,6 +1357,7 @@ export function installSessions(app) {
       <span class="session-status-dot" aria-hidden="true"></span>
       <span class="session-status-mode">${app.escapeHtml(entry.modeLabel)}</span>
       <span class="session-status-git">${app.escapeHtml(entry.gitLabel)}</span>
+      ${entry.healthLabel ? `<span class="session-status-health">${app.escapeHtml(entry.healthLabel)}</span>` : ""}
       ${entry.refText ? `<span class="session-status-ref">${app.escapeHtml(entry.refText)}</span>` : ""}
     `;
   };
@@ -1184,7 +1369,8 @@ export function installSessions(app) {
     const latestGitEvent = app.latestGitSummaryEvent(session.events || []);
     const summary = latestGitEvent?.raw?.gitSummary || {};
     const inWorktree = execution.mode === "worktree";
-    if (!inWorktree && !latestGitEvent) return null;
+    const health = app.sessionHealthEntry(session);
+    if (!inWorktree && !latestGitEvent && !health) return null;
 
     const changedFiles = Array.isArray(summary.changedFiles) ? summary.changedFiles : null;
     const changedFileCount = Number.isFinite(Number(summary.changedFileCount))
@@ -1201,16 +1387,56 @@ export function installSessions(app) {
         : "Git 无变更"
       : app.sessionStatusGitPendingLabel(session);
     const modeLabel = inWorktree ? "隔离 worktree" : "主工作区";
-    const title = [modeLabel, refText, execution.path || summary.root || ""].filter(Boolean).join("\n");
+    const title = [modeLabel, health?.title, refText, execution.path || summary.root || ""].filter(Boolean).join("\n");
 
     return {
       mode: inWorktree ? "worktree" : "workspace",
-      gitState: Number.isFinite(changedFileCount) && changedFileCount > 0 ? "dirty" : Number.isFinite(changedFileCount) ? "clean" : "pending",
+      gitState: health?.state || (Number.isFinite(changedFileCount) && changedFileCount > 0 ? "dirty" : Number.isFinite(changedFileCount) ? "clean" : "pending"),
       modeLabel,
       gitLabel,
+      healthLabel: health?.label || "",
       refText,
       title
     };
+  };
+
+  app.sessionHealthEntry = function sessionHealthEntry(session) {
+    const metrics = session?.metrics || {};
+    const contextPercent = Number(metrics.contextPercent ?? app.currentContextPercentForSession(session));
+    const eventCount = Number(metrics.eventCount ?? session?.eventCount ?? 0);
+    const artifactBytes = Number(metrics.artifactBytes ?? session?.artifactBytes ?? 0);
+    const risk = metrics.risk || app.sessionRiskLevel({ contextPercent, eventCount, artifactBytes });
+    if (risk === "normal" && !Number.isFinite(contextPercent) && eventCount < 80 && artifactBytes < 512 * 1024) return null;
+    const parts = [];
+    if (Number.isFinite(contextPercent)) parts.push(`上下文 ${contextPercent}%`);
+    if (eventCount >= 80) parts.push(`${eventCount} 事件`);
+    if (artifactBytes > 0) parts.push(app.formatBytes(artifactBytes));
+    const label = parts.slice(0, 2).join(" · ") || (risk === "high" ? "会话很长" : "会话偏长");
+    return {
+      state: risk === "high" ? "risk" : risk === "warn" ? "pending" : "",
+      label,
+      title: [`会话负载：${risk}`, ...parts].filter(Boolean).join("\n")
+    };
+  };
+
+  app.currentContextPercentForSession = function currentContextPercentForSession(session) {
+    const usage = app.normalizeContextUsage(session?.contextUsage) || app.latestContextUsageFromEvents(session?.events || []);
+    if (!usage?.limitTokens || !usage.usedTokens) return null;
+    return Math.max(0, Math.min(100, Math.round((usage.usedTokens / usage.limitTokens) * 100)));
+  };
+
+  app.sessionRiskLevel = function sessionRiskLevel({ contextPercent = null, eventCount = 0, artifactBytes = 0 } = {}) {
+    if (Number(contextPercent) >= 85 || Number(eventCount) >= 160 || Number(artifactBytes) >= 2 * 1024 * 1024) return "high";
+    if (Number(contextPercent) >= 70 || Number(eventCount) >= 100 || Number(artifactBytes) >= 768 * 1024) return "warn";
+    return "normal";
+  };
+
+  app.formatBytes = function formatBytes(value) {
+    const bytes = Number(value || 0);
+    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+    if (bytes < 1024) return `${Math.round(bytes)} B`;
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
   };
 
   app.latestGitSummaryEvent = function latestGitSummaryEvent(events) {
@@ -1263,6 +1489,38 @@ export function installSessions(app) {
               ${entry.at ? `<span class="thread-message-time">${app.escapeHtml(app.formatMessageTime(entry.at))}</span>` : ""}
             </div>
             <div class="thread-plan-card-body">${app.escapeHtml(entry.text)}</div>
+          </div>
+        </article>
+      `;
+    }
+
+    if (entry.kind === "test") {
+      const statusClass = entry.status === "failed" ? "warn" : "";
+      const artifact = entry.outputArtifact || {};
+      return `
+        <article class="thread-message thread-message-system">
+          <div class="thread-plan-card thread-test-card">
+            <div class="thread-plan-card-head">
+              <span class="thread-status-pill">${app.escapeHtml(app.testLevelLabel(entry.level))}</span>
+              <span class="thread-status-pill ${app.escapeHtml(statusClass)}">${app.escapeHtml(app.testStatusLabel(entry.status))}</span>
+              ${entry.at ? `<span class="thread-message-time">${app.escapeHtml(app.formatMessageTime(entry.at))}</span>` : ""}
+            </div>
+            <div class="thread-test-command">${app.escapeHtml(entry.command)}</div>
+            ${
+              entry.failures?.length
+                ? `<div class="thread-test-failures">${entry.failures
+                    .slice(0, 5)
+                    .map((failure) => `<span>${app.escapeHtml(failure)}</span>`)
+                    .join("")}</div>`
+                : ""
+            }
+            ${
+              artifact.downloadPath
+                ? `<a class="thread-test-artifact" href="${app.escapeHtml(artifact.downloadPath)}" target="_blank" rel="noreferrer">${app.escapeHtml(
+                    artifact.label || "完整输出"
+                  )}</a>`
+                : ""
+            }
           </div>
         </article>
       `;
@@ -1549,6 +1807,10 @@ export function installSessions(app) {
   };
 
   app.sessionTime = function sessionTime(session) {
+    if (session?.status === "running") {
+      const lastLoggedEventMs = app.sessionLastLoggedEventMs?.(session);
+      if (lastLoggedEventMs) return new Date(lastLoggedEventMs).toISOString();
+    }
     return session.updatedAt || session.completedAt || session.startedAt || session.createdAt;
   };
 
@@ -1583,6 +1845,12 @@ export function installSessions(app) {
     const runtimeLabel = app.sessionRuntimeLabel(runtime) || "桌面默认";
     if (session && !app.sessionCanAcceptFollowUp(session)) {
       elements.composerActionsMeta.textContent = `当前会话不可继续，请先从左上角新建会话 · ${runtimeLabel}`;
+      return;
+    }
+    const health = app.sessionHealthEntry(session);
+    if (health?.state === "risk") {
+      const memoryHint = session?.memory?.summary ? "跟进会用摘要新开线程" : "建议新开轻话题";
+      elements.composerActionsMeta.textContent = `会话较长 · ${memoryHint} · ${app.sessionProjectLabel(session?.projectId || elements.codexProject.value)} · ${runtimeLabel}`;
       return;
     }
     const lead = session ? (app.sessionHasPendingWork(session) ? "继续当前话题，接在这一轮后面" : "继续当前话题") : "发送后创建新话题";
