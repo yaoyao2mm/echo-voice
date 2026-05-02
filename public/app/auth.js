@@ -241,7 +241,7 @@ export function installAuth(app) {
           elements.pairingStatus.textContent = "当前浏览器没有有效配对，请扫描桌面端二维码。";
         }
       } else {
-        app.setTopbarStatus("连接失败", "error");
+        app.markCodexConnectionProblem?.("连接中断，当前会话已保留。") || app.setTopbarStatus("连接失败", "error");
         app.toast(error.message);
       }
     }

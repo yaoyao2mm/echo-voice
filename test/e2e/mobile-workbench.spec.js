@@ -319,6 +319,80 @@ test("mobile login, pairing, sidebar, and session creation", async ({ page, requ
   }
 });
 
+test("mobile keeps the current conversation visible when desktop status drops offline", async ({ page, request }) => {
+  await touchMockAgent(request);
+  await loginToWorkbench(page);
+  await page.locator("#toggleSessionsButton").click();
+  await page.locator("#newCodexSessionButton").click();
+
+  const prompt = `离线保留会话 ${Date.now()}`;
+  await page.locator("#codexPrompt").fill(prompt);
+  await page.locator("#sendCodexButton").click();
+
+  const command = await leaseCodexCommandForPrompt(request, prompt);
+  const appThreadId = `thr_${command.sessionId}`;
+  await postCodexSessionEvents(request, command.sessionId, [
+    { type: "thread.started", text: "started", appThreadId, sessionStatus: "active" },
+    {
+      type: "turn/completed",
+      text: "Turn completed.",
+      appThreadId,
+      clearActiveTurnId: true,
+      sessionStatus: "active",
+      raw: { method: "turn/completed", params: { threadId: appThreadId, turn: { id: "turn_offline", status: "completed" } } }
+    }
+  ]);
+  await completeCodexSessionCommand(request, command, { appThreadId });
+  await expect(page.locator("#activeSessionTitle")).toContainText("离线保留会话");
+  await expect(page.locator("#codexRunSummary")).toContainText(prompt);
+
+  let statusHits = 0;
+  await page.route("**/api/status", async (route) => {
+    statusHits += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: true,
+        mode: "relay",
+        refine: {},
+        user: null,
+        platform: "darwin",
+        codex: {
+          enabled: true,
+          agentOnline: false,
+          lastAgentSeenAt: "2026-05-02T00:00:00.000Z",
+          agents: [],
+          workspaces: [],
+          runtime: {},
+          queued: 0,
+          running: 0,
+          active: null,
+          runningJobs: [],
+          recent: [],
+          interactive: {
+            activeSessions: 0,
+            archivedSessions: 0,
+            pendingInteractions: 0,
+            pendingApprovals: 0
+          }
+        }
+      })
+    });
+  });
+
+  await page.locator("#refreshStatus").evaluate((node) => node.click());
+  await expect.poll(() => statusHits, { timeout: 6000 }).toBeGreaterThan(0);
+  await expect(page.locator("#activeSessionTitle")).toContainText("离线保留会话");
+  await expect(page.locator("#codexRunSummary")).toContainText(prompt);
+  await expect(page.locator("#codexRunSummary")).not.toContainText("选择工程");
+  await expect(page.locator("#projectPickerLabel")).toContainText("echo");
+  await expect(page.locator("#composerStatusText")).toContainText("等待桌面 agent");
+  await expect(page.locator("#mobileStatusIndicator")).toBeVisible();
+  await expect(page.locator("#mobileStatusIndicator")).toHaveAttribute("data-state", "idle");
+  await expect(page.locator("#sendCodexButton")).toBeDisabled();
+});
+
 test("mobile shows a compact terminal activity line while a command runs", async ({ page, request }) => {
   await touchMockAgent(request);
   const keepAlive = setInterval(() => {

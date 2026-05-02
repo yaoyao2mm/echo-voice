@@ -68,8 +68,9 @@ export function createAppContext(windowRef = window, documentRef = document) {
       sessionStreamRenderFrame: 0,
       pendingSessionStreamRender: null,
       composingNewSession: false,
-      codexWorkspaces: [],
+      codexWorkspaces: readStoredCodexWorkspaces(windowRef.localStorage),
       codexAgentOnline: false,
+      codexConnectionState: "connecting",
       projectCreateBusy: false,
       showArchivedSessions: false,
       composerBusy: false,
@@ -309,7 +310,11 @@ export function installCore(app) {
         state.composerAttachmentPendingCount === 1
           ? "正在处理 1 张图片…"
           : `正在处理 ${state.composerAttachmentPendingCount} 张图片…`;
-    } else if (!elements.codexProject.value) {
+    } else if (state.codexConnectionState === "error") {
+      status = "连接中断，可继续浏览";
+    } else if (!state.codexAgentOnline) {
+      status = "等待桌面 agent";
+    } else if (!app.currentProjectId()) {
       status = "先选择工程";
     } else if (session?.pendingInteractionCount > 0) {
       status = "等待你的选择";
@@ -436,6 +441,7 @@ export function installCore(app) {
     if (elements.mobileStatusIndicator) {
       elements.mobileStatusIndicator.dataset.state = indicatorState;
       elements.mobileStatusIndicator.title = text;
+      elements.mobileStatusIndicator.setAttribute("aria-hidden", indicatorState === "online" ? "true" : "false");
       elements.mobileStatusIndicator.setAttribute("aria-label", text);
     }
   };
@@ -728,7 +734,12 @@ export function installCore(app) {
   };
 
   app.currentProjectId = function currentProjectId() {
-    return String(elements.codexProject?.value || "").trim();
+    return String(
+      elements.codexProject?.value ||
+        state.selectedCodexSession?.projectId ||
+        localStorage.getItem("echoCodexProject") ||
+        ""
+    ).trim();
   };
 
   app.sessionBelongsToCurrentProject = function sessionBelongsToCurrentProject(session) {
@@ -951,6 +962,26 @@ function readStoredRuntimePreferences(localStorageRef) {
 
 function readStoredWorktreePreference(localStorageRef) {
   return localStorageRef.getItem("echoCodexWorktreeEnabled") !== "false";
+}
+
+function readStoredCodexWorkspaces(localStorageRef) {
+  try {
+    const parsed = JSON.parse(localStorageRef.getItem("echoCodexWorkspaces") || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(normalizeStoredCodexWorkspace).filter(Boolean).slice(0, 50);
+  } catch {
+    return [];
+  }
+}
+
+function normalizeStoredCodexWorkspace(workspace = {}) {
+  const id = String(workspace.id || "").trim();
+  if (!id) return null;
+  return {
+    id,
+    label: String(workspace.label || workspace.id || "").trim() || id,
+    path: String(workspace.path || "").trim()
+  };
 }
 
 function queryElements(documentRef) {

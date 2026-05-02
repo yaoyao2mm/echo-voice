@@ -295,7 +295,10 @@ export function installSessions(app) {
     try {
       const data = await app.apiPost(`/api/codex/sessions/${encodeURIComponent(sessionId)}/events-ticket`, {});
       ticket = String(data.ticket || "");
-    } catch {
+    } catch (error) {
+      if (!app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
+        app.markCodexConnectionProblem?.("实时更新连接失败，当前会话已保留。");
+      }
       return;
     }
     if (!ticket || state.selectedCodexJobId !== sessionId) return;
@@ -304,6 +307,15 @@ export function installSessions(app) {
     const source = new EventSource(`/api/codex/sessions/${encodeURIComponent(sessionId)}/events?${params.toString()}`);
     state.sessionEventSource = source;
     state.sessionEventSourceId = sessionId;
+
+    source.addEventListener("open", () => {
+      if (state.sessionEventSource !== source) return;
+      if (state.codexConnectionState === "error") {
+        state.codexConnectionState = state.codexAgentOnline ? "online" : "waiting";
+        app.setTopbarStatus(state.codexAgentOnline ? "Codex 在线" : "等待桌面 agent", state.codexAgentOnline ? "online" : "idle");
+        app.updateComposerAvailability();
+      }
+    });
 
     source.addEventListener("session", (event) => {
       let data = null;
@@ -319,6 +331,7 @@ export function installSessions(app) {
 
     source.onerror = () => {
       if (state.sessionEventSource !== source) return;
+      app.markCodexConnectionProblem?.("实时更新中断，当前会话已保留。");
       app.closeCodexSessionStream();
       app.scheduleSessionListRefresh();
     };
@@ -411,7 +424,11 @@ export function installSessions(app) {
     state.sessionListRefreshTimer = windowRef.setTimeout(() => {
       state.sessionListRefreshTimer = null;
       if (app.isLoggedIn() && state.token) {
-        app.loadCodexJobs({ skipSelectedDetailLoad: Boolean(state.sessionEventSourceId) }).catch(() => {});
+        app.loadCodexJobs({ skipSelectedDetailLoad: Boolean(state.sessionEventSourceId) }).catch((error) => {
+          if (!app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
+            app.markCodexConnectionProblem?.("连接中断，当前会话已保留。");
+          }
+        });
       }
     }, 1200);
   };

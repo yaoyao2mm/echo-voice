@@ -357,6 +357,16 @@ h1 {
   box-shadow: 0 0 0 1px rgba(119, 179, 140, 0.14);
 }
 
+.mobile-status-indicator[data-state="info"] {
+  background: #4f7ea8;
+  box-shadow: 0 0 0 1px rgba(79, 126, 168, 0.16);
+}
+
+.mobile-status-indicator[data-state="idle"] {
+  background: #aeb6c3;
+  box-shadow: 0 0 0 1px rgba(174, 182, 195, 0.18);
+}
+
 .mobile-status-indicator[data-state="busy"] {
   background: #c56a2d;
   box-shadow: 0 0 0 1px rgba(197, 106, 45, 0.16);

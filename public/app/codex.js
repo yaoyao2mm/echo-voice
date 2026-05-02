@@ -34,27 +34,18 @@ export function installCodex(app) {
       await app.loadCodexJobs({ skipSelectedDetailLoad: Boolean(state.sessionEventSourceId) });
     } catch (error) {
       if (app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) return;
-      elements.codexStatusText.textContent = "Codex 未连接";
-      elements.codexQueueMeta.textContent = "";
-      state.codexWorkspaces = [];
-      state.codexAgentOnline = false;
-      state.codexUnsupportedModels = [];
-      state.codexSupportedModels = [];
-      state.codexAllowedPermissionModes = [];
-      state.codexAgentRuntime = {};
-      app.refreshRuntimeDefaultOptions();
-      app.refreshWorktreeModeControls?.();
-      elements.codexProject.innerHTML = "";
-      app.renderProjectPicker(false);
-      app.updateComposerAvailability();
-      if (error.message && !error.message.includes("relay mode")) app.toast(error.message);
+      const shouldToast = app.markCodexConnectionProblem("连接中断，当前会话已保留。");
+      if (shouldToast && error.message && !error.message.includes("relay mode")) app.toast(error.message);
     }
   };
 
   app.renderCodexStatus = function renderCodexStatus(codex) {
-    const workspaces = codex.workspaces || [];
+    const agentOnline = Boolean(codex.agentOnline);
+    const workspaces = app.codexWorkspacesForStatus(codex);
+    const previousProject = app.currentProjectId();
     state.codexWorkspaces = workspaces;
-    state.codexAgentOnline = Boolean(codex.agentOnline);
+    state.codexAgentOnline = agentOnline;
+    state.codexConnectionState = agentOnline ? "online" : "waiting";
     state.codexUnsupportedModels = Array.isArray(codex.runtime?.unsupportedModels)
       ? codex.runtime.unsupportedModels.map((model) => String(model || "").trim()).filter(Boolean)
       : [];
@@ -76,27 +67,95 @@ export function installCodex(app) {
     });
     app.refreshRuntimeDefaultOptions();
     app.refreshWorktreeModeControls?.();
-    elements.codexStatusText.textContent = codex.agentOnline ? "本机 Codex 在线" : "等待桌面 agent";
+    app.setTopbarStatus(agentOnline ? "Codex 在线" : "等待桌面 agent", agentOnline ? "online" : "idle");
+    elements.codexStatusText.textContent = agentOnline ? "本机 Codex 在线" : "等待桌面 agent";
     const pendingDecisions = Number(codex.interactive?.pendingInteractions || 0) + Number(codex.interactive?.pendingApprovals || 0);
-    elements.codexQueueMeta.textContent = codex.agentOnline
+    elements.codexQueueMeta.textContent = agentOnline
       ? `会话 ${codex.interactive?.activeSessions || 0} · 待处理 ${pendingDecisions} · 归档 ${codex.interactive?.archivedSessions || 0} · 项目 ${workspaces.length}`
-      : "打开桌面端后自动同步";
+      : workspaces.length
+        ? `桌面离线 · 可浏览已同步会话 · 项目 ${workspaces.length}`
+        : "打开桌面端后自动同步";
 
-    const previousProject = app.currentProjectId();
-    const preferred = localStorage.getItem("echoCodexProject") || elements.codexProject.value;
-    const selected = workspaces.find((workspace) => workspace.id === preferred)?.id || workspaces[0]?.id || "";
-    if (previousProject && selected && previousProject !== selected) {
+    const preferred = localStorage.getItem("echoCodexProject") || previousProject || elements.codexProject.value;
+    const selected =
+      workspaces.find((workspace) => workspace.id === preferred)?.id ||
+      (agentOnline ? workspaces[0]?.id : workspaces.find((workspace) => workspace.id === previousProject)?.id || workspaces[0]?.id) ||
+      "";
+    if (previousProject && selected && previousProject !== selected && agentOnline) {
       state.composingNewSession = false;
       state.selectedCodexJobId = "";
       state.selectedCodexSession = null;
       app.closeCodexSessionStream?.();
     }
+    app.renderCodexProjectOptions(workspaces, selected, agentOnline);
+    if (elements.codexProject.value) localStorage.setItem("echoCodexProject", elements.codexProject.value);
+    if (agentOnline && workspaces.length > 0) app.persistCodexWorkspaces(workspaces);
+    app.renderProjectPicker(agentOnline);
+    app.updateComposerAvailability();
+    app.syncComposerMetrics();
+  };
+
+  app.codexWorkspacesForStatus = function codexWorkspacesForStatus(codex = {}) {
+    const incoming = Array.isArray(codex.workspaces)
+      ? codex.workspaces.map(app.normalizeCodexWorkspace).filter(Boolean)
+      : [];
+    if (incoming.length > 0 || codex.agentOnline) return incoming;
+
+    const projectId = app.currentProjectId();
+    const cached = (state.codexWorkspaces || []).map(app.normalizeCodexWorkspace).filter(Boolean);
+    if (!projectId) return cached;
+    return app.mergeCodexWorkspaces(cached, [app.cachedWorkspaceForProject(projectId)]);
+  };
+
+  app.normalizeCodexWorkspace = function normalizeCodexWorkspace(workspace = {}) {
+    const source = workspace && typeof workspace === "object" ? workspace : {};
+    const id = String(source.id || "").trim();
+    if (!id) return null;
+    return {
+      id,
+      label: String(source.label || source.id || source.path || "").trim() || id,
+      path: String(source.path || "").trim()
+    };
+  };
+
+  app.mergeCodexWorkspaces = function mergeCodexWorkspaces(...groups) {
+    const byId = new Map();
+    for (const group of groups) {
+      for (const workspace of group || []) {
+        const normalized = app.normalizeCodexWorkspace(workspace);
+        if (!normalized || byId.has(normalized.id)) continue;
+        byId.set(normalized.id, normalized);
+      }
+    }
+    return Array.from(byId.values()).slice(0, 50);
+  };
+
+  app.cachedWorkspaceForProject = function cachedWorkspaceForProject(projectId) {
+    const id = String(projectId || "").trim();
+    if (!id) return null;
+    return (
+      app.normalizeCodexWorkspace((state.codexWorkspaces || []).find((workspace) => workspace.id === id)) || {
+        id,
+        label: id,
+        path: ""
+      }
+    );
+  };
+
+  app.persistCodexWorkspaces = function persistCodexWorkspaces(workspaces = []) {
+    const normalized = app.mergeCodexWorkspaces(workspaces);
+    if (normalized.length === 0) return;
+    localStorage.setItem("echoCodexWorkspaces", JSON.stringify(normalized));
+  };
+
+  app.renderCodexProjectOptions = function renderCodexProjectOptions(workspaces, selected, agentOnline) {
     elements.codexProject.innerHTML = "";
     if (!workspaces.length) {
       const option = document.createElement("option");
       option.value = "";
-      option.textContent = codex.agentOnline ? "还没有授权工程目录" : "等待桌面 agent";
+      option.textContent = agentOnline ? "还没有授权工程目录" : "等待桌面 agent";
       elements.codexProject.append(option);
+      return;
     }
     for (const workspace of workspaces) {
       const option = document.createElement("option");
@@ -106,12 +165,29 @@ export function installCodex(app) {
       option.selected = workspace.id === selected;
       elements.codexProject.append(option);
     }
-    if (elements.codexProject.value) {
-      localStorage.setItem("echoCodexProject", elements.codexProject.value);
+    if (selected && workspaces.some((workspace) => workspace.id === selected)) {
+      elements.codexProject.value = selected;
     }
-    app.renderProjectPicker(codex.agentOnline);
+  };
+
+  app.markCodexConnectionProblem = function markCodexConnectionProblem(message = "连接中断，当前会话已保留。") {
+    const wasAlreadyError = state.codexConnectionState === "error";
+    state.codexConnectionState = "error";
+    state.codexAgentOnline = false;
+    const projectId = app.currentProjectId() || state.codexWorkspaces?.[0]?.id || "";
+    if (projectId) {
+      state.codexWorkspaces = app.mergeCodexWorkspaces(state.codexWorkspaces, [app.cachedWorkspaceForProject(projectId)]);
+      app.renderCodexProjectOptions(state.codexWorkspaces, projectId, false);
+    } else if (state.codexWorkspaces?.length) {
+      app.renderCodexProjectOptions(state.codexWorkspaces, state.codexWorkspaces[0]?.id || "", false);
+    }
+    if (elements.codexProject.value) localStorage.setItem("echoCodexProject", elements.codexProject.value);
+    app.setTopbarStatus("连接中断", "error");
+    elements.codexStatusText.textContent = "连接中断";
+    elements.codexQueueMeta.textContent = message;
+    app.renderProjectPicker(false);
     app.updateComposerAvailability();
-    app.syncComposerMetrics();
+    return !wasAlreadyError;
   };
 
   app.openSessionSidebar = function openSessionSidebar() {
@@ -254,7 +330,7 @@ export function installCodex(app) {
 
     const rawPrompt = elements.codexPrompt.value.trim();
     const attachments = app.currentComposerAttachmentsPayload();
-    const projectId = elements.codexProject.value;
+    const projectId = app.currentProjectId();
     const runtimeDraft = app.currentRuntimeDraft();
     const runtime = app.runtimeForAttachments(runtimeDraft, attachments);
     const mode = state.composerPlanMode ? "plan" : "execute";
@@ -264,6 +340,10 @@ export function installCodex(app) {
     }
     if (!projectId) {
       app.toast("桌面 agent 还没有公布项目");
+      return;
+    }
+    if (!app.codexCommandsAvailable()) {
+      app.toast(state.codexConnectionState === "error" ? "连接恢复后再发送" : "桌面 agent 在线后再发送");
       return;
     }
 
@@ -312,10 +392,14 @@ export function installCodex(app) {
       return;
     }
 
-    const projectId = elements.codexProject.value;
+    const projectId = app.currentProjectId();
     const session = app.selectedSessionForComposer();
     if (!projectId) {
       app.toast("桌面 agent 还没有公布项目");
+      return;
+    }
+    if (!app.codexCommandsAvailable()) {
+      app.toast(state.codexConnectionState === "error" ? "连接恢复后再部署" : "桌面 agent 在线后再部署");
       return;
     }
     if (!session) {
@@ -403,6 +487,10 @@ export function installCodex(app) {
   };
 
   app.requestContextCompaction = async function requestContextCompaction({ automatic = false } = {}) {
+    if (!app.codexCommandsAvailable()) {
+      if (!automatic) app.toast(state.codexConnectionState === "error" ? "连接恢复后再压缩" : "桌面 agent 在线后再压缩");
+      return;
+    }
     const session = app.selectedSessionForComposer();
     if (!session || !app.canCompactSelectedSession(session)) {
       if (!automatic) app.toast("当前会话暂时不能压缩");
@@ -646,11 +734,13 @@ export function installCodex(app) {
   };
 
   app.updateComposerAvailability = function updateComposerAvailability() {
-    const hasProject = Boolean(elements.codexProject.value);
+    const hasProject = Boolean(app.currentProjectId());
+    const commandsAvailable = app.codexCommandsAvailable();
     const hasDraft = Boolean(elements.codexPrompt.value.trim()) || state.composerAttachments.length > 0;
     const blockedBySelectedSession = app.selectedSessionNeedsExplicitNew();
     const attachmentsPending = app.hasPendingComposerAttachments();
-    elements.sendCodexButton.disabled = state.composerBusy || attachmentsPending || !hasProject || !hasDraft || blockedBySelectedSession;
+    elements.sendCodexButton.disabled =
+      state.composerBusy || attachmentsPending || !commandsAvailable || !hasProject || !hasDraft || blockedBySelectedSession;
     if (!state.composerBusy) {
       elements.sendCodexButton.textContent = attachmentsPending ? "处理图片" : app.composerActionLabel();
     }
@@ -665,12 +755,13 @@ export function installCodex(app) {
       elements.composerPlanModeButton.disabled = state.composerBusy;
     }
     if (elements.compactContextButton) {
-      elements.compactContextButton.disabled = state.composerBusy || attachmentsPending || hasDraft || !app.canCompactSelectedSession();
+      elements.compactContextButton.disabled =
+        state.composerBusy || attachmentsPending || !commandsAvailable || hasDraft || !app.canCompactSelectedSession();
     }
     app.updateProjectCreateControls();
     if (elements.quickDeployButton) {
       elements.quickDeployButton.disabled =
-        state.composerBusy || attachmentsPending || !hasProject || hasDraft || !app.canQuickDeploySelectedSession();
+        state.composerBusy || attachmentsPending || !commandsAvailable || !hasProject || hasDraft || !app.canQuickDeploySelectedSession();
     }
     app.updateStopButton?.();
     app.refreshComposerMeta();
@@ -678,6 +769,12 @@ export function installCodex(app) {
     app.updateComposerModeControls();
     app.syncComposerMetrics();
     app.refreshComposerStatusBar();
+  };
+
+  app.codexCommandsAvailable = function codexCommandsAvailable() {
+    if (state.codexConnectionState === "error" || !state.codexAgentOnline) return false;
+    const projectId = app.currentProjectId();
+    return Boolean(projectId && (state.codexWorkspaces || []).some((workspace) => workspace.id === projectId));
   };
 
   app.toggleProjectCreateForm = function toggleProjectCreateForm() {

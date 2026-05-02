@@ -23,7 +23,8 @@ Build toward a dependable remote Codex companion:
 
 - Use `pnpm test` for the Node test suite.
 - Use `pnpm run check:js` after touching server, desktop agent, or browser JavaScript.
-- Use `pnpm run test:e2e:mobile` for mobile PWA behavior when UI flows change.
+- Hard rule: do not run e2e tests unless the user explicitly asks for e2e testing.
+- When mobile PWA behavior changes, prefer targeted non-e2e checks by default and report that e2e was not run unless explicitly requested.
 - The relay data store is SQLite at `~/.echo-voice/echo.sqlite` unless tests override `HOME`.
 - Keep migrations compatible with existing local databases.
 - Keep the default worktree mode off unless the desktop owner enables it.

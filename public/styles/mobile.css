@@ -657,6 +657,13 @@
     align-self: center;
   }
 
+  body.mobile-ui .mobile-status-indicator[data-state="idle"],
+  body.mobile-ui .mobile-status-indicator[data-state="info"],
+  body.mobile-ui .mobile-status-indicator[data-state="busy"],
+  body.mobile-ui .mobile-status-indicator[data-state="error"] {
+    display: block;
+  }
+
   body.mobile-ui .topbar-quick-deploy {
     width: 34px;
     min-height: 34px;
