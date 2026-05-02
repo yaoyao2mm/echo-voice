@@ -356,8 +356,6 @@ export function installCodex(app) {
       state.runtimeDirty = false;
       app.applyRuntimeDraft(state.selectedCodexSession.runtime || runtime, { persist: false, dirty: false });
       app.renderCodexJob(data.session, { keepSelection: true, scrollToBottom: true });
-      if (state.lastPromptRouting === "fresh-long-session") app.toast("当前会话较长，已新开轻话题");
-      if (state.lastPromptRouting === "fork-summary") app.toast("已用会话摘要开启新线程");
       elements.codexPrompt.value = "";
       app.syncComposerInputHeight();
       await app.loadCodexJobs();
@@ -692,24 +690,6 @@ export function installCodex(app) {
   };
 
   app.sendCodexPrompt = async function sendCodexPrompt({ projectId, prompt, runtime, attachments, mode = "execute" }) {
-    const selectedSession = app.selectedSessionForComposer();
-    if (app.shouldStartFreshSessionForPrompt(selectedSession, prompt, attachments)) {
-      state.lastPromptRouting = "fresh-long-session";
-      return app.apiPost("/api/codex/sessions", { projectId, prompt, runtime, attachments, mode });
-    }
-    if (app.shouldForkSummarySessionForPrompt(selectedSession, prompt, attachments)) {
-      state.lastPromptRouting = "fork-summary";
-      return app.apiPost("/api/codex/sessions", {
-        projectId,
-        prompt,
-        runtime,
-        attachments,
-        mode,
-        sourceSessionId: selectedSession.id,
-        threadMode: "fork-summary"
-      });
-    }
-    state.lastPromptRouting = "";
     if (app.canContinueSelectedSession()) {
       return app.apiPost(`/api/codex/sessions/${encodeURIComponent(state.selectedCodexJobId)}/messages`, {
         projectId,
@@ -723,35 +703,6 @@ export function installCodex(app) {
       throw new Error("当前会话不能继续，请先从左上角新建会话。");
     }
     return app.apiPost("/api/codex/sessions", { projectId, prompt, runtime, attachments, mode });
-  };
-
-  app.shouldStartFreshSessionForPrompt = function shouldStartFreshSessionForPrompt(session, prompt, attachments = []) {
-    if (!session || state.composingNewSession) return false;
-    if (!app.sessionCanAcceptFollowUp(session) || app.sessionHasPendingWork(session)) return false;
-    if (Array.isArray(attachments) && attachments.length > 0) return false;
-    const risk = app.sessionHealthEntry?.(session);
-    if (!risk || risk.state !== "risk") return false;
-    const text = String(prompt || "").trim();
-    if (!text || text.length > 180) return false;
-    return !app.promptLooksLikeFollowUp(text);
-  };
-
-  app.shouldForkSummarySessionForPrompt = function shouldForkSummarySessionForPrompt(session, prompt, attachments = []) {
-    if (!session || state.composingNewSession) return false;
-    if (!app.sessionCanAcceptFollowUp(session) || app.sessionHasPendingWork(session)) return false;
-    if (Array.isArray(attachments) && attachments.length > 0) return false;
-    if (!session.memory?.summary) return false;
-    const risk = app.sessionHealthEntry?.(session);
-    if (!risk || !["risk", "pending"].includes(risk.state)) return false;
-    const text = String(prompt || "").trim();
-    if (!text) return false;
-    return app.promptLooksLikeFollowUp(text) || text.length > 180;
-  };
-
-  app.promptLooksLikeFollowUp = function promptLooksLikeFollowUp(prompt) {
-    const text = String(prompt || "").trim().toLowerCase();
-    if (!text) return false;
-    return /(继续|刚才|上面|前面|这个|那个|它|其|同样|再|接着|上一轮|当前会话|这轮|this|that|it|continue|same|previous|above|again)/i.test(text);
   };
 
   app.canContinueSelectedSession = function canContinueSelectedSession() {

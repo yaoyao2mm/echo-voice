@@ -83,7 +83,6 @@ export function createAppContext(windowRef = window, documentRef = document) {
       codexAllowedPermissionModes: [],
       runtimePreferences: readStoredRuntimePreferences(windowRef.localStorage),
       runtimeDirty: false,
-      lastPromptRouting: "",
       lastTopbarScrollY: 0,
       topbarScrollAccumulator: 0,
       topbarCollapsed: false,

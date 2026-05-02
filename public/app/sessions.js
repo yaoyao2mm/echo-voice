@@ -1953,7 +1953,7 @@ export function installSessions(app) {
     }
     const health = app.sessionHealthEntry(session);
     if (health?.state === "risk") {
-      const memoryHint = session?.memory?.summary ? "跟进会用摘要新开线程" : "建议新开轻话题";
+      const memoryHint = app.canCompactSelectedSession(session) ? "可先压缩上下文" : "可手动新建话题";
       elements.composerActionsMeta.textContent = `会话较长 · ${memoryHint} · ${app.sessionProjectLabel(session?.projectId || elements.codexProject.value)} · ${runtimeLabel}`;
       return;
     }
