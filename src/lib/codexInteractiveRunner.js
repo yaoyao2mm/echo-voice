@@ -26,6 +26,7 @@ export class CodexInteractiveRuntime {
     this.eventFlushes = new Map();
     this.deltaBuffers = new Map();
     this.turnGitBaselines = new Map();
+    this.completedTurns = new Map();
     this.collaborationModePresets = null;
     this.collaborationModeUnavailable = false;
     this.expectedClientCloses = new WeakSet();
@@ -52,6 +53,7 @@ export class CodexInteractiveRuntime {
     this.threadToSession.clear();
     this.activeTurns.clear();
     this.turnGitBaselines.clear();
+    this.#clearCompletedTurns();
     this.eventFlushes.clear();
     for (const buffer of this.deltaBuffers.values()) {
       if (buffer.timer) clearTimeout(buffer.timer);
@@ -91,7 +93,7 @@ export class CodexInteractiveRuntime {
       runtime,
       mode: command.payload?.mode
     });
-    return { ok: true, appThreadId, activeTurnId: turn.id, sessionStatus: "running" };
+    return this.#turnCommandResult(appThreadId, turn);
   }
 
   async #handleCommandWithClient(command) {
@@ -114,6 +116,7 @@ export class CodexInteractiveRuntime {
     this.threadToSession.clear();
     this.activeTurns.clear();
     this.turnGitBaselines.clear();
+    this.#clearCompletedTurns();
   }
 
   async #sendMessage(command, workspace) {
@@ -133,7 +136,7 @@ export class CodexInteractiveRuntime {
         runtime,
         mode: command.payload?.mode
       });
-      return { ok: true, appThreadId: thread.appThreadId, activeTurnId: turn.id, sessionStatus: "running" };
+      return this.#turnCommandResult(thread.appThreadId, turn);
     } catch (error) {
       if (!isThreadNotFoundError(error) || thread.recovered) throw error;
       thread = await this.#startReplacementThread(command, workspace, runtime, error);
@@ -146,7 +149,7 @@ export class CodexInteractiveRuntime {
         runtime,
         mode: command.payload?.mode
       });
-      return { ok: true, appThreadId: thread.appThreadId, activeTurnId: turn.id, sessionStatus: "running" };
+      return this.#turnCommandResult(thread.appThreadId, turn);
     }
   }
 
@@ -188,6 +191,17 @@ export class CodexInteractiveRuntime {
     return { ok: true, appThreadId: thread.appThreadId, sessionStatus: "running" };
   }
 
+  #turnCommandResult(appThreadId, turn = {}) {
+    const completed = Boolean(turn.completed);
+    return {
+      ok: true,
+      appThreadId,
+      activeTurnId: completed ? null : turn.id,
+      sessionStatus: turn.sessionStatus || (completed ? "active" : "running"),
+      error: turn.error || ""
+    };
+  }
+
   async #startOrSteerTurn({ sessionId, threadId, text, attachments, workspace, runtime, mode }) {
     const preparedAttachments = await this.#materializeAttachments({ sessionId, threadId, attachments, workspace });
     const requestedMode = normalizeSessionMode(mode);
@@ -206,17 +220,21 @@ export class CodexInteractiveRuntime {
           },
           60000
         );
+        const completedTurn = this.#takeCompletedTurn(threadId, activeTurnId);
         await this.#emit(sessionId, [
           {
             type: "turn.steered",
             text: "Message added to the active Codex turn.",
             appThreadId: threadId,
             activeTurnId,
-            sessionStatus: "running",
+            clearActiveTurnId: Boolean(completedTurn),
+            sessionStatus: completedTurn?.sessionStatus || "running",
             raw: { method: "turn/steer", result }
           }
         ]);
-        return { id: result?.turnId || activeTurnId };
+        return completedTurn
+          ? { id: result?.turnId || activeTurnId, completed: true, sessionStatus: completedTurn.sessionStatus, error: completedTurn.error }
+          : { id: result?.turnId || activeTurnId };
       }
 
       const turnStartParams = await this.#turnStartParams({
@@ -255,6 +273,11 @@ export class CodexInteractiveRuntime {
       }
       const turnId = result?.turn?.id;
       if (!turnId) throw new Error("Codex app-server did not return a turn id.");
+      const completedTurn = this.#takeCompletedTurn(threadId, turnId);
+      if (completedTurn) {
+        await this.#cleanupAttachmentDir(threadId);
+        return { id: turnId, completed: true, sessionStatus: completedTurn.sessionStatus, error: completedTurn.error };
+      }
       this.activeTurns.set(threadId, turnId);
       if (gitBaseline) this.turnGitBaselines.set(turnGitBaselineKey(threadId, turnId), gitBaseline);
       return { id: turnId };
@@ -460,6 +483,7 @@ export class CodexInteractiveRuntime {
       this.threadToSession.clear();
       this.activeTurns.clear();
       this.turnGitBaselines.clear();
+      this.#clearCompletedTurns();
       for (const buffer of this.deltaBuffers.values()) {
         if (buffer.timer) clearTimeout(buffer.timer);
       }
@@ -561,6 +585,39 @@ export class CodexInteractiveRuntime {
     }
   }
 
+  #rememberCompletedTurn(threadId, turn = {}) {
+    const key = turnGitBaselineKey(threadId, turn?.id);
+    if (!key) return;
+    const previous = this.completedTurns.get(key);
+    if (previous?.timer) clearTimeout(previous.timer);
+    const timer = setTimeout(() => {
+      this.completedTurns.delete(key);
+    }, 30000);
+    timer.unref?.();
+    this.completedTurns.set(key, {
+      sessionStatus: turn?.status === "failed" ? "failed" : "active",
+      error: turn?.error?.message || "",
+      timer
+    });
+  }
+
+  #takeCompletedTurn(threadId, turnId) {
+    const key = turnGitBaselineKey(threadId, turnId);
+    if (!key) return null;
+    const completed = this.completedTurns.get(key);
+    if (!completed) return null;
+    if (completed.timer) clearTimeout(completed.timer);
+    this.completedTurns.delete(key);
+    return completed;
+  }
+
+  #clearCompletedTurns() {
+    for (const completed of this.completedTurns.values()) {
+      if (completed.timer) clearTimeout(completed.timer);
+    }
+    this.completedTurns.clear();
+  }
+
   #runtimeFor(command = {}) {
     const remembered = this.sessions.get(command.sessionId)?.runtime || {};
     const runtime = command.runtime && typeof command.runtime === "object" ? command.runtime : remembered;
@@ -584,6 +641,7 @@ export class CodexInteractiveRuntime {
       this.activeTurns.set(threadId, message.params?.turn?.id || "");
     }
     if (message.method === "turn/completed") {
+      this.#rememberCompletedTurn(threadId, message.params?.turn);
       this.activeTurns.delete(threadId);
       this.#cleanupAttachmentDir(threadId).catch((error) => {
         console.error(`[codex attachment cleanup] ${error.message}`);

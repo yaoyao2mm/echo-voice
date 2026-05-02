@@ -1279,15 +1279,18 @@ export function completeSessionCommand(commandId, result = {}, options = {}) {
   const error = String(result.error || "");
   const status = ok ? "done" : "failed";
   const resultSessionStatus = ok ? result.sessionStatus || (result.activeTurnId ? "running" : "active") : "failed";
-  const compactAlreadyCompleted =
-    ok &&
-    command.type === "compact" &&
-    resultSessionStatus === "running" &&
-    sessionHasCompletedCompactionSince(command.sessionId, command.updatedAt);
-  const sessionStatus = compactAlreadyCompleted ? "active" : resultSessionStatus;
-  const activeTurnId = compactAlreadyCompleted ? null : result.activeTurnId || null;
+  const completedAsyncWork =
+    ok && resultSessionStatus === "running"
+      ? sessionCompletedAsyncWorkSince(command.sessionId, command.updatedAt, result.activeTurnId, command.type, result.appThreadId || session.appThreadId)
+      : null;
+  const sessionStatus = completedAsyncWork ? completedAsyncWork.status : resultSessionStatus;
+  const activeTurnId = completedAsyncWork ? null : result.activeTurnId || null;
   const clearActiveTurnId = sessionStatus !== "running";
   const releaseLease = sessionStatus !== "running";
+  const lastError =
+    completedAsyncWork?.status === "failed"
+      ? String(session.lastError || completedAsyncWork.error || error).slice(0, 12000)
+      : error;
   const executionJson = result.execution && typeof result.execution === "object" ? JSON.stringify(result.execution) : null;
 
   const complete = db.transaction(() => {
@@ -1329,7 +1332,7 @@ export function completeSessionCommand(commandId, result = {}, options = {}) {
       activeTurnId,
       clearActiveTurnId: clearActiveTurnId ? 1 : 0,
       releaseLease: releaseLease ? 1 : 0,
-      lastError: error,
+      lastError,
       finalMessage: result.finalMessage || null,
       executionJson,
       now,
@@ -2975,7 +2978,10 @@ function sessionHasLeasedCommand(sessionId) {
   );
 }
 
-function sessionHasCompletedCompactionSince(sessionId, sinceAt = "") {
+function sessionCompletedAsyncWorkSince(sessionId, sinceAt = "", expectedTurnId = "", commandType = "", expectedThreadId = "") {
+  const normalizedExpectedTurnId = String(expectedTurnId || "");
+  const normalizedExpectedThreadId = String(expectedThreadId || "");
+  const allowCompactionCompletion = commandType === "compact";
   const rows = db.prepare(`
     SELECT type, raw_json AS rawJson
     FROM codex_session_events
@@ -2985,12 +2991,42 @@ function sessionHasCompletedCompactionSince(sessionId, sinceAt = "") {
     LIMIT 120
   `).all(sessionId, String(sinceAt || ""), String(sinceAt || ""));
 
-  return rows.some((row) => {
+  for (const row of rows) {
     const raw = parseJson(row.rawJson, {});
     const method = raw?.method || row.type || "";
+    const params = raw?.params || {};
+    const threadId = String(params.threadId || params.thread?.id || params.item?.threadId || "");
+    const turnId = String(params.turn?.id || params.turnId || "");
     const itemType = raw?.params?.item?.type || "";
-    return method === "turn/completed" || method === "thread/compacted" || itemType === "contextCompaction";
-  });
+    if (
+      method === "turn/completed" &&
+      threadMatchesExpected(threadId, normalizedExpectedThreadId) &&
+      turnMatchesExpected(turnId, normalizedExpectedTurnId)
+    ) {
+      const status = params.turn?.status === "failed" ? "failed" : "active";
+      return {
+        status,
+        error: String(params.turn?.error?.message || "").slice(0, 12000)
+      };
+    }
+    if (
+      allowCompactionCompletion &&
+      threadMatchesExpected(threadId, normalizedExpectedThreadId) &&
+      (method === "thread/compacted" || itemType === "contextCompaction")
+    ) {
+      return { status: "active", error: "" };
+    }
+  }
+
+  return null;
+}
+
+function turnMatchesExpected(turnId, expectedTurnId) {
+  return !expectedTurnId || !turnId || turnId === expectedTurnId;
+}
+
+function threadMatchesExpected(threadId, expectedThreadId) {
+  return !expectedThreadId || !threadId || threadId === expectedThreadId;
 }
 
 function sessionHasQueuedStopCommand(sessionId) {
@@ -4236,8 +4272,74 @@ function reclaimExpiredSessionLeases() {
 function refreshInteractiveSessionState() {
   reclaimExpiredSessionCommandLeases();
   reclaimExpiredSessionLeases();
+  reconcileCompletedRunningSessions();
   expireOldApprovals();
   expireOldInteractions();
+}
+
+function reconcileCompletedRunningSessions() {
+  const rows = db.prepare(`
+    SELECT
+      s.id,
+      s.app_thread_id AS appThreadId,
+      s.active_turn_id AS activeTurnId,
+      s.last_error AS lastError
+    FROM codex_sessions s
+    WHERE s.status = 'running'
+      AND s.active_turn_id IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM codex_session_commands c
+        WHERE c.session_id = s.id
+          AND c.status = 'leased'
+      )
+  `).all();
+  const completedSessions = rows
+    .map((session) => ({
+      ...session,
+      completed: sessionCompletedAsyncWorkSince(session.id, "", session.activeTurnId, "", session.appThreadId)
+    }))
+    .filter((session) => session.completed);
+  if (completedSessions.length === 0) return;
+
+  const now = nowIso();
+  const reconcile = db.transaction((sessions) => {
+    for (const session of sessions) {
+      const lastError =
+        session.completed.status === "failed"
+          ? String(session.lastError || session.completed.error || "").slice(0, 12000)
+          : "";
+      const update = db.prepare(`
+        UPDATE codex_sessions
+        SET status = @status,
+            active_turn_id = NULL,
+            last_error = @lastError,
+            leased_by = NULL,
+            lease_expires_at = NULL,
+            updated_at = @now
+        WHERE id = @sessionId
+          AND status = 'running'
+          AND active_turn_id = @activeTurnId
+      `).run({
+        sessionId: session.id,
+        activeTurnId: session.activeTurnId,
+        status: session.completed.status,
+        lastError,
+        now
+      });
+      if (update.changes === 0) continue;
+      insertSessionEvent.run(
+        normalizeSessionEvent(session.id, {
+          type: session.completed.status === "failed" ? "session.reconciled.failed" : "session.reconciled",
+          text:
+            session.completed.status === "failed"
+              ? "Relay reconciled a completed failed Codex turn."
+              : "Relay reconciled a completed Codex turn."
+        }, now)
+      );
+    }
+  });
+  reconcile(completedSessions);
 }
 
 function trimOldSessions() {

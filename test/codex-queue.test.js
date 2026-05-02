@@ -613,6 +613,124 @@ test("interactive Codex sessions lease commands and keep thread state", async ()
   assert.equal(messageCommand.runtime.approvalPolicy, "on-request");
 });
 
+test("interactive Codex command completion keeps turns that already completed", async () => {
+  store.resetStoreForTest();
+
+  const agent = {
+    id: "race-agent",
+    workspaces: [{ id: "demo", path: process.cwd() }]
+  };
+
+  const session = queue.createCodexSession({
+    projectId: "demo",
+    prompt: "finish quickly"
+  });
+  const command = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+
+  queue.appendCodexSessionEvents(
+    session.id,
+    [
+      { type: "thread.started", text: "started", appThreadId: "thr_fast", sessionStatus: "active" },
+      {
+        type: "turn/started",
+        text: "Turn started.",
+        appThreadId: "thr_fast",
+        activeTurnId: "turn_fast",
+        sessionStatus: "running",
+        raw: { method: "turn/started", params: { threadId: "thr_fast", turn: { id: "turn_fast" } } }
+      },
+      {
+        type: "turn/completed",
+        text: "Turn completed.",
+        raw: { method: "turn/completed", params: { threadId: "thr_fast", turn: { id: "turn_fast", status: "completed" } } }
+      }
+    ],
+    { agentId: agent.id }
+  );
+
+  const beforeCommandComplete = queue.getCodexSession(session.id);
+  assert.equal(beforeCommandComplete.status, "active");
+  assert.equal(beforeCommandComplete.activeTurnId, null);
+  assert.equal(beforeCommandComplete.leasedBy, agent.id);
+
+  assert.equal(
+    queue.completeCodexSessionCommand(
+      command.id,
+      { ok: true, appThreadId: "thr_fast", activeTurnId: "turn_fast", sessionStatus: "running" },
+      { agentId: agent.id }
+    ),
+    true
+  );
+
+  const completed = queue.getCodexSession(session.id);
+  assert.equal(completed.status, "active");
+  assert.equal(completed.activeTurnId, null);
+  assert.equal(completed.leasedBy, null);
+
+  db.prepare(`
+    UPDATE codex_sessions
+    SET status = 'running',
+        active_turn_id = 'turn_fast',
+        leased_by = ?,
+        lease_expires_at = ?
+    WHERE id = ?
+  `).run(agent.id, new Date(Date.now() + 60000).toISOString(), session.id);
+  const reconciled = queue.getCodexSession(session.id);
+  assert.equal(reconciled.status, "active");
+  assert.equal(reconciled.activeTurnId, null);
+  assert.equal(reconciled.leasedBy, null);
+  assert.equal(reconciled.events.some((event) => event.type === "session.reconciled"), true);
+
+  const failedSession = queue.createCodexSession({
+    projectId: "demo",
+    prompt: "fail quickly"
+  });
+  const failedCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+
+  queue.appendCodexSessionEvents(
+    failedSession.id,
+    [
+      { type: "thread.started", text: "started", appThreadId: "thr_failed", sessionStatus: "active" },
+      {
+        type: "turn/started",
+        text: "Turn started.",
+        raw: { method: "turn/started", params: { threadId: "thr_failed", turn: { id: "turn_failed" } } }
+      },
+      {
+        type: "turn/completed",
+        text: "Turn failed: boom",
+        raw: {
+          method: "turn/completed",
+          params: {
+            threadId: "thr_failed",
+            turn: {
+              id: "turn_failed",
+              status: "failed",
+              error: { message: "boom" }
+            }
+          }
+        }
+      }
+    ],
+    { agentId: agent.id }
+  );
+
+  assert.equal(
+    queue.completeCodexSessionCommand(
+      failedCommand.id,
+      { ok: true, appThreadId: "thr_failed", activeTurnId: "turn_failed", sessionStatus: "running" },
+      { agentId: agent.id }
+    ),
+    true
+  );
+
+  const failed = queue.getCodexSession(failedSession.id);
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.activeTurnId, null);
+  assert.equal(failed.leasedBy, null);
+  assert.match(failed.lastError, /boom/);
+});
+
 test("interactive Codex sessions can start from screenshots only", async () => {
   store.resetStoreForTest();
 
