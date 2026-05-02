@@ -145,6 +145,25 @@
   box-shadow: 0 24px 54px rgba(0, 0, 0, 0.34);
 }
 
+:root[data-theme="dark"] .quick-skills-panel {
+  border-color: rgba(139, 154, 174, 0.18);
+  background: rgba(17, 21, 27, 0.98);
+  box-shadow: 0 24px 54px rgba(0, 0, 0, 0.34);
+}
+
+:root[data-theme="dark"] .quick-skill-item,
+:root[data-theme="dark"] .quick-skill-form input[type="text"],
+:root[data-theme="dark"] .quick-skill-form select,
+:root[data-theme="dark"] .quick-skill-form textarea {
+  border-color: rgba(139, 154, 174, 0.16);
+  background: rgba(23, 28, 36, 0.72);
+}
+
+:root[data-theme="dark"] .quick-skill-edit {
+  border-left-color: rgba(139, 154, 174, 0.14);
+  background: rgba(13, 16, 20, 0.36);
+}
+
 :root[data-theme="dark"] .topbar-quick-deploy:not(:disabled) {
   color: #aab792;
 }

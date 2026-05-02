@@ -9,8 +9,10 @@ import {
   completeWorkspaceCommand as completeStoredWorkspaceCommand,
   createSessionInteraction as createStoredSessionInteraction,
   createSessionApproval as createStoredSessionApproval,
+  createQuickSkill as createStoredQuickSkill,
   createSession as createStoredSession,
   createWorkspaceCommand as createStoredWorkspaceCommand,
+  deleteQuickSkill as deleteStoredQuickSkill,
   decideSessionInteraction as decideStoredSessionInteraction,
   decideSessionApproval as decideStoredSessionApproval,
   enqueueSessionMessage as enqueueStoredSessionMessage,
@@ -19,7 +21,9 @@ import {
   getSessionCommandSessionId as getStoredSessionCommandSessionId,
   getSessionAttachmentContent as getStoredSessionAttachmentContent,
   getSession as getStoredSession,
+  listQuickSkills as listStoredQuickSkills,
   listSessions as listStoredSessions,
+  updateQuickSkill as updateStoredQuickSkill,
   acquireNextWorkspaceCommand,
   statusSnapshot,
   touchAgent,
@@ -86,6 +90,22 @@ export function listCodexSessions(limit = 20, options = {}) {
 
 export function getCodexSession(id, options = {}) {
   return getStoredSession(id, options);
+}
+
+export function listCodexQuickSkills(options = {}) {
+  return listStoredQuickSkills(options);
+}
+
+export function createCodexQuickSkill(input = {}) {
+  return createStoredQuickSkill(input);
+}
+
+export function updateCodexQuickSkill(id, input = {}) {
+  return updateStoredQuickSkill(id, input);
+}
+
+export function deleteCodexQuickSkill(id) {
+  return deleteStoredQuickSkill(id);
 }
 
 export function getCodexSessionAttachmentContent(id) {

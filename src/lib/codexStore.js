@@ -270,6 +270,39 @@ const summarizeSessionArtifactColumns = `
   created_at AS createdAt
 `;
 
+const summarizeQuickSkillColumns = `
+  id,
+  scope,
+  project_id AS projectId,
+  title,
+  description,
+  prompt,
+  mode,
+  requires_session AS requiresSession,
+  sort_order AS sortOrder,
+  created_at AS createdAt,
+  updated_at AS updatedAt,
+  archived_at AS archivedAt
+`;
+
+function defaultQuickDeployPrompt() {
+  return [
+    "请把当前对话中已经完成且适合发布的代码改动提交、推送，然后把本次结果合入主部署分支并等待部署完成。",
+    "",
+    "要求：",
+    "- 先检查 git status，只提交与本次对话需求相关的文件，不要提交未跟踪的本地预览或附件文件。",
+    "- 根据当前仓库和改动类型选择必要且可运行的验证，例如现有测试、语法检查、格式检查或轻量 smoke test；不要强行运行与项目技术栈无关的检查。",
+    "- 将本次改动提交在当前结果分支上；如果当前分支不是主部署分支，先把当前分支推送到默认远端。",
+    "- 主部署分支默认使用 main；如果仓库明确配置了其他部署分支或当前任务明确指定目标分支，则使用该分支。",
+    "- 如果当前分支已经是主部署分支，提交并推送该分支即可；否则先更新远端信息，再把本次结果合入主部署分支并推送主部署分支，以触发基于主部署分支的部署流程。",
+    "- 在隔离 worktree 中，主分支可能已被其他工作区占用；可以安全快进时，优先用 refspec 将当前结果提交推送到主部署分支，不要为了切换主分支破坏其他工作区。",
+    "- 不要 force push，不要绕过分支保护；如果遇到冲突、非快进、权限限制或必须走 PR/CI 审批，停止并说明需要的人工处理。",
+    "- 如果仓库配置了部署流程，等待部署完成并尽量确认远端服务已更新到合并后的主部署分支提交；如果没有可识别的部署流程，说明已完成提交、推送和合并。",
+    "- 如果没有可提交改动，不要空提交，直接说明当前状态。",
+    "- 最后简短汇报已运行的验证、结果分支 commit、推送目标、合并目标，以及部署或服务状态。"
+  ].join("\n");
+}
+
 export function createJob({ projectId, prompt }) {
   const now = nowIso();
   const job = {
@@ -1520,7 +1553,100 @@ export function waitForSessionInteractionDecision(id, options = {}) {
   return interaction.status === "pending" ? null : interaction;
 }
 
+export function listQuickSkills(options = {}) {
+  ensureDefaultQuickSkills();
+  const projectId = normalizeQuickSkillProjectId(options.projectId);
+  const rows = db.prepare(`
+    SELECT ${summarizeQuickSkillColumns}
+    FROM codex_quick_skills
+    WHERE archived_at IS NULL
+      AND (
+        scope = 'global'
+        OR (scope = 'project' AND project_id = @projectId)
+      )
+    ORDER BY
+      CASE scope WHEN 'global' THEN 0 ELSE 1 END,
+      sort_order ASC,
+      created_at ASC
+  `).all({ projectId });
+  return rows.map(summarizeQuickSkill);
+}
+
+export function createQuickSkill(input = {}) {
+  const now = nowIso();
+  const skill = normalizeQuickSkillInput(input);
+  const sortOrder = Number.isFinite(Number(input.sortOrder))
+    ? Math.round(Number(input.sortOrder))
+    : nextQuickSkillSortOrder(skill.scope, skill.projectId);
+  const id = crypto.randomUUID();
+
+  db.prepare(`
+    INSERT INTO codex_quick_skills (
+      id, scope, project_id, title, description, prompt, mode, requires_session, sort_order, created_at, updated_at, archived_at
+    ) VALUES (
+      @id, @scope, @projectId, @title, @description, @prompt, @mode, @requiresSession, @sortOrder, @now, @now, NULL
+    )
+  `).run({
+    id,
+    ...skill,
+    requiresSession: skill.requiresSession ? 1 : 0,
+    sortOrder,
+    now
+  });
+
+  return getQuickSkill(id);
+}
+
+export function updateQuickSkill(id, input = {}) {
+  ensureDefaultQuickSkills();
+  const existing = getQuickSkill(id);
+  if (!existing || existing.archivedAt) return notFound("Quick skill not found.");
+
+  const now = nowIso();
+  const next = normalizeQuickSkillInput(input, existing);
+  const sortOrder = Number.isFinite(Number(input.sortOrder)) ? Math.round(Number(input.sortOrder)) : existing.sortOrder;
+  db.prepare(`
+    UPDATE codex_quick_skills
+    SET scope = @scope,
+        project_id = @projectId,
+        title = @title,
+        description = @description,
+        prompt = @prompt,
+        mode = @mode,
+        requires_session = @requiresSession,
+        sort_order = @sortOrder,
+        updated_at = @now
+    WHERE id = @id
+      AND archived_at IS NULL
+  `).run({
+    id,
+    ...next,
+    requiresSession: next.requiresSession ? 1 : 0,
+    sortOrder,
+    now
+  });
+
+  return getQuickSkill(id);
+}
+
+export function deleteQuickSkill(id) {
+  ensureDefaultQuickSkills();
+  const existing = getQuickSkill(id);
+  if (!existing || existing.archivedAt) return notFound("Quick skill not found.");
+
+  const now = nowIso();
+  db.prepare(`
+    UPDATE codex_quick_skills
+    SET archived_at = @now,
+        updated_at = @now
+    WHERE id = @id
+      AND archived_at IS NULL
+  `).run({ id, now });
+  return { ...existing, archivedAt: now };
+}
+
 export function resetStoreForTest() {
+  db.prepare("DELETE FROM codex_quick_skills").run();
   db.prepare("DELETE FROM codex_workspace_commands").run();
   db.prepare("DELETE FROM codex_session_artifacts").run();
   db.prepare("DELETE FROM codex_session_attachments").run();
@@ -1537,6 +1663,7 @@ export function resetStoreForTest() {
   fs.rmSync(artifactStorageDir, { recursive: true, force: true });
   fs.mkdirSync(attachmentStorageDir, { recursive: true });
   fs.mkdirSync(artifactStorageDir, { recursive: true });
+  ensureDefaultQuickSkills();
 }
 
 function migrate() {
@@ -1752,6 +1879,24 @@ function migrate() {
 
     CREATE INDEX IF NOT EXISTS idx_codex_session_interactions_status
       ON codex_session_interactions(status, created_at);
+
+    CREATE TABLE IF NOT EXISTS codex_quick_skills (
+      id TEXT PRIMARY KEY,
+      scope TEXT NOT NULL CHECK (scope IN ('global', 'project')),
+      project_id TEXT NOT NULL DEFAULT '',
+      title TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      prompt TEXT NOT NULL,
+      mode TEXT NOT NULL CHECK (mode IN ('execute', 'plan')) DEFAULT 'execute',
+      requires_session INTEGER NOT NULL DEFAULT 0,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      archived_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_codex_quick_skills_scope_project_order
+      ON codex_quick_skills(scope, project_id, archived_at, sort_order, created_at);
   `);
 
   ensureColumn("codex_sessions", "archived_at", "TEXT");
@@ -1807,7 +1952,11 @@ function migrate() {
 
     CREATE INDEX IF NOT EXISTS idx_codex_session_interactions_status
       ON codex_session_interactions(status, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_codex_quick_skills_scope_project_order
+      ON codex_quick_skills(scope, project_id, archived_at, sort_order, created_at);
   `);
+  ensureDefaultQuickSkills();
 }
 
 function ensureColumn(table, column, definition) {
@@ -2373,6 +2522,13 @@ function summarizeWorkspaceCommand(row) {
   };
 }
 
+function summarizeQuickSkill(row) {
+  return {
+    ...row,
+    requiresSession: Boolean(row.requiresSession)
+  };
+}
+
 function summarizeSessionMessage(row, attachments = []) {
   return {
     ...row,
@@ -2674,6 +2830,82 @@ function getSessionArtifact(id) {
     WHERE id = ?
   `).get(id);
   return row ? summarizeSessionArtifact(row) : null;
+}
+
+function getQuickSkill(id) {
+  const row = db.prepare(`
+    SELECT ${summarizeQuickSkillColumns}
+    FROM codex_quick_skills
+    WHERE id = ?
+  `).get(String(id || "").trim());
+  return row ? summarizeQuickSkill(row) : null;
+}
+
+function ensureDefaultQuickSkills() {
+  const now = nowIso();
+  db.prepare(`
+    INSERT OR IGNORE INTO codex_quick_skills (
+      id, scope, project_id, title, description, prompt, mode, requires_session, sort_order, created_at, updated_at, archived_at
+    ) VALUES (
+      'builtin.quick-deploy',
+      'global',
+      '',
+      '提交推送部署',
+      '提交当前结果，合入主部署分支并等待部署完成。',
+      @prompt,
+      'execute',
+      1,
+      10,
+      @now,
+      @now,
+      NULL
+    )
+  `).run({ prompt: defaultQuickDeployPrompt(), now });
+}
+
+function nextQuickSkillSortOrder(scope, projectId) {
+  const row = db.prepare(`
+    SELECT COALESCE(MAX(sort_order), 0) AS maxOrder
+    FROM codex_quick_skills
+    WHERE scope = ?
+      AND project_id = ?
+      AND archived_at IS NULL
+  `).get(scope, projectId);
+  return Number(row?.maxOrder || 0) + 10;
+}
+
+function normalizeQuickSkillInput(input = {}, existing = null) {
+  const scope = normalizeQuickSkillScope(input.scope ?? existing?.scope ?? "");
+  const projectId = scope === "project" ? normalizeQuickSkillProjectId(input.projectId ?? existing?.projectId ?? "") : "";
+  if (scope === "project" && !projectId) return badRequest("Project quick skills require a project id.");
+
+  const title = String(input.title ?? existing?.title ?? "").trim().slice(0, 80);
+  if (!title) return badRequest("Quick skill title is required.");
+
+  const prompt = String(input.prompt ?? existing?.prompt ?? "").trim().slice(0, 12000);
+  if (!prompt) return badRequest("Quick skill prompt is required.");
+
+  return {
+    scope,
+    projectId,
+    title,
+    description: String(input.description ?? existing?.description ?? "").trim().slice(0, 240),
+    prompt,
+    mode: normalizeSessionMode(input.mode ?? existing?.mode ?? "execute"),
+    requiresSession:
+      input.requiresSession === undefined && existing
+        ? Boolean(existing.requiresSession)
+        : input.requiresSession === true || input.requiresSession === "true" || input.requiresSession === 1
+  };
+}
+
+function normalizeQuickSkillScope(value) {
+  const scope = String(value || "").trim().toLowerCase();
+  return scope === "global" ? "global" : "project";
+}
+
+function normalizeQuickSkillProjectId(value) {
+  return String(value || "").trim().slice(0, 160);
 }
 
 function listMessageAttachments(messageId) {

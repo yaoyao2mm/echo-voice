@@ -1,20 +1,5 @@
 export function installCodex(app) {
   const { constants, elements, state } = app;
-  const quickDeployPrompt = [
-    "请把当前对话中已经完成且适合发布的代码改动提交、推送，然后把本次结果合入主部署分支并等待部署完成。",
-    "",
-    "要求：",
-    "- 先检查 git status，只提交与本次对话需求相关的文件，不要提交未跟踪的本地预览或附件文件。",
-    "- 根据当前仓库和改动类型选择必要且可运行的验证，例如现有测试、语法检查、格式检查或轻量 smoke test；不要强行运行与项目技术栈无关的检查。",
-    "- 将本次改动提交在当前结果分支上；如果当前分支不是主部署分支，先把当前分支推送到默认远端。",
-    "- 主部署分支默认使用 main；如果仓库明确配置了其他部署分支或当前任务明确指定目标分支，则使用该分支。",
-    "- 如果当前分支已经是主部署分支，提交并推送该分支即可；否则先更新远端信息，再把本次结果合入主部署分支并推送主部署分支，以触发基于主部署分支的部署流程。",
-    "- 在隔离 worktree 中，主分支可能已被其他工作区占用；可以安全快进时，优先用 refspec 将当前结果提交推送到主部署分支，不要为了切换主分支破坏其他工作区。",
-    "- 不要 force push，不要绕过分支保护；如果遇到冲突、非快进、权限限制或必须走 PR/CI 审批，停止并说明需要的人工处理。",
-    "- 如果仓库配置了部署流程，等待部署完成并尽量确认远端服务已更新到合并后的主部署分支提交；如果没有可识别的部署流程，说明已完成提交、推送和合并。",
-    "- 如果没有可提交改动，不要空提交，直接说明当前状态。",
-    "- 最后简短汇报已运行的验证、结果分支 commit、推送目标、合并目标，以及部署或服务状态。"
-  ].join("\n");
 
   app.hasPendingComposerAttachments = function hasPendingComposerAttachments() {
     return Number(state.composerAttachmentPendingCount || 0) > 0;
@@ -31,6 +16,7 @@ export function installCodex(app) {
     try {
       const data = await app.apiGet("/api/codex/status");
       app.renderCodexStatus(data);
+      await app.loadQuickSkills({ silent: true });
       await app.loadCodexJobs({ skipSelectedDetailLoad: Boolean(state.sessionEventSourceId) });
     } catch (error) {
       if (app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) return;
@@ -212,6 +198,7 @@ export function installCodex(app) {
 
   app.openProjectSwitcher = function openProjectSwitcher() {
     if (!elements.projectSwitcherPanel) return;
+    app.closeQuickSkillsPanel?.();
     app.setTopbarCollapsed(false);
     elements.projectSwitcherPanel.hidden = false;
     elements.projectSwitcherButton?.setAttribute("aria-expanded", "true");
@@ -241,9 +228,12 @@ export function installCodex(app) {
   };
 
   app.handleDocumentClick = function handleDocumentClick(event) {
-    if (!elements.projectSwitcher || elements.projectSwitcherPanel?.hidden) return;
-    if (elements.projectSwitcher.contains(event.target)) return;
-    app.closeProjectSwitcher();
+    if (elements.projectSwitcher && !elements.projectSwitcherPanel?.hidden && !elements.projectSwitcher.contains(event.target)) {
+      app.closeProjectSwitcher();
+    }
+    if (elements.quickSkills && !elements.quickSkillsPanel?.hidden && !elements.quickSkills.contains(event.target)) {
+      app.closeQuickSkillsPanel();
+    }
   };
 
   app.toggleSessionSidebar = function toggleSessionSidebar() {
@@ -383,10 +373,137 @@ export function installCodex(app) {
     }
   };
 
-  app.sendQuickDeployPrompt = async function sendQuickDeployPrompt() {
+  app.loadQuickSkills = async function loadQuickSkills({ silent = false } = {}) {
+    if (!app.isLoggedIn() || !state.token) return;
+    const projectId = app.currentProjectId();
+    const params = new URLSearchParams();
+    if (projectId) params.set("projectId", projectId);
+
+    try {
+      const data = await app.apiGet(`/api/codex/quick-skills?${params.toString()}`);
+      state.quickSkills = Array.isArray(data.items) ? data.items.map(app.normalizeQuickSkill).filter(Boolean) : [];
+      state.quickSkillsLoadedProjectId = projectId;
+      app.renderQuickSkills();
+      app.updateComposerAvailability();
+    } catch (error) {
+      if (!silent && !app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) app.toast(error.message);
+    }
+  };
+
+  app.normalizeQuickSkill = function normalizeQuickSkill(skill = {}) {
+    const id = String(skill.id || "").trim();
+    const title = String(skill.title || "").trim();
+    const prompt = String(skill.prompt || "").trim();
+    if (!id || !title || !prompt) return null;
+    return {
+      id,
+      scope: skill.scope === "global" ? "global" : "project",
+      projectId: String(skill.projectId || "").trim(),
+      title: title.slice(0, 80),
+      description: String(skill.description || "").trim().slice(0, 240),
+      prompt: prompt.slice(0, 12000),
+      mode: skill.mode === "plan" ? "plan" : "execute",
+      requiresSession: Boolean(skill.requiresSession),
+      sortOrder: Number(skill.sortOrder || 0),
+      createdAt: String(skill.createdAt || ""),
+      updatedAt: String(skill.updatedAt || "")
+    };
+  };
+
+  app.toggleQuickSkillsPanel = async function toggleQuickSkillsPanel(event) {
+    event?.stopPropagation();
+    if (!elements.quickSkillsPanel) return;
+    if (elements.quickSkillsPanel.hidden) {
+      await app.openQuickSkillsPanel();
+      return;
+    }
+    app.closeQuickSkillsPanel({ restoreFocus: true });
+  };
+
+  app.openQuickSkillsPanel = async function openQuickSkillsPanel() {
+    if (!elements.quickSkillsPanel) return;
+    app.closeProjectSwitcher();
+    app.setTopbarCollapsed(false);
+    elements.quickSkillsPanel.hidden = false;
+    elements.quickSkillsButton?.setAttribute("aria-expanded", "true");
+    if (state.quickSkillsLoadedProjectId !== app.currentProjectId()) await app.loadQuickSkills({ silent: true });
+    app.renderQuickSkills();
+  };
+
+  app.closeQuickSkillsPanel = function closeQuickSkillsPanel({ restoreFocus = false } = {}) {
+    if (!elements.quickSkillsPanel || elements.quickSkillsPanel.hidden) return;
+    elements.quickSkillsPanel.hidden = true;
+    elements.quickSkillsButton?.setAttribute("aria-expanded", "false");
+    app.resetQuickSkillForm();
+    if (restoreFocus) elements.quickSkillsButton?.focus({ preventScroll: true });
+  };
+
+  app.renderQuickSkills = function renderQuickSkills() {
+    if (!elements.quickSkillsList) return;
+    const projectId = app.currentProjectId();
+    const projectLabel = projectId ? app.sessionProjectLabel(projectId) : "未选择工程";
+    const globalSkills = state.quickSkills.filter((skill) => skill.scope === "global");
+    const projectSkills = state.quickSkills.filter((skill) => skill.scope === "project");
+    if (elements.quickSkillsMeta) {
+      elements.quickSkillsMeta.textContent = `${globalSkills.length} 个全局 · ${projectSkills.length} 个项目`;
+    }
+
+    elements.quickSkillsList.innerHTML = "";
+    if (state.quickSkills.length === 0) {
+      elements.quickSkillsList.innerHTML = '<div class="quick-skills-empty">还没有快速指令。</div>';
+      return;
+    }
+
+    const groups = [
+      { title: "全局", meta: "所有项目可用", items: globalSkills },
+      { title: "项目", meta: projectLabel, items: projectSkills }
+    ];
+    for (const group of groups) {
+      const section = document.createElement("section");
+      section.className = "quick-skill-group";
+      section.innerHTML = `
+        <div class="quick-skill-group-head">
+          <strong>${app.escapeHtml(group.title)}</strong>
+          <span>${app.escapeHtml(group.meta)}</span>
+        </div>
+      `;
+      const wheel = document.createElement("div");
+      wheel.className = "quick-skill-wheel";
+      if (group.items.length === 0) {
+        wheel.innerHTML = '<div class="quick-skills-empty compact">暂无</div>';
+      } else {
+        for (const skill of group.items) {
+          wheel.append(app.renderQuickSkillButton(skill));
+        }
+      }
+      section.append(wheel);
+      elements.quickSkillsList.append(section);
+    }
+  };
+
+  app.renderQuickSkillButton = function renderQuickSkillButton(skill) {
+    const item = document.createElement("div");
+    item.className = "quick-skill-item";
+    item.dataset.skillId = skill.id;
+    item.innerHTML = `
+      <button class="quick-skill-run" type="button">
+        <span class="quick-skill-chamber" aria-hidden="true"></span>
+        <span class="quick-skill-copy">
+          <strong>${app.escapeHtml(skill.title)}</strong>
+          <span>${app.escapeHtml(skill.description || (skill.mode === "plan" ? "计划模式" : "执行模式"))}</span>
+        </span>
+      </button>
+      <button class="quick-skill-edit" type="button" aria-label="编辑 ${app.escapeHtml(skill.title)}" title="编辑">编辑</button>
+    `;
+    item.querySelector(".quick-skill-run").addEventListener("click", () => app.sendQuickSkill(skill));
+    item.querySelector(".quick-skill-edit").addEventListener("click", () => app.editQuickSkill(skill.id));
+    return item;
+  };
+
+  app.sendQuickSkill = async function sendQuickSkill(skill) {
     if (!app.ensurePaired()) return;
     if (app.hasPendingComposerAttachments()) {
-      app.toast("图片还在处理中，请稍候再部署");
+      app.toast("图片还在处理中，请稍候再发送");
       return;
     }
     if (elements.codexPrompt.value.trim() || state.composerAttachments.length > 0) {
@@ -401,23 +518,24 @@ export function installCodex(app) {
       return;
     }
     if (!app.codexCommandsAvailable()) {
-      app.toast(state.codexConnectionState === "error" ? "连接恢复后再部署" : "桌面 agent 在线后再部署");
+      app.toast(state.codexConnectionState === "error" ? "连接恢复后再发送" : "桌面 agent 在线后再发送");
       return;
     }
-    if (!session) {
-      app.toast("先打开要部署的对话");
+    if (skill.requiresSession && !session) {
+      app.toast("先打开要使用的对话");
       return;
     }
-    if (!app.canQuickDeploySelectedSession()) {
-      app.toast("当前会话暂时不能部署");
+    if (skill.requiresSession && !app.canRunSessionQuickSkill()) {
+      app.toast("当前会话暂时不能使用这个指令");
       return;
     }
 
     localStorage.setItem("echoCodexProject", projectId);
-    app.setComposerBusy(true, "合并部署中");
+    app.closeQuickSkillsPanel();
+    app.setComposerBusy(true, "发送中");
     try {
       const runtime = app.currentRuntimeDraft();
-      const data = await app.sendCodexPrompt({ projectId, prompt: quickDeployPrompt, runtime, attachments: [], mode: "execute" });
+      const data = await app.sendCodexPrompt({ projectId, prompt: skill.prompt, runtime, attachments: [], mode: skill.mode });
       state.selectedCodexJobId = data.session.id;
       state.selectedCodexSession = data.session;
       state.composingNewSession = false;
@@ -433,6 +551,143 @@ export function installCodex(app) {
       }
     } finally {
       app.setComposerBusy(false);
+    }
+  };
+
+  app.startNewQuickSkill = function startNewQuickSkill() {
+    app.fillQuickSkillForm({
+      id: "",
+      scope: app.currentProjectId() ? "project" : "global",
+      projectId: app.currentProjectId(),
+      title: "",
+      description: "",
+      prompt: "",
+      mode: state.composerPlanMode ? "plan" : "execute",
+      requiresSession: false
+    });
+  };
+
+  app.editQuickSkill = function editQuickSkill(id) {
+    const skill = state.quickSkills.find((item) => item.id === id);
+    if (!skill) return;
+    app.fillQuickSkillForm(skill);
+  };
+
+  app.fillQuickSkillForm = function fillQuickSkillForm(skill) {
+    state.quickSkillEditingId = skill.id || "";
+    elements.quickSkillForm.hidden = false;
+    elements.quickSkillId.value = skill.id || "";
+    elements.quickSkillTitle.value = skill.title || "";
+    elements.quickSkillScope.value = skill.scope === "global" ? "global" : "project";
+    elements.quickSkillMode.value = skill.mode === "plan" ? "plan" : "execute";
+    elements.quickSkillRequiresSession.checked = Boolean(skill.requiresSession);
+    elements.quickSkillDescription.value = skill.description || "";
+    elements.quickSkillPrompt.value = skill.prompt || "";
+    elements.quickSkillDeleteButton.hidden = !skill.id;
+    elements.quickSkillSaveButton.textContent = skill.id ? "保存" : "创建";
+    app.updateQuickSkillFormControls();
+    elements.quickSkillTitle.focus({ preventScroll: true });
+  };
+
+  app.resetQuickSkillForm = function resetQuickSkillForm() {
+    if (!elements.quickSkillForm) return;
+    state.quickSkillEditingId = "";
+    elements.quickSkillForm.hidden = true;
+    elements.quickSkillId.value = "";
+    elements.quickSkillTitle.value = "";
+    elements.quickSkillScope.value = app.currentProjectId() ? "project" : "global";
+    elements.quickSkillMode.value = "execute";
+    elements.quickSkillRequiresSession.checked = false;
+    elements.quickSkillDescription.value = "";
+    elements.quickSkillPrompt.value = "";
+    elements.quickSkillDeleteButton.hidden = true;
+    app.updateQuickSkillFormControls();
+  };
+
+  app.updateQuickSkillFormControls = function updateQuickSkillFormControls() {
+    if (!elements.quickSkillForm) return;
+    const disabled = state.quickSkillsBusy;
+    for (const control of [
+      elements.quickSkillTitle,
+      elements.quickSkillScope,
+      elements.quickSkillMode,
+      elements.quickSkillRequiresSession,
+      elements.quickSkillDescription,
+      elements.quickSkillPrompt,
+      elements.quickSkillDeleteButton,
+      elements.quickSkillCancelButton,
+      elements.quickSkillSaveButton
+    ]) {
+      if (control) control.disabled = disabled;
+    }
+    if (elements.quickSkillScope && !app.currentProjectId() && elements.quickSkillScope.value === "project") {
+      elements.quickSkillScope.value = "global";
+    }
+    if (elements.quickSkillScope) {
+      for (const option of Array.from(elements.quickSkillScope.options || [])) {
+        if (option.value === "project") option.disabled = !app.currentProjectId();
+      }
+    }
+  };
+
+  app.saveQuickSkill = async function saveQuickSkill(event) {
+    event?.preventDefault();
+    if (!app.ensurePaired()) return;
+    const id = elements.quickSkillId.value.trim();
+    const scope = elements.quickSkillScope.value === "global" ? "global" : "project";
+    const body = {
+      scope,
+      projectId: scope === "project" ? app.currentProjectId() : "",
+      title: elements.quickSkillTitle.value.trim(),
+      description: elements.quickSkillDescription.value.trim(),
+      prompt: elements.quickSkillPrompt.value.trim(),
+      mode: elements.quickSkillMode.value === "plan" ? "plan" : "execute",
+      requiresSession: elements.quickSkillRequiresSession.checked
+    };
+    if (!body.title || !body.prompt) {
+      app.toast("名称和指令不能为空");
+      return;
+    }
+    if (body.scope === "project" && !body.projectId) {
+      app.toast("先选择工程，或保存为全局指令");
+      return;
+    }
+
+    state.quickSkillsBusy = true;
+    app.updateQuickSkillFormControls();
+    try {
+      if (id) {
+        await app.apiPost(`/api/codex/quick-skills/${encodeURIComponent(id)}`, body);
+        app.toast("已保存");
+      } else {
+        await app.apiPost("/api/codex/quick-skills", body);
+        app.toast("已创建");
+      }
+      app.resetQuickSkillForm();
+      await app.loadQuickSkills();
+    } catch (error) {
+      if (!app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) app.toast(error.message);
+    } finally {
+      state.quickSkillsBusy = false;
+      app.updateQuickSkillFormControls();
+    }
+  };
+
+  app.deleteEditingQuickSkill = async function deleteEditingQuickSkill() {
+    const id = elements.quickSkillId.value.trim();
+    if (!id) return;
+    state.quickSkillsBusy = true;
+    app.updateQuickSkillFormControls();
+    try {
+      await app.apiPost(`/api/codex/quick-skills/${encodeURIComponent(id)}/delete`, {});
+      app.toast("已删除");
+      app.resetQuickSkillForm();
+      await app.loadQuickSkills();
+    } catch (error) {
+      if (!app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) app.toast(error.message);
+    } finally {
+      state.quickSkillsBusy = false;
+      app.updateQuickSkillFormControls();
     }
   };
 
@@ -510,7 +765,7 @@ export function installCodex(app) {
     return state.selectedCodexSession;
   };
 
-  app.canQuickDeploySelectedSession = function canQuickDeploySelectedSession() {
+  app.canRunSessionQuickSkill = function canRunSessionQuickSkill() {
     const session = app.selectedSessionForComposer();
     return Boolean(session && app.sessionCanAcceptFollowUp(session) && !app.sessionHasPendingWork(session));
   };
@@ -808,9 +1063,8 @@ export function installCodex(app) {
         state.composerBusy || attachmentsPending || !commandsAvailable || hasDraft || !app.canCompactSelectedSession();
     }
     app.updateProjectCreateControls();
-    if (elements.quickDeployButton) {
-      elements.quickDeployButton.disabled =
-        state.composerBusy || attachmentsPending || !commandsAvailable || !hasProject || hasDraft || !app.canQuickDeploySelectedSession();
+    if (elements.quickSkillsButton) {
+      elements.quickSkillsButton.disabled = state.composerBusy;
     }
     app.updateStopButton?.();
     app.refreshComposerMeta();
@@ -984,6 +1238,11 @@ export function installCodex(app) {
 
   app.handleGlobalKeydown = function handleGlobalKeydown(event) {
     if (event.key !== "Escape") return;
+    if (elements.quickSkillsPanel && !elements.quickSkillsPanel.hidden) {
+      event.preventDefault();
+      app.closeQuickSkillsPanel({ restoreFocus: true });
+      return;
+    }
     if (elements.projectSwitcherPanel && !elements.projectSwitcherPanel.hidden) {
       event.preventDefault();
       app.closeProjectSwitcher({ restoreFocus: true });
@@ -1016,6 +1275,7 @@ export function installCodex(app) {
     app.closeProjectSwitcher();
     if (previous !== projectId) {
       try {
+        await app.loadQuickSkills({ silent: true });
         await app.loadCodexJobs();
       } catch (error) {
         if (!app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {

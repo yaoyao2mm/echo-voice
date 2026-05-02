@@ -1,7 +1,7 @@
-import { installAuth } from "./auth.js?v=86";
-import { installCodex } from "./codex.js?v=86";
-import { createAppContext, installCore } from "./core.js?v=86";
-import { installSessions } from "./sessions.js?v=86";
+import { installAuth } from "./auth.js?v=87";
+import { installCodex } from "./codex.js?v=87";
+import { createAppContext, installCore } from "./core.js?v=87";
+import { installSessions } from "./sessions.js?v=87";
 
 export function createApp(windowRef = window, documentRef = document) {
   const app = createAppContext(windowRef, documentRef);
@@ -28,7 +28,12 @@ export function createApp(windowRef = window, documentRef = document) {
     elements.sendCodexButton.addEventListener("click", app.sendToCodex);
     elements.stopCodexTurnButton?.addEventListener("click", app.cancelSelectedCodexTurn);
     elements.composerStatusText?.addEventListener("click", app.toggleTurnActivityDetails);
-    elements.quickDeployButton?.addEventListener("click", app.sendQuickDeployPrompt);
+    elements.quickSkillsButton?.addEventListener("click", app.toggleQuickSkillsPanel);
+    elements.quickSkillNewButton?.addEventListener("click", app.startNewQuickSkill);
+    elements.quickSkillForm?.addEventListener("submit", app.saveQuickSkill);
+    elements.quickSkillCancelButton?.addEventListener("click", app.resetQuickSkillForm);
+    elements.quickSkillDeleteButton?.addEventListener("click", app.deleteEditingQuickSkill);
+    elements.quickSkillScope?.addEventListener("change", app.updateQuickSkillFormControls);
     elements.composerPlanModeButton?.addEventListener("click", app.toggleComposerPlanMode);
     elements.compactContextButton?.addEventListener("click", () => app.requestContextCompaction({ automatic: false }));
     elements.toggleSessionsButton.addEventListener("click", app.toggleSessionSidebar);
@@ -74,6 +79,7 @@ export function createApp(windowRef = window, documentRef = document) {
 
     app.renderComposerAttachments();
     app.updateComposerModeControls?.();
+    app.resetQuickSkillForm?.();
     app.refreshWorktreeModeControls?.();
     app.syncComposerInputHeight();
     app.updateSessionSidebarToggle(false);

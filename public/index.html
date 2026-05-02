@@ -15,8 +15,8 @@
         if (localStorage.getItem("echoTheme") === "dark") document.documentElement.dataset.theme = "dark";
       } catch {}
     </script>
-    <link rel="manifest" href="/manifest.webmanifest?v=85" />
-    <link rel="stylesheet" href="/styles.css?v=85" />
+    <link rel="manifest" href="/manifest.webmanifest?v=87" />
+    <link rel="stylesheet" href="/styles.css?v=87" />
   </head>
   <body>
     <main class="shell">
@@ -91,26 +91,72 @@
             </div>
           </div>
         </div>
-        <button
-          id="quickDeployButton"
-          class="topbar-quick-deploy"
-          type="button"
-          aria-label="提交、推送、合并到主分支并部署当前对话"
-          title="提交、推送、合并到主分支并部署当前对话"
-          data-authenticated
-          hidden
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              d="M12 16.5v-9m-3.5 3.5L12 7.5l3.5 3.5M7.5 18.5h8.7a3.8 3.8 0 0 0 .7-7.5A5.2 5.2 0 0 0 6.7 12.2 3.2 3.2 0 0 0 7.5 18.5Z"
-              fill="none"
-              stroke="currentColor"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="1.8"
-            />
-          </svg>
-        </button>
+        <div id="quickSkills" class="topbar-quick-skills" data-authenticated hidden>
+          <button
+            id="quickSkillsButton"
+            class="topbar-quick-deploy quick-skills-trigger"
+            type="button"
+            aria-label="打开快速指令"
+            aria-haspopup="dialog"
+            aria-expanded="false"
+            aria-controls="quickSkillsPanel"
+            title="快速指令"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="7.2" fill="none" stroke="currentColor" stroke-width="1.8" />
+              <circle cx="12" cy="12" r="1.6" fill="currentColor" />
+              <circle cx="12" cy="7.4" r="1.25" fill="currentColor" />
+              <circle cx="16" cy="14.3" r="1.25" fill="currentColor" />
+              <circle cx="8" cy="14.3" r="1.25" fill="currentColor" />
+            </svg>
+          </button>
+          <section id="quickSkillsPanel" class="quick-skills-panel" role="dialog" aria-label="快速指令" hidden>
+            <div class="quick-skills-head">
+              <div>
+                <strong>快速指令</strong>
+                <span id="quickSkillsMeta">全局与当前项目</span>
+              </div>
+              <button id="quickSkillNewButton" class="icon-button quick-skill-add" type="button" aria-label="新增快速指令" title="新增快速指令">
+                +
+              </button>
+            </div>
+            <div id="quickSkillsList" class="quick-skills-list"></div>
+            <form id="quickSkillForm" class="quick-skill-form" hidden>
+              <input id="quickSkillId" type="hidden" />
+              <label class="field-label" for="quickSkillTitle">名称</label>
+              <input id="quickSkillTitle" type="text" autocomplete="off" maxlength="80" />
+              <div class="quick-skill-form-row">
+                <label class="field-label" for="quickSkillScope">
+                  范围
+                  <select id="quickSkillScope">
+                    <option value="project">当前项目</option>
+                    <option value="global">全局</option>
+                  </select>
+                </label>
+                <label class="field-label" for="quickSkillMode">
+                  模式
+                  <select id="quickSkillMode">
+                    <option value="execute">执行</option>
+                    <option value="plan">计划</option>
+                  </select>
+                </label>
+              </div>
+              <label class="field-label quick-skill-checkbox" for="quickSkillRequiresSession">
+                <input id="quickSkillRequiresSession" type="checkbox" />
+                <span>需要当前会话</span>
+              </label>
+              <label class="field-label" for="quickSkillDescription">说明</label>
+              <input id="quickSkillDescription" type="text" autocomplete="off" maxlength="240" />
+              <label class="field-label" for="quickSkillPrompt">指令</label>
+              <textarea id="quickSkillPrompt" rows="7"></textarea>
+              <div class="quick-skill-form-actions">
+                <button id="quickSkillDeleteButton" class="secondary" type="button" hidden>删除</button>
+                <button id="quickSkillCancelButton" class="secondary" type="button">取消</button>
+                <button id="quickSkillSaveButton" class="primary" type="submit">保存</button>
+              </div>
+            </form>
+          </section>
+        </div>
       </header>
 
       <section id="loginPanel" class="auth-panel" hidden>
@@ -394,6 +440,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=85" type="module"></script>
+    <script src="/app.js?v=87" type="module"></script>
   </body>
 </html>

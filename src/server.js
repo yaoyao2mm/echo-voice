@@ -28,15 +28,19 @@ import {
   getCodexSessionAttachmentContent,
   createCodexSessionInteraction,
   createCodexSessionApproval,
+  createCodexQuickSkill,
   createCodexSession,
   createCodexWorkspace,
+  deleteCodexQuickSkill,
   decideCodexSessionInteraction,
   decideCodexSessionApproval,
   enqueueCodexSessionMessage,
   getCodexSession,
   getCodexWorkspaceCommand,
+  listCodexQuickSkills,
   listCodexSessions,
   subscribeCodexSession,
+  updateCodexQuickSkill,
   waitForCodexSessionApproval,
   waitForCodexSessionInteraction,
   waitForCodexSessionCommand,
@@ -218,6 +222,75 @@ app.get("/api/codex/status", (req, res) => {
   }
 
   res.json(codexStatus());
+});
+
+app.get("/api/codex/quick-skills", (req, res) => {
+  if (config.mode !== "relay") {
+    return res.status(400).json({ error: "Codex quick skills are only available in relay mode." });
+  }
+
+  res.json({
+    items: listCodexQuickSkills({
+      projectId: req.query.projectId
+    })
+  });
+});
+
+app.post("/api/codex/quick-skills", (req, res) => {
+  try {
+    if (config.mode !== "relay") {
+      return res.status(400).json({ error: "Codex quick skills are only available in relay mode." });
+    }
+
+    const skill = createCodexQuickSkill({
+      scope: req.body.scope,
+      projectId: req.body.projectId,
+      title: req.body.title,
+      description: req.body.description,
+      prompt: req.body.prompt,
+      mode: req.body.mode,
+      requiresSession: req.body.requiresSession,
+      sortOrder: req.body.sortOrder
+    });
+    res.json({ skill });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.post("/api/codex/quick-skills/:id", (req, res) => {
+  try {
+    if (config.mode !== "relay") {
+      return res.status(400).json({ error: "Codex quick skills are only available in relay mode." });
+    }
+
+    const skill = updateCodexQuickSkill(req.params.id, {
+      scope: req.body.scope,
+      projectId: req.body.projectId,
+      title: req.body.title,
+      description: req.body.description,
+      prompt: req.body.prompt,
+      mode: req.body.mode,
+      requiresSession: req.body.requiresSession,
+      sortOrder: req.body.sortOrder
+    });
+    res.json({ skill });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.post("/api/codex/quick-skills/:id/delete", (req, res) => {
+  try {
+    if (config.mode !== "relay") {
+      return res.status(400).json({ error: "Codex quick skills are only available in relay mode." });
+    }
+
+    const skill = deleteCodexQuickSkill(req.params.id);
+    res.json({ skill });
+  } catch (error) {
+    handleError(res, error);
+  }
 });
 
 app.post("/api/codex/workspaces", (req, res) => {

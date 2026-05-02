@@ -667,8 +667,21 @@
   body.mobile-ui .topbar-quick-deploy {
     width: 34px;
     min-height: 34px;
+  }
+
+  body.mobile-ui .topbar-quick-skills {
     margin-left: auto;
     margin-right: max(8px, var(--safe-right));
+  }
+
+  body.mobile-ui .quick-skills-panel {
+    right: calc(-1 * max(8px, var(--safe-right)));
+    width: min(380px, calc(100vw - 20px));
+    max-height: min(620px, calc(var(--app-height) - var(--safe-top) - 92px));
+  }
+
+  body.mobile-ui .quick-skill-wheel {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   body.mobile-ui .codex-section,

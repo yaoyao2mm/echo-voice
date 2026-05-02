@@ -137,6 +137,7 @@ export function installAuth(app) {
     app.closeCodexSessionStream?.();
     app.stopPairingScanner();
     app.closeSessionSidebar({ restoreFocus: false });
+    app.closeQuickSkillsPanel?.({ restoreFocus: false });
     app.updateAuthView("已退出，请重新登录。");
   };
 
@@ -152,6 +153,7 @@ export function installAuth(app) {
     app.closeCodexSessionStream?.();
     app.stopPairingScanner();
     app.closeSessionSidebar({ restoreFocus: false });
+    app.closeQuickSkillsPanel?.({ restoreFocus: false });
     app.updateAuthView(message);
   };
 
@@ -205,6 +207,7 @@ export function installAuth(app) {
     }
     app.closeCodexSessionStream?.();
     app.stopPairingScanner();
+    app.closeQuickSkillsPanel?.({ restoreFocus: false });
     app.updateAuthView(message);
   };
 

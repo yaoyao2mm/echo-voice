@@ -94,6 +94,50 @@ test("interactive Codex sessions are scoped to one project", () => {
   assert.equal(continued.messages.filter((message) => message.role === "user").length, 2);
 });
 
+test("quick skills include globals and current project skills only", () => {
+  store.resetStoreForTest();
+
+  const defaults = queue.listCodexQuickSkills({ projectId: "echo" });
+  assert.equal(defaults.some((skill) => skill.id === "builtin.quick-deploy" && skill.scope === "global"), true);
+
+  const globalSkill = queue.createCodexQuickSkill({
+    scope: "global",
+    title: "检查状态",
+    description: "快速查看当前状态",
+    prompt: "请检查当前项目状态。",
+    mode: "plan"
+  });
+  const echoSkill = queue.createCodexQuickSkill({
+    scope: "project",
+    projectId: "echo",
+    title: "Echo 发布检查",
+    prompt: "请按 Echo 的发布前检查清单执行。",
+    requiresSession: true
+  });
+  queue.createCodexQuickSkill({
+    scope: "project",
+    projectId: "metio",
+    title: "Metio 发布检查",
+    prompt: "请按 Metio 的发布前检查清单执行。"
+  });
+
+  const echoSkills = queue.listCodexQuickSkills({ projectId: "echo" });
+  assert.equal(echoSkills.some((skill) => skill.id === globalSkill.id && skill.scope === "global" && skill.mode === "plan"), true);
+  assert.equal(echoSkills.some((skill) => skill.id === echoSkill.id && skill.requiresSession), true);
+  assert.equal(echoSkills.some((skill) => skill.projectId === "metio"), false);
+
+  const updated = queue.updateCodexQuickSkill(echoSkill.id, {
+    scope: "project",
+    projectId: "echo",
+    title: "Echo 上线检查",
+    prompt: "请执行 Echo 上线检查。"
+  });
+  assert.equal(updated.title, "Echo 上线检查");
+
+  queue.deleteCodexQuickSkill(globalSkill.id);
+  assert.equal(queue.listCodexQuickSkills({ projectId: "echo" }).some((skill) => skill.id === globalSkill.id), false);
+});
+
 test("session delta batches append to the visible assistant draft", async () => {
   store.resetStoreForTest();
 

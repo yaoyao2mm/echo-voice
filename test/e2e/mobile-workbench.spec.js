@@ -158,20 +158,20 @@ async function loginToWorkbench(page) {
   await expect(page.locator("#mobileStatusIndicator")).toBeHidden();
   await expect(page.locator("#contextUsageIndicator")).toBeVisible();
   await expect(page.locator("#contextUsageIndicator")).toHaveAttribute("role", "meter");
-  await expect(page.locator("#quickDeployButton")).toBeVisible();
+  await expect(page.locator("#quickSkillsButton")).toBeVisible();
   await expect(page.locator("#composerPlanModeButton")).toBeVisible();
   await expect(page.locator("#compactContextButton")).toBeVisible();
   await expect(page.locator("#worktreeModeToggle")).toBeVisible();
   await expect(page.locator("#composerAttachmentButton")).toHaveCSS("width", "24px");
   await expect(page.locator("#composerPlanModeButton")).toHaveCSS("width", "24px");
   await expect(page.locator("#compactContextButton")).toHaveCSS("width", "24px");
-  await expect(page.locator("#quickDeployButton")).toHaveCSS("width", "34px");
+  await expect(page.locator("#quickSkillsButton")).toHaveCSS("width", "34px");
   await expect(page.locator("#contextUsageIndicator")).toHaveCSS("width", "16px");
   const topbarIconLayout = await page.evaluate(() => {
     const titleRow = document.querySelector(".topbar-title-row");
     const status = document.querySelector("#mobileStatusIndicator")?.getBoundingClientRect();
     const context = document.querySelector("#contextUsageIndicator")?.getBoundingClientRect();
-    const deploy = document.querySelector("#quickDeployButton")?.getBoundingClientRect();
+    const deploy = document.querySelector("#quickSkillsButton")?.getBoundingClientRect();
     const composer = document.querySelector(".composer-statusbar")?.getBoundingClientRect();
     return {
       statusHidden: Boolean(status && status.width === 0 && status.height === 0),
@@ -1340,19 +1340,21 @@ test("mobile quick deploy sends the fixed deployment prompt", async ({ page, req
     await page.locator("#toggleSessionsButton").click();
     await page.locator(".conversation-item", { hasText: prompt }).locator(".conversation-item-open").click();
 
-    await expect(page.locator("#quickDeployButton")).toBeEnabled();
+    await expect(page.locator("#quickSkillsButton")).toBeEnabled();
     await page.locator("#codexPrompt").fill("还没发送的草稿");
-    await expect(page.locator("#quickDeployButton")).toBeDisabled();
+    await page.locator("#quickSkillsButton").click();
+    await page.locator(".quick-skill-item", { hasText: "提交推送部署" }).locator(".quick-skill-run").click();
+    await expect(page.locator(".toast", { hasText: "请先发送或清空输入框内容" })).toBeVisible();
     await page.locator("#codexPrompt").fill("");
-    await expect(page.locator("#quickDeployButton")).toBeEnabled();
+    await expect(page.locator("#quickSkillsButton")).toBeEnabled();
 
-    await page.locator("#quickDeployButton").click();
+    await page.locator(".quick-skill-item", { hasText: "提交推送部署" }).locator(".quick-skill-run").click();
 
     await expect(page.locator("#codexRunSummary")).toContainText(
       "请把当前对话中已经完成且适合发布的代码改动提交、推送，然后把本次结果合入主部署分支"
     );
     await expect(page.locator(".toast", { hasText: "已发送部署指令" })).toHaveCount(0);
-    await expect(page.locator("#quickDeployButton")).toBeDisabled();
+    await expect(page.locator("#quickSkillsButton")).toBeDisabled();
 
     const sessionResponse = await request.get(`/api/codex/sessions/${created.session.id}`, { headers });
     expect(sessionResponse.ok()).toBeTruthy();
