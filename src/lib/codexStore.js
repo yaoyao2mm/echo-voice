@@ -303,6 +303,28 @@ function defaultQuickDeployPrompt() {
   ].join("\n");
 }
 
+function defaultEchoRelayDeployPrompt() {
+  return [
+    "请按 Echo 项目的发布流程，把当前会话已经完成且适合上线的改动提交、推送，并确认 GitHub Actions 的 Deploy Relay 部署结果。",
+    "",
+    "背景：",
+    "- 这个仓库的部署 workflow 是 `.github/workflows/deploy-relay.yml`，workflow 名称是 `Deploy Relay`。",
+    "- `Deploy Relay` 会在 push 到 `main` 时自动触发，也支持 `workflow_dispatch` 手动触发。",
+    "- 成功的部署 run 应该看到 job `Deploy relay over SSH` 成功，并且 `Deploy` step 确实执行成功；如果只是因为 secrets 缺失而跳过部署，不能汇报为已部署。",
+    "",
+    "流程：",
+    "1. 先检查 `git status --short --branch` 和当前分支，只处理本次会话相关改动，不要提交未跟踪的本地预览、附件或无关文件。",
+    "2. 运行 Echo 需要的非 e2e 验证。默认至少考虑 `pnpm run check:js`、`pnpm test` 和 `git diff --check`；遵守项目规则，除非用户明确要求，不要运行 e2e。",
+    "3. 如果有可提交改动，创建清晰 commit，然后推送到 `origin/main`。如果当前分支不是 `main`，先确认能安全快进或按现有仓库策略把结果合入 `main`；不要 force push，不要绕过分支保护。",
+    "4. 推送到 `main` 后，用 GitHub CLI 找到对应的 Actions run，例如：",
+    "   - `gh run list --workflow deploy-relay.yml --branch main --limit 10 --json databaseId,headSha,status,conclusion,url,event,createdAt`",
+    "   - 优先选择 `headSha` 等于刚推送 commit 的 run。",
+    "5. 如果没有新 commit 但用户的意图是重新部署当前 `main`，不要空提交；改用 `gh workflow run deploy-relay.yml --ref main` 触发 `workflow_dispatch`，然后用 `gh run list --workflow deploy-relay.yml --branch main --event workflow_dispatch --limit 10 --json databaseId,headSha,status,conclusion,url,event,createdAt` 找到新 run。",
+    "6. 等待部署结束：`gh run watch <run-id> --exit-status`。失败时用 `gh run view <run-id> --log-failed` 查看失败日志；必要时再看 job/step 详情确认是部署失败、secrets 缺失跳过，还是 GitHub Actions 本身失败。",
+    "7. 最后用简短结果汇报：验证命令及结果、commit、push 目标、部署触发方式（push 或 workflow_dispatch）、Actions run URL、最终 conclusion，以及 `Deploy relay over SSH`/`Deploy` step 是否成功。"
+  ].join("\n");
+}
+
 export function createJob({ projectId, prompt }) {
   const now = nowIso();
   const job = {
@@ -2864,6 +2886,25 @@ function ensureDefaultQuickSkills() {
       NULL
     )
   `).run({ prompt: defaultQuickDeployPrompt(), now });
+
+  db.prepare(`
+    INSERT OR IGNORE INTO codex_quick_skills (
+      id, scope, project_id, title, description, prompt, mode, requires_session, sort_order, created_at, updated_at, archived_at
+    ) VALUES (
+      'builtin.echo-relay-deploy',
+      'project',
+      'echo',
+      'Echo 推送部署',
+      '推送 main，触发 Deploy Relay，并等待 Actions 结果。',
+      @prompt,
+      'execute',
+      1,
+      10,
+      @now,
+      @now,
+      NULL
+    )
+  `).run({ prompt: defaultEchoRelayDeployPrompt(), now });
 }
 
 function nextQuickSkillSortOrder(scope, projectId) {

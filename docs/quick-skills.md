@@ -10,6 +10,7 @@
   - 项目：只在当前项目 ID 下可见。
 - Echo 会在 relay SQLite 中保存指令，因此同一 relay/配对环境可以持续复用。
 - 默认内置一个全局“提交推送部署”指令，保留旧按钮的核心能力。
+- Echo 项目内置一个项目级“Echo 推送部署”指令，用于提交、推送 `main`、触发 `Deploy Relay` 并等待 GitHub Actions 结果。
 - 手机端可以新增、编辑、删除指令。
 - 指令可以选择执行模式：
   - 执行：直接让 Codex 执行任务。
@@ -30,6 +31,42 @@
 - 图片还在处理时不会发送。
 - 桌面 agent 不在线或当前项目不可执行时不会发送。
 - 标记为“需要当前会话”的指令不会在空会话、归档会话、正在运行的会话或有待审批/待选择的会话上运行。
+
+## Echo 推送部署指令
+
+当当前项目 ID 是 `echo` 时，快速指令面板的“项目”分组会出现内置的“Echo 推送部署”。这个指令标记为“需要当前会话”，适合在一轮代码改动完成后，直接在同一个移动端会话里触发发布。
+
+这个指令要求 Codex 执行的流程是：
+
+1. 检查 `git status --short --branch`，只提交本次会话相关改动。
+2. 运行 Echo 的非 e2e 检查，默认覆盖 `pnpm run check:js`、`pnpm test` 和 `git diff --check`；除非用户明确要求，不运行 e2e。
+3. 有可提交改动时创建 commit 并推送到 `origin/main`，由 `.github/workflows/deploy-relay.yml` 的 `push` 触发 `Deploy Relay`。
+4. 没有新 commit 但需要重新部署当前 `main` 时，不做空提交，改用 GitHub Actions 的手动触发：
+
+```sh
+gh workflow run deploy-relay.yml --ref main
+```
+
+5. 查找对应 run，优先匹配刚推送的 `headSha`；手动触发时查看 `workflow_dispatch` 事件：
+
+```sh
+gh run list --workflow deploy-relay.yml --branch main --limit 10 --json databaseId,headSha,status,conclusion,url,event,createdAt
+gh run list --workflow deploy-relay.yml --branch main --event workflow_dispatch --limit 10 --json databaseId,headSha,status,conclusion,url,event,createdAt
+```
+
+6. 等待最终结果：
+
+```sh
+gh run watch <run-id> --exit-status
+```
+
+失败时查看失败日志：
+
+```sh
+gh run view <run-id> --log-failed
+```
+
+最后汇报时需要包含验证命令、commit、push 目标、触发方式、Actions run URL、最终 conclusion，并确认 job `Deploy relay over SSH` 和 `Deploy` step 是否真正成功。仅 secrets 缺失后的跳过不能算部署成功。
 
 ## 数据模型
 

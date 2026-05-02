@@ -99,6 +99,13 @@ test("quick skills include globals and current project skills only", () => {
 
   const defaults = queue.listCodexQuickSkills({ projectId: "echo" });
   assert.equal(defaults.some((skill) => skill.id === "builtin.quick-deploy" && skill.scope === "global"), true);
+  const echoDeploySkill = defaults.find((skill) => skill.id === "builtin.echo-relay-deploy");
+  assert.equal(echoDeploySkill?.scope, "project");
+  assert.equal(echoDeploySkill?.projectId, "echo");
+  assert.equal(echoDeploySkill?.requiresSession, true);
+  assert.match(echoDeploySkill?.prompt || "", /Deploy Relay/);
+  assert.match(echoDeploySkill?.prompt || "", /gh workflow run deploy-relay\.yml --ref main/);
+  assert.equal(queue.listCodexQuickSkills({ projectId: "metio" }).some((skill) => skill.id === "builtin.echo-relay-deploy"), false);
 
   const globalSkill = queue.createCodexQuickSkill({
     scope: "global",
