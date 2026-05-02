@@ -10,19 +10,28 @@ export function installCodex(app) {
     app.updateComposerAvailability();
   };
 
-  app.refreshCodex = async function refreshCodex() {
+  app.refreshCodex = async function refreshCodex(options = {}) {
     if (!app.isLoggedIn() || !state.token) return;
+    if (state.codexRefreshPromise) return state.codexRefreshPromise;
 
-    try {
-      const data = await app.apiGet("/api/codex/status");
-      app.renderCodexStatus(data);
-      await app.loadQuickSkills({ silent: true });
-      await app.loadCodexJobs({ skipSelectedDetailLoad: Boolean(state.sessionEventSourceId) });
-    } catch (error) {
-      if (app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) return;
-      const shouldToast = app.markCodexConnectionProblem("连接中断，当前会话已保留。");
-      if (shouldToast && error.message && !error.message.includes("relay mode")) app.toast(error.message);
-    }
+    state.codexRefreshPromise = (async () => {
+      try {
+        const data = await app.apiGet("/api/codex/status");
+        app.renderCodexStatus(data);
+        const shouldLoadQuickSkills =
+          options.forceQuickSkills || !options.scheduled || state.quickSkillsLoadedProjectId !== app.currentProjectId();
+        if (shouldLoadQuickSkills) await app.loadQuickSkills({ silent: true });
+        await app.loadCodexJobs({ skipSelectedDetailLoad: Boolean(state.sessionEventSourceId || state.sessionEventReconnectTimer) });
+      } catch (error) {
+        if (app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) return;
+        const shouldToast = app.markCodexConnectionProblem("连接中断，当前会话已保留。");
+        if (shouldToast && error.message && !error.message.includes("relay mode")) app.toast(error.message);
+      }
+    })().finally(() => {
+      state.codexRefreshPromise = null;
+    });
+
+    return state.codexRefreshPromise;
   };
 
   app.renderCodexStatus = function renderCodexStatus(codex) {
@@ -358,10 +367,9 @@ export function installCodex(app) {
       app.renderCodexJob(data.session, { keepSelection: true, scrollToBottom: true });
       elements.codexPrompt.value = "";
       app.syncComposerInputHeight();
-      await app.loadCodexJobs();
-      await app.showCodexJob(data.session.id);
       app.clearComposerAttachments({ silent: true });
-      await app.refreshStatus({ silentAuthFailure: true });
+      await app.showCodexJob(data.session.id, { keepSelection: true, scrollToBottom: true });
+      app.scheduleSessionListRefresh?.({ delayMs: 300 });
     } catch (error) {
       if (!app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
         app.toast(error.message);
@@ -540,9 +548,8 @@ export function installCodex(app) {
       state.runtimeDirty = false;
       app.applyRuntimeDraft(state.selectedCodexSession.runtime || runtime, { persist: false, dirty: false });
       app.renderCodexJob(data.session, { keepSelection: true, scrollToBottom: true });
-      await app.loadCodexJobs();
-      await app.showCodexJob(data.session.id);
-      await app.refreshStatus({ silentAuthFailure: true });
+      await app.showCodexJob(data.session.id, { keepSelection: true, scrollToBottom: true });
+      app.scheduleSessionListRefresh?.({ delayMs: 300 });
     } catch (error) {
       if (!app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
         app.toast(error.message);
@@ -760,8 +767,8 @@ export function installCodex(app) {
         reason: automatic ? "context-threshold" : "manual"
       });
       state.selectedCodexSession = data.session || session;
-      await app.loadCodexJobs();
-      await app.showCodexJob(session.id, { keepSelection: true, scrollToBottom: automatic });
+      app.renderCodexJob(state.selectedCodexSession, { keepSelection: true, scrollToBottom: automatic });
+      app.scheduleSessionListRefresh?.({ delayMs: 250 });
       if (!automatic) app.toast("已请求压缩上下文");
     } catch (error) {
       state.autoCompactedSessionIds.delete(session.id);

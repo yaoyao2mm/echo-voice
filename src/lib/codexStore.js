@@ -383,7 +383,6 @@ export function touchAgent(id) {
 }
 
 export function statusSnapshot() {
-  reclaimExpiredLeases();
   reclaimExpiredWorkspaceCommandLeases();
 
   const nowMs = Date.now();
@@ -394,15 +393,6 @@ export function statusSnapshot() {
   const onlineAgents = agents.filter((agent) => agent.online);
   const latestAgent = agents[0] || null;
   const primaryAgent = onlineAgents[0] || null;
-  const queued = db.prepare("SELECT COUNT(*) AS count FROM codex_jobs WHERE status = 'queued'").get().count;
-  const running = db.prepare("SELECT COUNT(*) AS count FROM codex_jobs WHERE status = 'running'").get().count;
-  const runningJobs = db.prepare(`
-    SELECT ${summarizeJobColumns}
-    FROM codex_jobs
-    WHERE status = 'running'
-    ORDER BY started_at DESC, created_at DESC
-    LIMIT 10
-  `).all().map(summarizeJob);
 
   return {
     enabled: true,
@@ -411,11 +401,11 @@ export function statusSnapshot() {
     agents,
     workspaces: mergeAgentWorkspaces(onlineAgents),
     runtime: mergeAgentRuntimes(onlineAgents, primaryAgent?.runtime || {}),
-    queued,
-    running,
-    active: runningJobs[0] || null,
-    runningJobs,
-    recent: listJobs(10),
+    queued: 0,
+    running: 0,
+    active: null,
+    runningJobs: [],
+    recent: [],
     interactive: sessionStatusSnapshot()
   };
 }
@@ -2416,7 +2406,7 @@ function sessionStatusSnapshot() {
     pendingApprovals,
     pendingInteractions,
     archivedSessions,
-    recent: listSessions(8)
+    recent: []
   };
 }
 

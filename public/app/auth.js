@@ -24,9 +24,38 @@ export function installAuth(app) {
     await app.refreshStatus({ silentAuthFailure: true });
     if (!state.token) return;
     await app.refreshCodex();
-    if (!state.codexTimer) {
-      state.codexTimer = window.setInterval(app.refreshCodex, 3500);
-    }
+    app.startCodexPolling();
+  };
+
+  app.startCodexPolling = function startCodexPolling() {
+    if (state.codexTimer) return;
+
+    const schedule = (delayMs = app.codexPollingDelayMs()) => {
+      state.codexTimer = window.setTimeout(tick, delayMs);
+    };
+
+    const tick = async () => {
+      state.codexTimer = null;
+      if (!app.isLoggedIn() || !state.token) return;
+      try {
+        await app.refreshCodex({ scheduled: true });
+      } finally {
+        if (app.isLoggedIn() && state.token) schedule();
+      }
+    };
+
+    schedule();
+  };
+
+  app.stopCodexPolling = function stopCodexPolling() {
+    if (!state.codexTimer) return;
+    window.clearTimeout(state.codexTimer);
+    state.codexTimer = null;
+  };
+
+  app.codexPollingDelayMs = function codexPollingDelayMs() {
+    if (state.sessionEventSourceId || state.sessionEventReconnectTimer) return 8000;
+    return 3500;
   };
 
   app.updateAuthView = function updateAuthView(message = "") {
@@ -130,10 +159,7 @@ export function installAuth(app) {
     state.currentUser = null;
     localStorage.removeItem("echoSession");
     localStorage.removeItem("echoUser");
-    if (state.codexTimer) {
-      window.clearInterval(state.codexTimer);
-      state.codexTimer = null;
-    }
+    app.stopCodexPolling();
     app.closeCodexSessionStream?.();
     app.stopPairingScanner();
     app.closeSessionSidebar({ restoreFocus: false });
@@ -146,10 +172,7 @@ export function installAuth(app) {
     state.currentUser = null;
     localStorage.removeItem("echoSession");
     localStorage.removeItem("echoUser");
-    if (state.codexTimer) {
-      window.clearInterval(state.codexTimer);
-      state.codexTimer = null;
-    }
+    app.stopCodexPolling();
     app.closeCodexSessionStream?.();
     app.stopPairingScanner();
     app.closeSessionSidebar({ restoreFocus: false });
@@ -201,10 +224,7 @@ export function installAuth(app) {
   app.enterPairing = function enterPairing(message = "配对已失效，请重新扫描桌面端二维码。") {
     localStorage.removeItem("echoToken");
     state.token = "";
-    if (state.codexTimer) {
-      window.clearInterval(state.codexTimer);
-      state.codexTimer = null;
-    }
+    app.stopCodexPolling();
     app.closeCodexSessionStream?.();
     app.stopPairingScanner();
     app.closeQuickSkillsPanel?.({ restoreFocus: false });

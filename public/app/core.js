@@ -57,6 +57,7 @@ export function createAppContext(windowRef = window, documentRef = document) {
       themeMode: windowRef.localStorage.getItem("echoTheme") === "dark" ? "dark" : "light",
       worktreePreferenceEnabled: readStoredWorktreePreference(windowRef.localStorage),
       codexTimer: null,
+      codexRefreshPromise: null,
       pairingStream: null,
       pairingScanActive: false,
       pairingScanBusy: false,

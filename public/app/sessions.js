@@ -149,7 +149,8 @@ export function installSessions(app) {
       });
       state.selectedCodexSession = data.session || session;
       app.toast("已请求中断");
-      await app.showCodexJob(session.id, { keepSelection: true });
+      app.renderCodexJob(state.selectedCodexSession, { keepSelection: true });
+      app.scheduleSessionListRefresh({ delayMs: 250 });
     } catch (error) {
       if (!app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
         app.toast(error.message);
@@ -316,9 +317,7 @@ export function installSessions(app) {
       const data = await app.apiPost(`/api/codex/sessions/${encodeURIComponent(sessionId)}/events-ticket`, {});
       ticket = String(data.ticket || "");
     } catch (error) {
-      if (!app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
-        app.markCodexConnectionProblem?.("实时更新连接失败，当前会话已保留。");
-      }
+      if (!app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) app.scheduleSessionListRefresh({ delayMs: 0 });
       return;
     }
     if (!ticket || state.selectedCodexJobId !== sessionId) return;
@@ -356,12 +355,11 @@ export function installSessions(app) {
 
     source.onerror = () => {
       if (state.sessionEventSource !== source) return;
-      app.markCodexConnectionProblem?.("实时更新中断，当前会话已保留。");
       source.close();
       state.sessionEventSource = null;
       state.sessionEventSourceId = "";
       app.scheduleCodexSessionStreamReconnect(sessionId);
-      app.scheduleSessionListRefresh();
+      app.scheduleSessionListRefresh({ delayMs: 0 });
     };
   };
 
@@ -477,18 +475,19 @@ export function installSessions(app) {
     return Math.max(stored, fromSession, fromEvents);
   };
 
-  app.scheduleSessionListRefresh = function scheduleSessionListRefresh() {
+  app.scheduleSessionListRefresh = function scheduleSessionListRefresh(options = {}) {
     if (state.sessionListRefreshTimer) return;
+    const delayMs = Math.max(0, Number(options.delayMs ?? 1200) || 0);
     state.sessionListRefreshTimer = windowRef.setTimeout(() => {
       state.sessionListRefreshTimer = null;
       if (app.isLoggedIn() && state.token) {
-        app.loadCodexJobs({ skipSelectedDetailLoad: Boolean(state.sessionEventSourceId) }).catch((error) => {
+        app.loadCodexJobs({ skipSelectedDetailLoad: Boolean(state.sessionEventSourceId || state.sessionEventReconnectTimer) }).catch((error) => {
           if (!app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
             app.markCodexConnectionProblem?.("连接中断，当前会话已保留。");
           }
         });
       }
-    }, 1200);
+    }, delayMs);
   };
 
   app.renderCodexLog = function renderCodexLog(job, errorText = "") {

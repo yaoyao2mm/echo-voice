@@ -19,6 +19,9 @@ if (!config.token) {
 
 const agentId = await loadDesktopAgentId();
 let codexRuntimeStatus = publicCodexRuntime();
+let codexRuntimeRefreshPromise = null;
+let codexRuntimeRefreshTimer = null;
+let activeCodexCommandCount = 0;
 const runningSessionHeartbeats = new Map();
 
 console.log("Echo Codex desktop agent is running.");
@@ -27,14 +30,13 @@ console.log(`Agent ID: ${agentId}`);
 console.log(`Network: ${formatNetworkStatus(describeHttpNetwork(config.relayUrl))}`);
 console.log(`Codex remote: ${config.codex.enabled ? "enabled" : "disabled"}`);
 if (config.codex.enabled) {
-  await refreshCodexRuntimeStatus();
   const runtime = currentCodexRuntime();
   console.log(`  command: ${runtime.command || "unavailable"}`);
   if (runtime.commandDetail) {
     console.log(`  app: ${runtime.commandDetail}`);
   }
   console.log(`  model: ${runtime.model || "Codex default"}`);
-  console.log(`  supported models: ${runtime.supportedModels?.length || 0}`);
+  console.log("  supported models: syncing when idle");
   console.log(`  permissions: ${(runtime.allowedPermissionModes || []).join(", ") || "none"}`);
   console.log(`  reasoning: ${runtime.reasoningEffort || "Codex default"}`);
   console.log(`  sandbox: ${runtime.sandbox}`);
@@ -51,10 +53,9 @@ console.log("Waiting for mobile Codex tasks.\n");
 
 if (config.codex.enabled) {
   setInterval(() => {
-    refreshCodexRuntimeStatus().catch((error) => {
-      console.error(`[codex runtime refresh] ${error.message}`);
-    });
+    scheduleCodexRuntimeRefresh();
   }, 10 * 60 * 1000).unref?.();
+  scheduleCodexRuntimeRefresh({ delayMs: 30000 });
   runCodexWorkspaceLoop();
   runCodexSessionLoop();
 }
@@ -111,14 +112,20 @@ async function runCodexSessionLoop() {
       if (!command) continue;
 
       console.log(`[${new Date().toLocaleTimeString()}] codex session ${command.sessionId} ${command.type}`);
+      activeCodexCommandCount += 1;
       const heartbeat = startCodexSessionHeartbeat(command.sessionId);
-      const preparedCommand = await prepareCodexSessionWorktree(command);
-      const result = await runtime.handleCommand(preparedCommand).finally(() => clearInterval(heartbeat));
-      if (preparedCommand.execution && !result.execution) result.execution = preparedCommand.execution;
-      result.sessionId = preparedCommand.sessionId || command.sessionId;
-      await postJson("/api/agent/codex/sessions/commands/complete", { id: command.id, agentId, result });
-      updateRunningSessionHeartbeatFromResult(result.sessionId, result);
-      console.log(`  session ${command.type} ${result.ok ? "accepted" : "failed"}`);
+      try {
+        const preparedCommand = await prepareCodexSessionWorktree(command);
+        const result = await runtime.handleCommand(preparedCommand);
+        if (preparedCommand.execution && !result.execution) result.execution = preparedCommand.execution;
+        result.sessionId = preparedCommand.sessionId || command.sessionId;
+        await postJson("/api/agent/codex/sessions/commands/complete", { id: command.id, agentId, result });
+        updateRunningSessionHeartbeatFromResult(result.sessionId, result);
+        console.log(`  session ${command.type} ${result.ok ? "accepted" : "failed"}`);
+      } finally {
+        clearInterval(heartbeat);
+        activeCodexCommandCount = Math.max(0, activeCodexCommandCount - 1);
+      }
     } catch (error) {
       console.error(`[codex session ${new Date().toLocaleTimeString()}] ${formatFetchError(error)}`);
       if (command?.sessionId) stopRunningSessionHeartbeat(command.sessionId);
@@ -333,30 +340,60 @@ function currentCodexRuntime() {
 
 async function refreshCodexRuntimeStatus() {
   const runtime = publicCodexRuntime();
+  const previous = codexRuntimeStatus || {};
   if (!runtime.command) {
     codexRuntimeStatus = runtime;
     return runtime;
   }
-
-  try {
-    const supportedModels = await probeCodexModels({ timeoutMs: 30000 });
+  if (activeCodexCommandCount > 0 || runningSessionHeartbeats.size > 0) {
     codexRuntimeStatus = {
       ...runtime,
-      supportedModels,
-      modelCapabilitySource: "codex-app-server",
-      modelCapabilityCheckedAt: new Date().toISOString(),
-      modelCapabilityError: ""
+      supportedModels: previous.supportedModels || [],
+      modelCapabilitySource: previous.modelCapabilitySource || "deferred",
+      modelCapabilityCheckedAt: previous.modelCapabilityCheckedAt || "",
+      modelCapabilityError: previous.modelCapabilityError || ""
     };
-  } catch (error) {
-    codexRuntimeStatus = {
-      ...runtime,
-      supportedModels: [],
-      modelCapabilitySource: "unavailable",
-      modelCapabilityCheckedAt: new Date().toISOString(),
-      modelCapabilityError: error.message
-    };
+    return codexRuntimeStatus;
   }
-  return codexRuntimeStatus;
+  if (codexRuntimeRefreshPromise) return codexRuntimeRefreshPromise;
+
+  codexRuntimeRefreshPromise = (async () => {
+    try {
+      const supportedModels = await probeCodexModels({ timeoutMs: 15000 });
+      codexRuntimeStatus = {
+        ...runtime,
+        supportedModels,
+        modelCapabilitySource: "codex-app-server",
+        modelCapabilityCheckedAt: new Date().toISOString(),
+        modelCapabilityError: ""
+      };
+    } catch (error) {
+      codexRuntimeStatus = {
+        ...runtime,
+        supportedModels: previous.supportedModels || [],
+        modelCapabilitySource: "unavailable",
+        modelCapabilityCheckedAt: new Date().toISOString(),
+        modelCapabilityError: error.message
+      };
+    }
+    return codexRuntimeStatus;
+  })().finally(() => {
+    codexRuntimeRefreshPromise = null;
+  });
+
+  return codexRuntimeRefreshPromise;
+}
+
+function scheduleCodexRuntimeRefresh(options = {}) {
+  if (codexRuntimeRefreshTimer) return;
+  const delayMs = Math.max(0, Number(options.delayMs || 0) || 0);
+  codexRuntimeRefreshTimer = setTimeout(() => {
+    codexRuntimeRefreshTimer = null;
+    refreshCodexRuntimeStatus().catch((error) => {
+      console.error(`[codex runtime refresh] ${error.message}`);
+    });
+  }, delayMs);
+  codexRuntimeRefreshTimer.unref?.();
 }
 
 function formatNetworkStatus(status) {

@@ -132,21 +132,10 @@ export async function waitForCodexWorkspaceCommand(input = {}) {
   if (immediateCommand) return immediateCommand;
 
   const waitMs = clampWaitMs(input.waitMs);
-  return new Promise((resolve) => {
-    const timeout = setTimeout(() => {
-      events.off("codex-workspace-command", handleCommand);
-      resolve(null);
-    }, waitMs);
-
-    function handleCommand() {
-      const command = acquireNextWorkspaceCommand({ agentId: agent.id });
-      if (!command) return;
-      clearTimeout(timeout);
-      events.off("codex-workspace-command", handleCommand);
-      resolve(command);
-    }
-
-    events.on("codex-workspace-command", handleCommand);
+  return waitForEventValue({
+    eventNames: ["codex-workspace-command"],
+    waitMs,
+    getValue: () => acquireNextWorkspaceCommand({ agentId: agent.id })
   });
 }
 
@@ -185,21 +174,10 @@ export async function waitForCodexSessionCommand(input = {}) {
   if (immediateCommand) return immediateCommand;
 
   const waitMs = clampWaitMs(input.waitMs);
-  return new Promise((resolve) => {
-    const timeout = setTimeout(() => {
-      events.off("codex-session-command", handleCommand);
-      resolve(null);
-    }, waitMs);
-
-    function handleCommand() {
-      const command = acquireNextSessionCommand({ agentId: agent.id, workspaces: agent.workspaces });
-      if (!command) return;
-      clearTimeout(timeout);
-      events.off("codex-session-command", handleCommand);
-      resolve(command);
-    }
-
-    events.on("codex-session-command", handleCommand);
+  return waitForEventValue({
+    eventNames: ["codex-session-command"],
+    waitMs,
+    getValue: () => acquireNextSessionCommand({ agentId: agent.id, workspaces: agent.workspaces })
   });
 }
 
@@ -251,22 +229,10 @@ export async function waitForCodexSessionApproval(id, input = {}) {
   if (immediateApproval) return immediateApproval;
 
   const waitMs = clampWaitMs(input.waitMs);
-  return new Promise((resolve) => {
-    const eventName = `codex-approval-${id}`;
-    const timeout = setTimeout(() => {
-      events.off(eventName, handleDecision);
-      resolve(null);
-    }, waitMs);
-
-    function handleDecision() {
-      const approval = getStoredApprovalDecision(id, { agentId: input.agentId || input.agent?.id });
-      if (!approval) return;
-      clearTimeout(timeout);
-      events.off(eventName, handleDecision);
-      resolve(approval);
-    }
-
-    events.on(eventName, handleDecision);
+  return waitForEventValue({
+    eventNames: [`codex-approval-${id}`],
+    waitMs,
+    getValue: () => getStoredApprovalDecision(id, { agentId: input.agentId || input.agent?.id })
   });
 }
 
@@ -278,26 +244,10 @@ export async function waitForCodexSessionInteraction(id, input = {}) {
   if (immediateInteraction) return immediateInteraction;
 
   const waitMs = clampWaitMs(input.waitMs);
-  return new Promise((resolve) => {
-    const eventName = `codex-interaction-${id}`;
-    const sessionEventName = input.sessionId ? sessionChangedEventName(input.sessionId) : "";
-    const timeout = setTimeout(() => {
-      events.off(eventName, handleDecision);
-      if (sessionEventName) events.off(sessionEventName, handleDecision);
-      resolve(null);
-    }, waitMs);
-
-    function handleDecision() {
-      const interaction = getStoredInteractionDecision(id, { agentId: input.agentId || input.agent?.id });
-      if (!interaction) return;
-      clearTimeout(timeout);
-      events.off(eventName, handleDecision);
-      if (sessionEventName) events.off(sessionEventName, handleDecision);
-      resolve(interaction);
-    }
-
-    events.on(eventName, handleDecision);
-    if (sessionEventName) events.on(sessionEventName, handleDecision);
+  return waitForEventValue({
+    eventNames: [`codex-interaction-${id}`, input.sessionId ? sessionChangedEventName(input.sessionId) : ""],
+    waitMs,
+    getValue: () => getStoredInteractionDecision(id, { agentId: input.agentId || input.agent?.id })
   });
 }
 
@@ -321,6 +271,35 @@ function notifySessionChanged(id) {
   const sessionId = String(id || "").trim();
   if (!sessionId) return;
   events.emit(sessionChangedEventName(sessionId), sessionId);
+}
+
+function waitForEventValue({ eventNames = [], waitMs, getValue }) {
+  return new Promise((resolve) => {
+    const names = eventNames.map((name) => String(name || "").trim()).filter(Boolean);
+    let settled = false;
+    let timeout = null;
+
+    function cleanup() {
+      for (const name of names) events.off(name, handleEvent);
+      if (timeout) clearTimeout(timeout);
+    }
+
+    function finish(value) {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(value || null);
+    }
+
+    function handleEvent() {
+      const value = getValue();
+      if (value) finish(value);
+    }
+
+    for (const name of names) events.on(name, handleEvent);
+    timeout = setTimeout(() => finish(null), waitMs);
+    handleEvent();
+  });
 }
 
 function sessionChangedEventName(id) {
