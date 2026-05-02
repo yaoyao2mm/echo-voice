@@ -17,6 +17,7 @@ export class CodexInteractiveRuntime {
     this.agentId = options.agentId || "default-agent";
     this.onEvents = options.onEvents || (async () => {});
     this.requestApproval = options.requestApproval || defaultApprovalHandler;
+    this.requestInteraction = options.requestInteraction || defaultInteractionHandler;
     this.client = null;
     this.sessions = new Map();
     this.threadToSession = new Map();
@@ -24,6 +25,8 @@ export class CodexInteractiveRuntime {
     this.attachmentDirs = new Map();
     this.eventFlushes = new Map();
     this.deltaBuffers = new Map();
+    this.collaborationModePresets = null;
+    this.collaborationModeUnavailable = false;
   }
 
   async handleCommand(command) {
@@ -81,7 +84,8 @@ export class CodexInteractiveRuntime {
       text: prompt,
       attachments,
       workspace,
-      runtime
+      runtime,
+      mode: command.payload?.mode
     });
     return { ok: true, appThreadId, activeTurnId: turn.id, sessionStatus: "running" };
   }
@@ -120,7 +124,8 @@ export class CodexInteractiveRuntime {
         text: thread.recovered ? recoveredThreadPrompt(command.payload?.history, rawText) : rawText,
         attachments,
         workspace,
-        runtime
+        runtime,
+        mode: command.payload?.mode
       });
       return { ok: true, appThreadId: thread.appThreadId, activeTurnId: turn.id, sessionStatus: "running" };
     } catch (error) {
@@ -132,7 +137,8 @@ export class CodexInteractiveRuntime {
         text: recoveredThreadPrompt(command.payload?.history, rawText),
         attachments,
         workspace,
-        runtime
+        runtime,
+        mode: command.payload?.mode
       });
       return { ok: true, appThreadId: thread.appThreadId, activeTurnId: turn.id, sessionStatus: "running" };
     }
@@ -176,9 +182,11 @@ export class CodexInteractiveRuntime {
     return { ok: true, appThreadId: thread.appThreadId, sessionStatus: "running" };
   }
 
-  async #startOrSteerTurn({ sessionId, threadId, text, attachments, workspace, runtime }) {
+  async #startOrSteerTurn({ sessionId, threadId, text, attachments, workspace, runtime, mode }) {
     const preparedAttachments = await this.#materializeAttachments({ sessionId, threadId, attachments, workspace });
-    const input = buildUserInputs(text, preparedAttachments);
+    const requestedMode = normalizeSessionMode(mode);
+    const inputText = String(text || "").trim();
+    const input = buildUserInputs(inputText, preparedAttachments);
     if (input.length === 0) throw new Error("Codex turn input is empty.");
     const activeTurnId = this.activeTurns.get(threadId);
     try {
@@ -205,18 +213,39 @@ export class CodexInteractiveRuntime {
         return { id: result?.turnId || activeTurnId };
       }
 
-      const result = await this.client.request(
-        "turn/start",
-        {
-          threadId,
-          input,
-          cwd: workspace.path,
-          approvalPolicy: runtime.approvalPolicy,
-          model: runtime.model,
-          effort: runtime.reasoningEffort
-        },
-        60000
-      );
+      const turnStartParams = await this.#turnStartParams({
+        threadId,
+        input,
+        cwd: workspace.path,
+        runtime,
+        mode: requestedMode
+      });
+      let result;
+      try {
+        result = await this.client.request("turn/start", turnStartParams.params, 60000);
+      } catch (error) {
+        if (!turnStartParams.nativePlan) throw error;
+        this.collaborationModeUnavailable = true;
+        const fallbackInput = buildUserInputs(promptForSessionMode(inputText, requestedMode), preparedAttachments);
+        result = await this.client.request(
+          "turn/start",
+          this.#baseTurnStartParams({
+            threadId,
+            input: fallbackInput,
+            cwd: workspace.path,
+            runtime
+          }),
+          60000
+        );
+        await this.#emit(sessionId, [
+          {
+            type: "plan.mode.fallback",
+            text: `Native Codex plan mode was unavailable; Echo used planning instructions instead. ${error.message || ""}`.trim(),
+            appThreadId: threadId,
+            raw: { method: "turn/start", mode: "plan", fallback: true, error: error.message || "" }
+          }
+        ]);
+      }
       const turnId = result?.turn?.id;
       if (!turnId) throw new Error("Codex app-server did not return a turn id.");
       this.activeTurns.set(threadId, turnId);
@@ -224,6 +253,78 @@ export class CodexInteractiveRuntime {
     } catch (error) {
       await this.#cleanupAttachmentDir(threadId);
       throw error;
+    }
+  }
+
+  async #turnStartParams({ threadId, input, cwd, runtime, mode }) {
+    const params = this.#baseTurnStartParams({ threadId, input, cwd, runtime });
+    if (mode !== "plan") return { params, nativePlan: false };
+
+    const collaborationMode = await this.#planCollaborationMode(runtime);
+    if (!collaborationMode) {
+      return {
+        params: {
+          ...params,
+          input: planFallbackInputs(input)
+        },
+        nativePlan: false
+      };
+    }
+
+    return {
+      params: {
+        ...params,
+        collaborationMode
+      },
+      nativePlan: true
+    };
+  }
+
+  #baseTurnStartParams({ threadId, input, cwd, runtime }) {
+    return {
+      threadId,
+      input,
+      cwd,
+      approvalPolicy: runtime.approvalPolicy,
+      model: runtime.model,
+      effort: runtime.reasoningEffort
+    };
+  }
+
+  async #planCollaborationMode(runtime) {
+    const model = String(runtime?.model || "").trim();
+    if (!model || this.collaborationModeUnavailable) return null;
+
+    const preset = await this.#planCollaborationPreset();
+    if (!preset) return null;
+    const effort = normalizeReasoningEffortForCollaboration(
+      preset.reasoning_effort ?? preset.reasoningEffort ?? runtime.reasoningEffort ?? "medium"
+    );
+    return {
+      mode: "plan",
+      settings: {
+        model,
+        reasoning_effort: effort || "medium",
+        developer_instructions: null
+      }
+    };
+  }
+
+  async #planCollaborationPreset() {
+    if (this.collaborationModePresets) return this.collaborationModePresets.plan || null;
+    if (this.collaborationModeUnavailable) return null;
+    try {
+      const result = await this.client.request("collaborationMode/list", {}, 15000);
+      const presets = Array.isArray(result?.data) ? result.data : [];
+      const plan =
+        presets.find((preset) => String(preset?.mode || "").toLowerCase() === "plan") ||
+        presets.find((preset) => String(preset?.name || "").toLowerCase() === "plan") ||
+        null;
+      this.collaborationModePresets = { plan };
+      return plan;
+    } catch (error) {
+      this.collaborationModeUnavailable = true;
+      return null;
     }
   }
 
@@ -471,9 +572,29 @@ export class CodexInteractiveRuntime {
     const threadId = getThreadId(message);
     const sessionId = threadId ? this.threadToSession.get(threadId) : "";
     const fallback = declineApprovalResponse(message.method);
-    if (!sessionId || !fallback) {
+    const userInputFallback = userInputResponseFallback(message.method);
+    if (!sessionId || (!fallback && !userInputFallback)) {
       if (fallback) this.client.respond(message.id, fallback);
+      else if (userInputFallback) this.client.respond(message.id, userInputFallback);
       else this.client.reject(message.id, -32603, "Echo Codex does not support this interactive request yet.");
+      return;
+    }
+
+    if (userInputFallback) {
+      const interaction = {
+        sessionId,
+        appRequestId: String(message.id),
+        method: message.method,
+        kind: "user_input",
+        prompt: userInputRequestText(message),
+        payload: message.params || {}
+      };
+      const response = await this.requestInteraction(interaction);
+      if (response) {
+        this.client.respond(message.id, response);
+      } else {
+        this.client.respond(message.id, userInputFallback);
+      }
       return;
     }
 
@@ -930,12 +1051,66 @@ function approvalRequestText(message) {
   return `Codex requested ${message.method}.`;
 }
 
+function userInputRequestText(message) {
+  const questions = Array.isArray(message.params?.questions) ? message.params.questions : [];
+  const first = questions[0] || {};
+  const header = String(first.header || "").trim();
+  const question = String(first.question || "").trim();
+  if (header && question) return `${header}: ${question}`;
+  if (question) return question;
+  if (header) return header;
+  return "Codex requested input.";
+}
+
 function declineApprovalResponse(method) {
   if (method === "item/commandExecution/requestApproval") return { decision: "decline" };
   if (method === "item/fileChange/requestApproval") return { decision: "decline" };
   if (method === "execCommandApproval") return { decision: "denied" };
   if (method === "applyPatchApproval") return { decision: "denied" };
   return null;
+}
+
+function userInputResponseFallback(method) {
+  if (method === "item/tool/requestUserInput" || method === "tool/requestUserInput") return { answers: {} };
+  return null;
+}
+
+function normalizeSessionMode(value) {
+  const mode = String(value || "").trim().toLowerCase();
+  return mode === "plan" ? "plan" : "execute";
+}
+
+function promptForSessionMode(text, mode) {
+  const normalized = String(text || "").trim();
+  if (mode !== "plan" || !normalized) return normalized;
+  return [
+    "请先进入计划模式，只分析并给出可执行计划。",
+    "不要修改文件，不要提交、推送、部署，也不要运行会改变仓库状态的命令。",
+    "如果需要验证，请只说明建议运行哪些检查，等待我确认后再执行。",
+    "",
+    "用户请求：",
+    normalized
+  ].join("\n");
+}
+
+function inputTextFromInputs(input = []) {
+  return (Array.isArray(input) ? input : [])
+    .filter((item) => item?.type === "text")
+    .map((item) => item.text || "")
+    .filter(Boolean)
+    .join("\n");
+}
+
+function planFallbackInputs(input = []) {
+  const attachments = (Array.isArray(input) ? input : []).filter((item) => item?.type !== "text");
+  const text = promptForSessionMode(inputTextFromInputs(input), "plan");
+  return text ? [{ type: "text", text, text_elements: [] }, ...attachments] : attachments;
+}
+
+function normalizeReasoningEffortForCollaboration(value) {
+  const effort = typeof value === "string" ? value : value === null ? "" : String(value || "");
+  const normalized = effort.trim().toLowerCase();
+  return ["low", "medium", "high", "xhigh"].includes(normalized) ? normalized : "";
 }
 
 function isCodexAuthRefreshError(error) {
@@ -945,4 +1120,8 @@ function isCodexAuthRefreshError(error) {
 
 async function defaultApprovalHandler(approval) {
   return declineApprovalResponse(approval.method);
+}
+
+async function defaultInteractionHandler(interaction) {
+  return userInputResponseFallback(interaction.method) || {};
 }

@@ -119,6 +119,8 @@ async function postCodexSessionEvents(request, sessionId, events) {
     }
   });
   expect(response.ok()).toBeTruthy();
+  const data = await response.json();
+  expect(data.ok).toBeTruthy();
 }
 
 async function completeCodexSessionCommand(request, command, result = {}) {
@@ -138,6 +140,8 @@ async function completeCodexSessionCommand(request, command, result = {}) {
     }
   });
   expect(response.ok()).toBeTruthy();
+  const data = await response.json();
+  expect(data.ok).toBeTruthy();
 }
 
 async function loginToWorkbench(page) {
@@ -695,7 +699,7 @@ test("mobile composer defaults to GPT-5.5 and remembers the last chosen model", 
   }
 });
 
-test("mobile plan mode sends planning instructions without polluting the visible prompt", async ({ page, request }) => {
+test("mobile plan mode keeps the queued and visible prompt clean", async ({ page, request }) => {
   await touchMockAgent(request);
   const keepAlive = setInterval(() => {
     touchMockAgent(request).catch(() => {});
@@ -707,7 +711,8 @@ test("mobile plan mode sends planning instructions without polluting the visible
     await page.locator("#newCodexSessionButton").click();
     await page.locator("#composerPlanModeButton").click();
     await expect(page.locator("#composerPlanModeButton")).toHaveAttribute("aria-pressed", "true");
-    await expect(page.locator("#sendCodexButton")).toHaveText("计划");
+    await expect(page.locator("#composerPlanModeButton")).toHaveAttribute("aria-label", "退出计划模式");
+    await expect(page.locator("#sendCodexButton")).toHaveText("生成计划");
 
     const prompt = `先规划移动端功能 ${Date.now()}`;
     await page.locator("#codexPrompt").fill(prompt);
@@ -718,8 +723,7 @@ test("mobile plan mode sends planning instructions without polluting the visible
     expect(command.runtime.worktreeMode).toBe("always");
     expect(command.payload.mode).toBe("plan");
     expect(command.payload.displayText).toBe(prompt);
-    expect(command.payload.prompt).toContain("请先进入计划模式");
-    expect(command.payload.prompt).toContain("不要修改文件");
+    expect(command.payload.prompt).toBe(prompt);
 
     const appThreadId = `thr_${command.sessionId}`;
     const eventsResponse = await request.post("/api/agent/codex/sessions/events", {
@@ -823,6 +827,127 @@ test("mobile plan mode sends planning instructions without polluting the visible
     expect(collapsedRailLayout.opacity).toBe("0");
     await page.evaluate(() => document.body.classList.remove("topbar-collapsed"));
     await expect(page.locator(".thread-plan-card")).toContainText("先梳理入口");
+  } finally {
+    clearInterval(keepAlive);
+  }
+});
+
+test("mobile renders Codex structured input requests and submits answers", async ({ page, request }) => {
+  await touchMockAgent(request);
+  const keepAlive = setInterval(() => {
+    touchMockAgent(request).catch(() => {});
+  }, 10000);
+
+  try {
+    await loginToWorkbench(page);
+    await page.locator("#toggleSessionsButton").click();
+    await page.locator("#newCodexSessionButton").click();
+
+    const prompt = `触发结构化选择 ${Date.now()}`;
+    await page.locator("#codexPrompt").fill(prompt);
+    await page.locator("#sendCodexButton").click();
+
+    const command = await leaseCodexCommandForPrompt(request, prompt);
+    const appThreadId = `thr_${command.sessionId}`;
+    await postCodexSessionEvents(request, command.sessionId, [
+      {
+        type: "turn/started",
+        text: "Turn started.",
+        appThreadId,
+        activeTurnId: "turn_choice",
+        sessionStatus: "running",
+        raw: { method: "turn/started", params: { threadId: appThreadId, turn: { id: "turn_choice" } } }
+      }
+    ]);
+    await completeCodexSessionCommand(request, command, {
+      appThreadId,
+      activeTurnId: "turn_choice",
+      sessionStatus: "running"
+    });
+
+    const interactionResponse = await request.post("/api/agent/codex/sessions/interactions", {
+      headers: {
+        "X-Echo-Token": pairingToken
+      },
+      data: {
+        agentId: "mobile-e2e-agent",
+        sessionId: command.sessionId,
+        appRequestId: "choice-request-1",
+        method: "item/tool/requestUserInput",
+        kind: "user_input",
+        prompt: "选择下一步方案",
+        payload: {
+          threadId: appThreadId,
+          turnId: "turn_choice",
+          itemId: "call_choice",
+          questions: [
+            {
+              id: "plan_choice",
+              header: "下一步",
+              question: "选择 Echo 接下来要执行的方案",
+              options: [
+                { label: "方案 A", description: "只整理计划" },
+                { label: "方案 B", description: "继续实现并验证" }
+              ]
+            }
+          ]
+        }
+      }
+    });
+    expect(interactionResponse.ok()).toBeTruthy();
+    const createdInteraction = (await interactionResponse.json()).interaction;
+    expect(createdInteraction.id).toBeTruthy();
+
+    const card = page.locator(".interaction-inline-card");
+    await expect(card).toBeVisible();
+    await expect(card).toContainText("选择下一步方案");
+    await expect(card).toContainText("方案 A");
+    await expect(card).toContainText("方案 B");
+    await expect(page.locator("#composerStatusText")).toContainText("等待你的选择");
+
+    await card.locator(".interaction-option", { hasText: "方案 B" }).click();
+    await card.locator('button[type="submit"]').click();
+
+    const waitedResponse = await request.post(
+      `/api/agent/codex/sessions/interactions/${encodeURIComponent(createdInteraction.id)}/wait?wait=1000`,
+      {
+        headers: {
+          "X-Echo-Token": pairingToken
+        },
+        data: {
+          agentId: "mobile-e2e-agent",
+          sessionId: command.sessionId
+        }
+      }
+    );
+    expect(waitedResponse.ok()).toBeTruthy();
+    const waited = await waitedResponse.json();
+    expect(waited.interaction.response).toEqual({ answers: { plan_choice: { answers: ["方案 B"] } } });
+    await postCodexSessionEvents(request, command.sessionId, [
+      {
+        type: "serverRequest/resolved",
+        text: "Request resolved.",
+        appThreadId,
+        raw: { method: "serverRequest/resolved", params: { threadId: appThreadId, requestId: "choice-request-1" } }
+      },
+      {
+        type: "turn/completed",
+        text: "Turn completed.",
+        appThreadId,
+        clearActiveTurnId: true,
+        sessionStatus: "active",
+        raw: {
+          method: "turn/completed",
+          params: { threadId: appThreadId, turn: { id: "turn_choice", status: "completed" } }
+        }
+      }
+    ]);
+    const headers = await authHeadersForSessionRequests(request);
+    const sessionResponse = await request.get(`/api/codex/sessions/${encodeURIComponent(command.sessionId)}`, { headers });
+    expect(sessionResponse.ok()).toBeTruthy();
+    const sessionDetail = await sessionResponse.json();
+    expect(sessionDetail.session.status).toBe("active");
+    await expect(card).toHaveCount(0);
   } finally {
     clearInterval(keepAlive);
   }

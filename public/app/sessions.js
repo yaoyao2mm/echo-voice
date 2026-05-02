@@ -82,7 +82,14 @@ export function installSessions(app) {
     item.className = "conversation-item";
     item.classList.toggle("active", job.id === state.selectedCodexJobId);
     const archived = Boolean(job.archivedAt);
-    const canArchive = !["queued", "starting", "running"].includes(job.status) && !job.pendingApprovalCount && !job.pendingCommandCount;
+    const pendingInteractionCount = Number(job.pendingInteractionCount || 0);
+    const pendingApprovalCount = Number(job.pendingApprovalCount || 0);
+    const canArchive =
+      !["queued", "starting", "running"].includes(job.status) &&
+      !pendingApprovalCount &&
+      !pendingInteractionCount &&
+      !job.pendingCommandCount;
+    const alertText = app.sessionPendingDecisionText(job);
     item.innerHTML = `
       <button class="conversation-item-open" type="button">
         <div class="conversation-item-head">
@@ -94,7 +101,7 @@ export function installSessions(app) {
           <span>${app.escapeHtml(app.sessionProjectLabel(job.projectId))}</span>
         </div>
         <span class="conversation-item-preview">${app.escapeHtml(app.jobPreview(job))}</span>
-        ${job.pendingApprovalCount ? `<span class="conversation-item-alert">${app.escapeHtml(job.pendingApprovalCount)} 个待审批</span>` : ""}
+        ${alertText ? `<span class="conversation-item-alert">${app.escapeHtml(alertText)}</span>` : ""}
       </button>
       <button class="conversation-item-archive" type="button" ${canArchive || archived ? "" : "disabled"}>
         ${archived ? "恢复" : "归档"}
@@ -167,11 +174,20 @@ export function installSessions(app) {
 
   app.preferredSession = function preferredSession(jobs) {
     return (
+      jobs.find((job) => Number(job.pendingInteractionCount || 0) > 0) ||
       jobs.find((job) => job.pendingApprovalCount > 0) ||
       jobs.find((job) => ["queued", "starting", "running"].includes(job.status)) ||
       jobs.find((job) => job.status === "active") ||
       jobs[0]
     );
+  };
+
+  app.sessionPendingDecisionText = function sessionPendingDecisionText(session) {
+    const interactionCount = Number(session?.pendingInteractionCount || 0);
+    if (interactionCount > 0) return `${interactionCount} 个待选择`;
+    const approvalCount = Number(session?.pendingApprovalCount || 0);
+    if (approvalCount > 0) return `${approvalCount} 个待审批`;
+    return "";
   };
 
   app.statusLabel = function statusLabel(status) {
@@ -358,6 +374,7 @@ export function installSessions(app) {
       ...incoming,
       messages: Array.isArray(incoming.messages) ? incoming.messages : current.messages || [],
       approvals: Array.isArray(incoming.approvals) ? incoming.approvals : current.approvals || [],
+      interactions: Array.isArray(incoming.interactions) ? incoming.interactions : current.interactions || [],
       events: app.mergeCodexSessionEvents(current.events || [], incoming.events || [])
     };
   };
@@ -484,7 +501,8 @@ export function installSessions(app) {
 
   app.renderApprovals = function renderApprovals(session) {
     const approvals = session.approvals || [];
-    elements.codexApprovals.hidden = approvals.length === 0;
+    const interactions = session.interactions || [];
+    elements.codexApprovals.hidden = approvals.length === 0 && interactions.length === 0;
     elements.codexApprovals.innerHTML = "";
     for (const approval of approvals) {
       const node = document.createElement("div");
@@ -504,6 +522,9 @@ export function installSessions(app) {
         button.addEventListener("click", () => app.decideApproval(session.id, approval.id, button.dataset.decision));
       }
       elements.codexApprovals.append(node);
+    }
+    for (const interaction of interactions) {
+      elements.codexApprovals.append(app.renderInteractionCard(session, interaction));
     }
   };
 
@@ -538,6 +559,164 @@ export function installSessions(app) {
     if (payload.grantRoot) return String(payload.grantRoot);
     if (payload.changes) return payload.changes.map((change) => change.path || change.kind || "").filter(Boolean).join("\n");
     return JSON.stringify(payload, null, 2).slice(0, 1600);
+  };
+
+  app.renderInteractionCard = function renderInteractionCard(session, interaction) {
+    const node = document.createElement("div");
+    node.className = "approval-inline-card interaction-inline-card";
+    const questions = app.interactionQuestions(interaction);
+    node.innerHTML = `
+      <div class="approval-inline-copy">
+        <span class="thread-status-pill warn">${app.escapeHtml(app.interactionTitle(interaction))}</span>
+        <p>${app.escapeHtml(interaction.prompt || "Codex 需要你的输入")}</p>
+      </div>
+      <form class="interaction-form">
+        <div class="interaction-questions">
+          ${questions.map((question) => app.renderInteractionQuestion(question)).join("")}
+        </div>
+        <div class="approval-actions">
+          <button class="secondary" type="button" data-interaction-cancel>取消</button>
+          <button class="primary" type="submit">提交</button>
+        </div>
+      </form>
+    `;
+    const form = node.querySelector(".interaction-form");
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      app.submitInteractionAnswer(session.id, interaction, form);
+    });
+    node.querySelector("[data-interaction-cancel]")?.addEventListener("click", () => {
+      app.decideInteraction(session.id, interaction.id, { decision: "cancel" });
+    });
+    return node;
+  };
+
+  app.interactionTitle = function interactionTitle(interaction) {
+    if (interaction.kind === "user_input" || /requestUserInput/i.test(interaction.method || "")) return "需要选择";
+    return "Codex 请求";
+  };
+
+  app.interactionQuestions = function interactionQuestions(interaction) {
+    const payload = interaction.payload || {};
+    const questions = Array.isArray(payload.questions) ? payload.questions : [];
+    return questions.length > 0
+      ? questions.slice(0, 3)
+      : [
+          {
+            id: "answer",
+            header: "输入",
+            question: interaction.prompt || "Codex 需要你的输入",
+            options: null
+          }
+        ];
+  };
+
+  app.renderInteractionQuestion = function renderInteractionQuestion(question) {
+    const id = app.safeInteractionFieldId(question.id);
+    const header = String(question.header || "").trim();
+    const prompt = String(question.question || "").trim();
+    const options = Array.isArray(question.options) ? question.options : [];
+    const secret = Boolean(question.isSecret || question.is_secret);
+    const other = Boolean(question.isOther || question.is_other);
+    const labelHtml = `
+      <div class="interaction-question-copy">
+        ${header ? `<strong>${app.escapeHtml(header)}</strong>` : ""}
+        ${prompt ? `<span>${app.escapeHtml(prompt)}</span>` : ""}
+      </div>
+    `;
+    if (options.length > 0) {
+      const optionHtml = options
+        .map((option, index) => {
+          const value = String(option.label || "").trim();
+          const description = String(option.description || "").trim();
+          return `
+            <label class="interaction-option">
+              <input type="radio" name="${app.escapeHtml(id)}" value="${app.escapeHtml(value)}" ${index === 0 ? "checked" : ""}>
+              <span>${app.escapeHtml(value)}</span>
+              ${description ? `<small>${app.escapeHtml(description)}</small>` : ""}
+            </label>
+          `;
+        })
+        .join("");
+      const otherHtml = other
+        ? `
+          <label class="interaction-option interaction-option-other">
+            <input type="radio" name="${app.escapeHtml(id)}" value="__other__">
+            <span>其他</span>
+            <input class="interaction-other-input" type="${secret ? "password" : "text"}" data-other-for="${app.escapeHtml(id)}" autocomplete="off">
+          </label>
+        `
+        : "";
+      return `
+        <div class="interaction-question" data-question-id="${app.escapeHtml(id)}">
+          ${labelHtml}
+          <div class="interaction-options">${optionHtml}${otherHtml}</div>
+        </div>
+      `;
+    }
+
+    return `
+      <label class="interaction-question" data-question-id="${app.escapeHtml(id)}">
+        ${labelHtml}
+        <input class="interaction-text-input" name="${app.escapeHtml(id)}" type="${secret ? "password" : "text"}" autocomplete="off">
+      </label>
+    `;
+  };
+
+  app.submitInteractionAnswer = async function submitInteractionAnswer(sessionId, interaction, form) {
+    const answers = app.collectInteractionAnswers(interaction, form);
+    if (!answers) return;
+    await app.decideInteraction(sessionId, interaction.id, { answers });
+  };
+
+  app.collectInteractionAnswers = function collectInteractionAnswers(interaction, form) {
+    const answers = {};
+    for (const question of app.interactionQuestions(interaction)) {
+      const originalId = String(question.id || "answer").trim() || "answer";
+      const fieldId = app.safeInteractionFieldId(originalId);
+      const escapedFieldId = app.cssEscape(fieldId);
+      const selected = form.querySelector(`input[type="radio"][name="${escapedFieldId}"]:checked`);
+      let values = [];
+      if (selected) {
+        if (selected.value === "__other__") {
+          const otherValue = form.querySelector(`[data-other-for="${escapedFieldId}"]`)?.value || "";
+          values = [otherValue.trim()];
+        } else {
+          values = [selected.value];
+        }
+      } else {
+        const input = form.querySelector(`[name="${escapedFieldId}"]`);
+        values = [String(input?.value || "").trim()];
+      }
+      values = values.filter(Boolean);
+      if (values.length === 0) {
+        app.toast("请先完成 Codex 的选择");
+        return null;
+      }
+      answers[originalId] = { answers: values };
+    }
+    return answers;
+  };
+
+  app.safeInteractionFieldId = function safeInteractionFieldId(value) {
+    return String(value || "answer").trim().replace(/[^A-Za-z0-9_-]/g, "_") || "answer";
+  };
+
+  app.cssEscape = function cssEscape(value) {
+    if (windowRef.CSS?.escape) return windowRef.CSS.escape(value);
+    return String(value || "").replace(/["\\]/g, "\\$&");
+  };
+
+  app.decideInteraction = async function decideInteraction(sessionId, interactionId, payload) {
+    try {
+      await app.apiPost(`/api/codex/sessions/${encodeURIComponent(sessionId)}/interactions/${encodeURIComponent(interactionId)}`, payload);
+      app.toast(payload.decision === "cancel" ? "已取消" : "已提交");
+      await app.showCodexJob(sessionId, { keepSelection: true });
+    } catch (error) {
+      if (!app.handleAuthError(error, "当前配对已失效，请重新扫描桌面端二维码。")) {
+        app.toast(error.message);
+      }
+    }
   };
 
   app.refreshTurnActivityLine = function refreshTurnActivityLine() {
@@ -594,7 +773,8 @@ export function installSessions(app) {
       session &&
         (["queued", "starting", "running"].includes(session.status) ||
           Number(session.pendingCommandCount || 0) > 0 ||
-          Number(session.pendingApprovalCount || 0) > 0)
+          Number(session.pendingApprovalCount || 0) > 0 ||
+          Number(session.pendingInteractionCount || 0) > 0)
     );
   };
 
@@ -604,6 +784,9 @@ export function installSessions(app) {
 
     const commandActivity = app.latestCommandActivity(session.events || []);
     if (commandActivity) return commandActivity;
+    if (Number(session.pendingInteractionCount || 0) > 0) {
+      return { state: "approval", text: "等待选择", title: "等待你回答 Codex 的结构化问题" };
+    }
     if (Number(session.pendingApprovalCount || 0) > 0) {
       return { state: "approval", text: "等待审批", title: "等待你在手机上批准 Codex 请求" };
     }
@@ -637,6 +820,14 @@ export function installSessions(app) {
           state: "approval",
           text: app.compactActivityText(`等待审批 ${commandText}`),
           title: commandText
+        };
+      }
+
+      if (method === "item/tool/requestUserInput" || method === "tool/requestUserInput") {
+        return {
+          state: "approval",
+          text: "等待选择",
+          title: "Codex 正在等待你的选择"
         };
       }
 
@@ -720,6 +911,8 @@ export function installSessions(app) {
       projectId: job.projectId || "",
       archivedAt: job.archivedAt || "",
       pendingApprovalCount: job.pendingApprovalCount || 0,
+      pendingInteractionCount: job.pendingInteractionCount || 0,
+      pendingUserInputCount: job.pendingUserInputCount || 0,
       pendingCommandCount: job.pendingCommandCount || 0,
       title: app.jobTitle(job),
       errorText,
@@ -744,6 +937,24 @@ export function installSessions(app) {
         prompt: approval.prompt || "",
         title: app.approvalTitle(approval),
         detail: app.approvalDetail(approval)
+      })),
+      interactions: (job.interactions || []).map((interaction) => ({
+        id: interaction.id || "",
+        method: interaction.method || "",
+        kind: interaction.kind || "",
+        prompt: interaction.prompt || "",
+        status: interaction.status || "",
+        questions: app.interactionQuestions(interaction).map((question) => ({
+          id: question.id || "",
+          header: question.header || "",
+          question: question.question || "",
+          isOther: Boolean(question.isOther || question.is_other),
+          isSecret: Boolean(question.isSecret || question.is_secret),
+          options: (question.options || []).map((option) => ({
+            label: option.label || "",
+            description: option.description || ""
+          }))
+        }))
       }))
     });
   };
@@ -905,6 +1116,9 @@ export function installSessions(app) {
 
   app.compactionEntryFromEvent = function compactionEntryFromEvent(event) {
     const itemType = event.raw?.params?.item?.type || "";
+    if (event.type === "plan.mode.fallback") {
+      return { kind: "system", text: "计划模式已降级为兼容指令", at: event.at || "" };
+    }
     if (event.type === "context.compaction.queued") {
       return { kind: "system", text: "上下文压缩已排队", at: event.at || "" };
     }

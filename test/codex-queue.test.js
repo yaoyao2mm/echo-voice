@@ -675,6 +675,149 @@ test("interactive Codex approvals wait for mobile decisions", async () => {
   assert.equal(detail.events.some((event) => event.type === "approval.approved"), true);
 });
 
+test("interactive Codex user input waits for mobile answers", async () => {
+  store.resetStoreForTest();
+
+  const agent = {
+    id: "interaction-agent",
+    workspaces: [{ id: "demo", path: process.cwd() }]
+  };
+  const session = queue.createCodexSession({ projectId: "demo", prompt: "需要选择模型" });
+  const command = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  queue.appendCodexSessionEvents(session.id, [{ type: "thread.started", text: "started", appThreadId: "thr_i" }], {
+    agentId: agent.id
+  });
+  queue.completeCodexSessionCommand(command.id, { ok: true, appThreadId: "thr_i", sessionStatus: "running" }, { agentId: agent.id });
+
+  const interaction = queue.createCodexSessionInteraction(
+    {
+      sessionId: session.id,
+      appRequestId: "request-input-1",
+      method: "item/tool/requestUserInput",
+      kind: "user_input",
+      prompt: "选择接下来使用的模型",
+      payload: {
+        threadId: "thr_i",
+        turnId: "turn_i",
+        itemId: "call_i",
+        questions: [
+          {
+            id: "model_choice",
+            header: "模型",
+            question: "选择接下来使用的模型",
+            options: [
+              { label: "A", description: "保持当前模型" },
+              { label: "B", description: "切换到更强模型" }
+            ]
+          }
+        ]
+      }
+    },
+    { agentId: agent.id }
+  );
+  assert.equal(interaction.status, "pending");
+
+  let detail = queue.getCodexSession(session.id);
+  assert.equal(detail.pendingInteractionCount, 1);
+  assert.equal(detail.pendingUserInputCount, 1);
+  assert.equal(detail.interactions.length, 1);
+  assert.equal(detail.events.some((event) => event.type === "interaction.requested"), true);
+
+  const waitPromise = queue.waitForCodexSessionInteraction(interaction.id, { waitMs: 1000, agentId: agent.id });
+  const answered = queue.decideCodexSessionInteraction(
+    interaction.id,
+    { answers: { model_choice: { answers: ["B"] } } },
+    { user: { username: "alice" } }
+  );
+  assert.equal(answered.status, "answered");
+  assert.deepEqual(answered.response, { answers: { model_choice: { answers: ["B"] } } });
+
+  const waited = await waitPromise;
+  assert.equal(waited.id, interaction.id);
+  assert.equal(waited.status, "answered");
+  assert.deepEqual(waited.response, { answers: { model_choice: { answers: ["B"] } } });
+
+  detail = queue.getCodexSession(session.id);
+  assert.equal(detail.pendingInteractionCount, 0);
+  assert.equal(detail.interactions.length, 0);
+  assert.equal(detail.events.some((event) => event.type === "interaction.answered"), true);
+});
+
+test("interactive Codex user input clears when app-server resolves the request", async () => {
+  store.resetStoreForTest();
+
+  const agent = {
+    id: "interaction-resolve-agent",
+    workspaces: [{ id: "demo", path: process.cwd() }]
+  };
+  const session = queue.createCodexSession({ projectId: "demo", prompt: "需要选择方案" });
+  const command = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  queue.appendCodexSessionEvents(session.id, [{ type: "thread.started", text: "started", appThreadId: "thr_resolved" }], {
+    agentId: agent.id
+  });
+  queue.completeCodexSessionCommand(command.id, { ok: true, appThreadId: "thr_resolved", sessionStatus: "running" }, {
+    agentId: agent.id
+  });
+
+  const interaction = queue.createCodexSessionInteraction(
+    {
+      sessionId: session.id,
+      appRequestId: "request-input-resolved",
+      method: "item/tool/requestUserInput",
+      kind: "user_input",
+      prompt: "选择下一步方案",
+      payload: {
+        threadId: "thr_resolved",
+        turnId: "turn_resolved",
+        itemId: "call_resolved",
+        questions: [
+          {
+            id: "plan_choice",
+            header: "方案",
+            question: "选择下一步方案",
+            options: [
+              { label: "A", description: "只整理计划" },
+              { label: "B", description: "继续实现" }
+            ]
+          }
+        ]
+      }
+    },
+    { agentId: agent.id }
+  );
+  assert.equal(interaction.status, "pending");
+
+  const waitPromise = queue.waitForCodexSessionInteraction(interaction.id, {
+    waitMs: 1000,
+    agentId: agent.id,
+    sessionId: session.id
+  });
+  queue.appendCodexSessionEvents(
+    session.id,
+    [
+      {
+        type: "serverRequest/resolved",
+        text: "Request resolved.",
+        appThreadId: "thr_resolved",
+        raw: {
+          method: "serverRequest/resolved",
+          params: { threadId: "thr_resolved", requestId: "request-input-resolved" }
+        }
+      }
+    ],
+    { agentId: agent.id }
+  );
+
+  const waited = await waitPromise;
+  assert.equal(waited.id, interaction.id);
+  assert.equal(waited.status, "cancelled");
+  assert.deepEqual(waited.response, { answers: {} });
+
+  const detail = queue.getCodexSession(session.id);
+  assert.equal(detail.pendingInteractionCount, 0);
+  assert.equal(detail.interactions.length, 0);
+});
+
 test("interactive Codex sessions can request app-server context compaction", async () => {
   store.resetStoreForTest();
 
@@ -882,7 +1025,7 @@ test("interactive Codex sessions can queue mobile cancellation for the active tu
   assert.equal(nextCommand, null);
 });
 
-test("plan mode keeps the visible user message clean while sending plan instructions to Codex", async () => {
+test("plan mode keeps the visible and queued user message clean", async () => {
   store.resetStoreForTest();
 
   const agent = {
@@ -899,8 +1042,7 @@ test("plan mode keeps the visible user message clean while sending plan instruct
   assert.equal(command.type, "start");
   assert.equal(command.payload.mode, "plan");
   assert.equal(command.payload.displayText, "分析一下怎么改这个功能");
-  assert.match(command.payload.prompt, /请先进入计划模式/);
-  assert.match(command.payload.prompt, /不要修改文件/);
+  assert.equal(command.payload.prompt, "分析一下怎么改这个功能");
 
   const detail = queue.getCodexSession(created.id);
   assert.equal(detail.messages[0].text, "分析一下怎么改这个功能");

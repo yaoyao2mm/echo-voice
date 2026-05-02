@@ -79,7 +79,7 @@ export class CodexAppServerClient extends EventEmitter {
           version: "0.1.0"
         },
         capabilities: {
-          experimentalApi: false
+          experimentalApi: true
         }
       },
       15000

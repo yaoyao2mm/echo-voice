@@ -89,6 +89,232 @@ try {
   assert.equal(result.status, 0, [result.stdout, result.stderr].filter(Boolean).join("\n"));
 });
 
+test("CodexInteractiveRuntime sends native collaboration plan mode when available", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "echo-runtime-plan-mode-"));
+  const homePath = path.join(tempRoot, "home");
+  const workspacePath = path.join(tempRoot, "workspace");
+  const fakeCodexPath = path.join(tempRoot, "fake-codex-app");
+  const recordPath = path.join(tempRoot, "turn-start.json");
+
+  fs.mkdirSync(homePath, { recursive: true });
+  fs.mkdirSync(workspacePath, { recursive: true });
+  fs.writeFileSync(
+    fakeCodexPath,
+    `#!/usr/bin/env node
+import fs from "node:fs";
+import readline from "node:readline";
+
+const rl = readline.createInterface({ input: process.stdin });
+const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+
+rl.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") {
+    send({ id: message.id, result: { userAgent: "fake", codexHome: "/tmp/codex", platformFamily: "unix", platformOs: "macos" } });
+    return;
+  }
+  if (message.method === "initialized") return;
+  if (message.method === "collaborationMode/list") {
+    send({ id: message.id, result: { data: [{ name: "Plan", mode: "plan", reasoning_effort: "medium" }] } });
+    return;
+  }
+  if (message.method === "thread/start") {
+    send({ id: message.id, result: { thread: { id: "thr_plan", preview: "", ephemeral: false, modelProvider: "openai", createdAt: 1, cwd: message.params.cwd } } });
+    return;
+  }
+  if (message.method === "turn/start") {
+    fs.writeFileSync(${JSON.stringify(recordPath)}, JSON.stringify(message.params), "utf8");
+    const turn = { id: "turn_plan", items: [], status: "inProgress", error: null, startedAt: 1, completedAt: null, durationMs: null };
+    send({ id: message.id, result: { turn } });
+  }
+});
+`,
+    "utf8"
+  );
+  fs.chmodSync(fakeCodexPath, 0o755);
+
+  const script = `
+import assert from "node:assert/strict";
+import fs from "node:fs";
+
+process.env.HOME = ${JSON.stringify(homePath)};
+process.env.ECHO_MODE = "relay";
+process.env.ECHO_TOKEN = "test-token";
+process.env.ECHO_RELAY_URL = "https://example.test";
+process.env.ECHO_CODEX_COMMAND = ${JSON.stringify(fakeCodexPath)};
+process.env.ECHO_CODEX_APP_PATH = ${JSON.stringify(fakeCodexPath)};
+process.env.ECHO_CODEX_WORKSPACES = ${JSON.stringify(`demo=${workspacePath}`)};
+
+const { CodexInteractiveRuntime } = await import(${JSON.stringify(path.join(process.cwd(), "src/lib/codexInteractiveRunner.js"))});
+
+const runtime = new CodexInteractiveRuntime();
+try {
+  const result = await runtime.handleCommand({
+    sessionId: "session-plan",
+    type: "start",
+    projectId: "demo",
+    payload: { prompt: "先设计移动端交互", attachments: [], mode: "plan" },
+    runtime: { model: "gpt-5.4", reasoningEffort: "low" }
+  });
+  assert.equal(result.ok, true);
+  const params = JSON.parse(fs.readFileSync(${JSON.stringify(recordPath)}, "utf8"));
+  assert.equal(params.input[0].text, "先设计移动端交互");
+  assert.equal(params.input[0].text.includes("请先进入计划模式"), false);
+  assert.equal(params.collaborationMode.mode, "plan");
+  assert.equal(params.collaborationMode.settings.model, "gpt-5.4");
+  assert.equal(params.collaborationMode.settings.reasoning_effort, "medium");
+  assert.equal(params.collaborationMode.settings.developer_instructions, null);
+} finally {
+  runtime.stop();
+}
+`;
+
+  const result = spawnSync(process.execPath, ["--input-type=module", "-"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    input: script
+  });
+
+  assert.equal(result.status, 0, [result.stdout, result.stderr].filter(Boolean).join("\n"));
+});
+
+test("CodexInteractiveRuntime forwards requestUserInput server requests", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "echo-runtime-user-input-"));
+  const homePath = path.join(tempRoot, "home");
+  const workspacePath = path.join(tempRoot, "workspace");
+  const fakeCodexPath = path.join(tempRoot, "fake-codex-app");
+  const responsePath = path.join(tempRoot, "user-input-response.json");
+
+  fs.mkdirSync(homePath, { recursive: true });
+  fs.mkdirSync(workspacePath, { recursive: true });
+  fs.writeFileSync(
+    fakeCodexPath,
+    `#!/usr/bin/env node
+import fs from "node:fs";
+import readline from "node:readline";
+
+const rl = readline.createInterface({ input: process.stdin });
+const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+const requestId = "request_user_input_1";
+
+rl.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.id === requestId && message.result) {
+    fs.writeFileSync(${JSON.stringify(responsePath)}, JSON.stringify(message.result), "utf8");
+    send({ method: "serverRequest/resolved", params: { threadId: "thr_input", requestId } });
+    send({ method: "turn/completed", params: { threadId: "thr_input", turn: { id: "turn_input", status: "completed" } } });
+    return;
+  }
+  if (message.method === "initialize") {
+    send({ id: message.id, result: { userAgent: "fake", codexHome: "/tmp/codex", platformFamily: "unix", platformOs: "macos" } });
+    return;
+  }
+  if (message.method === "initialized") return;
+  if (message.method === "thread/start") {
+    send({ id: message.id, result: { thread: { id: "thr_input", preview: "", ephemeral: false, modelProvider: "openai", createdAt: 1, cwd: message.params.cwd } } });
+    return;
+  }
+  if (message.method === "turn/start") {
+    const turn = { id: "turn_input", items: [], status: "inProgress", error: null, startedAt: 1, completedAt: null, durationMs: null };
+    send({ id: message.id, result: { turn } });
+    send({ method: "turn/started", params: { threadId: message.params.threadId, turn } });
+    send({
+      id: requestId,
+      method: "item/tool/requestUserInput",
+      params: {
+        threadId: message.params.threadId,
+        turnId: turn.id,
+        itemId: "call1",
+        questions: [
+          {
+            id: "model_choice",
+            header: "模型",
+            question: "选择接下来使用的模型",
+            options: [
+              { label: "A", description: "保持当前模型" },
+              { label: "B", description: "切换到更强模型" }
+            ]
+          }
+        ]
+      }
+    });
+  }
+});
+`,
+    "utf8"
+  );
+  fs.chmodSync(fakeCodexPath, 0o755);
+
+  const script = `
+import assert from "node:assert/strict";
+import fs from "node:fs";
+
+process.env.HOME = ${JSON.stringify(homePath)};
+process.env.ECHO_MODE = "relay";
+process.env.ECHO_TOKEN = "test-token";
+process.env.ECHO_RELAY_URL = "https://example.test";
+process.env.ECHO_CODEX_COMMAND = ${JSON.stringify(fakeCodexPath)};
+process.env.ECHO_CODEX_APP_PATH = ${JSON.stringify(fakeCodexPath)};
+process.env.ECHO_CODEX_WORKSPACES = ${JSON.stringify(`demo=${workspacePath}`)};
+
+const { CodexInteractiveRuntime } = await import(${JSON.stringify(path.join(process.cwd(), "src/lib/codexInteractiveRunner.js"))});
+
+let capturedInteraction = null;
+let resolveCompleted;
+const completed = new Promise((resolve) => {
+  resolveCompleted = resolve;
+});
+let resolveInteraction;
+const interactionSeen = new Promise((resolve) => {
+  resolveInteraction = resolve;
+});
+const runtime = new CodexInteractiveRuntime({
+  onEvents: async (_id, events) => {
+    if (events.some((event) => event.type === "turn/completed")) resolveCompleted();
+  },
+  requestInteraction: async (interaction) => {
+    capturedInteraction = interaction;
+    resolveInteraction();
+    return { answers: { model_choice: { answers: ["B"] } } };
+  }
+});
+
+try {
+  const result = await runtime.handleCommand({
+    sessionId: "session-input",
+    type: "start",
+    projectId: "demo",
+    payload: { prompt: "ask", attachments: [] },
+    runtime: { model: "gpt-5.4" }
+  });
+  assert.equal(result.ok, true);
+  await Promise.race([
+    interactionSeen,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("timed out waiting for interaction")), 2000))
+  ]);
+  await Promise.race([
+    completed,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("timed out waiting for completion")), 2000))
+  ]);
+  assert.equal(capturedInteraction.method, "item/tool/requestUserInput");
+  assert.equal(capturedInteraction.kind, "user_input");
+  assert.equal(capturedInteraction.payload.questions[0].id, "model_choice");
+  const response = JSON.parse(fs.readFileSync(${JSON.stringify(responsePath)}, "utf8"));
+  assert.deepEqual(response, { answers: { model_choice: { answers: ["B"] } } });
+} finally {
+  runtime.stop();
+}
+`;
+
+  const result = spawnSync(process.execPath, ["--input-type=module", "-"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    input: script
+  });
+
+  assert.equal(result.status, 0, [result.stdout, result.stderr].filter(Boolean).join("\n"));
+});
+
 test("CodexInteractiveRuntime accepts managed workspaces created by the desktop agent", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "echo-runtime-managed-workspace-"));
   const homePath = path.join(tempRoot, "home");

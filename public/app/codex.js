@@ -77,8 +77,9 @@ export function installCodex(app) {
     app.refreshRuntimeDefaultOptions();
     app.refreshWorktreeModeControls?.();
     elements.codexStatusText.textContent = codex.agentOnline ? "本机 Codex 在线" : "等待桌面 agent";
+    const pendingDecisions = Number(codex.interactive?.pendingInteractions || 0) + Number(codex.interactive?.pendingApprovals || 0);
     elements.codexQueueMeta.textContent = codex.agentOnline
-      ? `会话 ${codex.interactive?.activeSessions || 0} · 待审批 ${codex.interactive?.pendingApprovals || 0} · 归档 ${codex.interactive?.archivedSessions || 0} · 项目 ${workspaces.length}`
+      ? `会话 ${codex.interactive?.activeSessions || 0} · 待处理 ${pendingDecisions} · 归档 ${codex.interactive?.archivedSessions || 0} · 项目 ${workspaces.length}`
       : "打开桌面端后自动同步";
 
     const previousProject = app.currentProjectId();
@@ -397,6 +398,8 @@ export function installCodex(app) {
     const enabled = Boolean(state.composerPlanMode);
     elements.composerPlanModeButton.classList.toggle("active", enabled);
     elements.composerPlanModeButton.setAttribute("aria-pressed", enabled ? "true" : "false");
+    elements.composerPlanModeButton.setAttribute("aria-label", enabled ? "退出计划模式" : "进入计划模式");
+    elements.composerPlanModeButton.setAttribute("title", enabled ? "退出计划模式" : "进入计划模式");
   };
 
   app.requestContextCompaction = async function requestContextCompaction({ automatic = false } = {}) {
@@ -443,7 +446,8 @@ export function installCodex(app) {
         app.sessionCanAcceptFollowUp(session) &&
         !["failed", "closed", "stale", "cancelled"].includes(session.status) &&
         !app.sessionHasPendingWork(session) &&
-        Number(session.pendingApprovalCount || 0) === 0
+        Number(session.pendingApprovalCount || 0) === 0 &&
+        Number(session.pendingInteractionCount || 0) === 0
     );
   };
 
@@ -480,12 +484,16 @@ export function installCodex(app) {
 
   app.sessionHasPendingWork = function sessionHasPendingWork(session) {
     if (!session) return false;
-    return ["queued", "starting", "running"].includes(session.status) || Number(session.pendingCommandCount || 0) > 0;
+    return (
+      ["queued", "starting", "running"].includes(session.status) ||
+      Number(session.pendingCommandCount || 0) > 0 ||
+      Number(session.pendingInteractionCount || 0) > 0
+    );
   };
 
   app.composerActionLabel = function composerActionLabel() {
     if (app.selectedSessionNeedsExplicitNew()) return "先新建";
-    if (state.composerPlanMode) return "计划";
+    if (state.composerPlanMode) return "生成计划";
     if (!app.canContinueSelectedSession()) return "发送";
     return app.sessionHasPendingWork(state.selectedCodexSession) ? "继续排队" : "继续";
   };

@@ -7,9 +7,11 @@ import {
   compactSession as compactStoredSession,
   completeSessionCommand as completeStoredSessionCommand,
   completeWorkspaceCommand as completeStoredWorkspaceCommand,
+  createSessionInteraction as createStoredSessionInteraction,
   createSessionApproval as createStoredSessionApproval,
   createSession as createStoredSession,
   createWorkspaceCommand as createStoredWorkspaceCommand,
+  decideSessionInteraction as decideStoredSessionInteraction,
   decideSessionApproval as decideStoredSessionApproval,
   enqueueSessionMessage as enqueueStoredSessionMessage,
   getWorkspaceCommand as getStoredWorkspaceCommand,
@@ -21,7 +23,8 @@ import {
   statusSnapshot,
   touchAgent,
   upsertAgent,
-  waitForSessionApprovalDecision as getStoredApprovalDecision
+  waitForSessionApprovalDecision as getStoredApprovalDecision,
+  waitForSessionInteractionDecision as getStoredInteractionDecision
 } from "./codexStore.js";
 
 const events = new EventEmitter();
@@ -191,6 +194,22 @@ export function decideCodexSessionApproval(id, input = {}, options = {}) {
   return approval;
 }
 
+export function createCodexSessionInteraction(input = {}, options = {}) {
+  if (options.agent) updateCodexAgent(options.agent);
+  else if (options.agentId) touchAgent(options.agentId);
+  const interaction = createStoredSessionInteraction(input, { agentId: options.agentId || options.agent?.id });
+  if (interaction) events.emit(`codex-interaction-${interaction.id}`);
+  notifySessionChanged(interaction?.sessionId);
+  return interaction;
+}
+
+export function decideCodexSessionInteraction(id, input = {}, options = {}) {
+  const interaction = decideStoredSessionInteraction(id, input, options);
+  if (interaction) events.emit(`codex-interaction-${interaction.id}`);
+  notifySessionChanged(interaction?.sessionId);
+  return interaction;
+}
+
 export async function waitForCodexSessionApproval(id, input = {}) {
   if (input.agent) updateCodexAgent(input.agent);
   else if (input.agentId) touchAgent(input.agentId);
@@ -215,6 +234,37 @@ export async function waitForCodexSessionApproval(id, input = {}) {
     }
 
     events.on(eventName, handleDecision);
+  });
+}
+
+export async function waitForCodexSessionInteraction(id, input = {}) {
+  if (input.agent) updateCodexAgent(input.agent);
+  else if (input.agentId) touchAgent(input.agentId);
+
+  const immediateInteraction = getStoredInteractionDecision(id, { agentId: input.agentId || input.agent?.id });
+  if (immediateInteraction) return immediateInteraction;
+
+  const waitMs = clampWaitMs(input.waitMs);
+  return new Promise((resolve) => {
+    const eventName = `codex-interaction-${id}`;
+    const sessionEventName = input.sessionId ? sessionChangedEventName(input.sessionId) : "";
+    const timeout = setTimeout(() => {
+      events.off(eventName, handleDecision);
+      if (sessionEventName) events.off(sessionEventName, handleDecision);
+      resolve(null);
+    }, waitMs);
+
+    function handleDecision() {
+      const interaction = getStoredInteractionDecision(id, { agentId: input.agentId || input.agent?.id });
+      if (!interaction) return;
+      clearTimeout(timeout);
+      events.off(eventName, handleDecision);
+      if (sessionEventName) events.off(sessionEventName, handleDecision);
+      resolve(interaction);
+    }
+
+    events.on(eventName, handleDecision);
+    if (sessionEventName) events.on(sessionEventName, handleDecision);
   });
 }
 

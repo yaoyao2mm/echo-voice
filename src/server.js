@@ -25,9 +25,11 @@ import {
   completeCodexSessionCommand,
   completeCodexWorkspaceCommand,
   getCodexSessionAttachmentContent,
+  createCodexSessionInteraction,
   createCodexSessionApproval,
   createCodexSession,
   createCodexWorkspace,
+  decideCodexSessionInteraction,
   decideCodexSessionApproval,
   enqueueCodexSessionMessage,
   getCodexSession,
@@ -35,6 +37,7 @@ import {
   listCodexSessions,
   subscribeCodexSession,
   waitForCodexSessionApproval,
+  waitForCodexSessionInteraction,
   waitForCodexSessionCommand,
   waitForCodexWorkspaceCommand
 } from "./lib/codexQueue.js";
@@ -452,6 +455,31 @@ app.post("/api/codex/sessions/:id/approvals/:approvalId", (req, res) => {
   }
 });
 
+app.post("/api/codex/sessions/:id/interactions/:interactionId", (req, res) => {
+  try {
+    if (config.mode !== "relay") {
+      return res.status(400).json({ error: "Codex interactive requests are only available in relay mode." });
+    }
+
+    const interaction = decideCodexSessionInteraction(
+      req.params.interactionId,
+      {
+        sessionId: req.params.id,
+        decision: req.body.decision,
+        answers: req.body.answers,
+        response: req.body.response
+      },
+      {
+        user: req.user || null
+      }
+    );
+    if (!interaction) return res.status(404).json({ error: "Codex interaction not found." });
+    res.json({ interaction });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
 app.post("/api/agent/codex/sessions/next", async (req, res) => {
   try {
     if (config.mode !== "relay") {
@@ -569,6 +597,48 @@ app.post("/api/agent/codex/sessions/approvals/:id/wait", async (req, res) => {
   }
 });
 
+app.post("/api/agent/codex/sessions/interactions", (req, res) => {
+  try {
+    if (config.mode !== "relay") {
+      return res.status(400).json({ error: "Codex session interactions are only available in relay mode." });
+    }
+
+    const interaction = createCodexSessionInteraction(
+      {
+        sessionId: req.body.sessionId,
+        appRequestId: req.body.appRequestId,
+        method: req.body.method,
+        kind: req.body.kind,
+        prompt: req.body.prompt,
+        payload: req.body.payload
+      },
+      {
+        agentId: req.body.agentId
+      }
+    );
+    res.json({ interaction });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.post("/api/agent/codex/sessions/interactions/:id/wait", async (req, res) => {
+  try {
+    if (config.mode !== "relay") {
+      return res.status(400).json({ error: "Codex session interaction waiting is only available in relay mode." });
+    }
+
+    const interaction = await waitForCodexSessionInteraction(req.params.id, {
+      waitMs: Number(req.query.wait || req.body.wait || 25000),
+      agentId: req.body.agentId,
+      sessionId: req.body.sessionId
+    });
+    res.json({ interaction });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
 const useHttps = Boolean(config.httpsCert && config.httpsKey);
 const server = useHttps
   ? https.createServer(
@@ -632,7 +702,8 @@ function streamSessionOptions({ initial = false } = {}) {
     rawMode: "client",
     maxEvents: initial ? 160 : 80,
     includeMessages: initial,
-    includeApprovals: true
+    includeApprovals: true,
+    includeInteractions: true
   };
 }
 

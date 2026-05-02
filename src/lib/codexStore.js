@@ -90,6 +90,14 @@ const insertSessionApproval = db.prepare(`
   )
 `);
 
+const insertSessionInteraction = db.prepare(`
+  INSERT INTO codex_session_interactions (
+    id, session_id, app_request_id, method, kind, status, prompt, payload_json, response_json, created_at, updated_at, requested_by
+  ) VALUES (
+    @id, @sessionId, @appRequestId, @method, @kind, 'pending', @prompt, @payloadJson, '', @now, @now, @requestedBy
+  )
+`);
+
 const trimEvents = db.prepare(`
   DELETE FROM codex_events
   WHERE job_id = ?
@@ -194,6 +202,23 @@ const summarizeSessionApprovalColumns = `
   updated_at AS updatedAt,
   decided_at AS decidedAt,
   decided_by AS decidedBy,
+  requested_by AS requestedBy
+`;
+
+const summarizeSessionInteractionColumns = `
+  id,
+  session_id AS sessionId,
+  app_request_id AS appRequestId,
+  method,
+  kind,
+  status,
+  prompt,
+  payload_json AS payloadJson,
+  response_json AS responseJson,
+  created_at AS createdAt,
+  updated_at AS updatedAt,
+  answered_at AS answeredAt,
+  answered_by AS answeredBy,
   requested_by AS requestedBy
 `;
 
@@ -589,6 +614,7 @@ export function getSession(id, options = {}) {
   };
   if (options.includeMessages !== false) result.messages = listSessionMessages(id);
   if (options.includeApprovals !== false) result.approvals = listSessionApprovals(id);
+  if (options.includeInteractions !== false) result.interactions = listSessionInteractions(id);
   return result;
 }
 
@@ -615,7 +641,8 @@ export function archiveSession(id, input = {}) {
     archive &&
     (["queued", "starting", "running"].includes(session.status) ||
       session.pendingCommandCount > 0 ||
-      session.pendingApprovalCount > 0)
+      session.pendingApprovalCount > 0 ||
+      session.pendingInteractionCount > 0)
   ) {
     return conflict("Running Codex sessions cannot be archived yet.");
   }
@@ -796,6 +823,7 @@ export function cancelSession(sessionId, input = {}) {
       `).run({ sessionId, now });
 
       denyPendingSessionApprovals(sessionId, now, "cancelled");
+      cancelPendingSessionInteractions(sessionId, now, "cancelled");
 
       insertSessionEvent.run(
         normalizeSessionEvent(sessionId, {
@@ -841,6 +869,7 @@ export function cancelSession(sessionId, input = {}) {
     `).run({ sessionId, now });
 
     denyPendingSessionApprovals(sessionId, now, "cancelled");
+    cancelPendingSessionInteractions(sessionId, now, "cancelled");
 
     insertSessionEvent.run(
       normalizeSessionEvent(sessionId, {
@@ -1067,6 +1096,7 @@ export function appendSessionEvents(sessionId, incomingEvents = [], options = {}
   const update = deriveSessionUpdate(incomingEvents, session);
   const releaseLease = update.releaseLease && !sessionHasLeasedCommand(sessionId);
   const assistantMessages = buildAssistantMessages(sessionId, incomingEvents, now);
+  const resolvedServerRequests = serverRequestResolutionsFromEvents(incomingEvents);
 
   const write = db.transaction(() => {
     db.prepare(`
@@ -1096,6 +1126,9 @@ export function appendSessionEvents(sessionId, incomingEvents = [], options = {}
     });
 
     for (const event of events) insertSessionEvent.run(event);
+    for (const resolution of resolvedServerRequests) {
+      resolvePendingServerRequest(sessionId, resolution.requestId, now);
+    }
     for (const message of assistantMessages) {
       insertSessionMessageIgnore.run(message);
     }
@@ -1283,6 +1316,101 @@ export function decideSessionApproval(id, input = {}, options = {}) {
   return decide();
 }
 
+export function createSessionInteraction(input = {}, options = {}) {
+  const session = getSessionSummary(input.sessionId);
+  if (!session) return notFound("Codex session not found.");
+  if (!canMutateSession(session, options.agentId)) return false;
+
+  const now = nowIso();
+  const interaction = {
+    id: crypto.randomUUID(),
+    sessionId: session.id,
+    appRequestId: String(input.appRequestId || ""),
+    method: String(input.method || ""),
+    kind: normalizeInteractionKind(input.kind || input.method),
+    prompt: String(input.prompt || "").slice(0, 12000),
+    payloadJson: JSON.stringify(input.payload || {}).slice(0, 30000),
+    requestedBy: normalizeAgentId(options.agentId),
+    now
+  };
+
+  const create = db.transaction(() => {
+    const existing = db.prepare(`
+      SELECT ${summarizeSessionInteractionColumns}
+      FROM codex_session_interactions
+      WHERE session_id = ?
+        AND app_request_id = ?
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).get(interaction.sessionId, interaction.appRequestId);
+
+    if (existing) return summarizeSessionInteraction(existing);
+
+    insertSessionInteraction.run(interaction);
+
+    insertSessionEvent.run(
+      normalizeSessionEvent(interaction.sessionId, {
+        type: "interaction.requested",
+        text: interaction.prompt || `${interaction.method} requested input.`,
+        raw: {
+          interactionId: interaction.id,
+          appRequestId: interaction.appRequestId,
+          method: interaction.method,
+          kind: interaction.kind,
+          payload: input.payload || {}
+        }
+      }, now)
+    );
+
+    return getSessionInteractionSummary(interaction.id);
+  });
+
+  return create();
+}
+
+export function decideSessionInteraction(id, input = {}, options = {}) {
+  const interaction = getSessionInteractionSummary(id);
+  if (!interaction) return notFound("Codex interaction not found.");
+  if (input.sessionId && interaction.sessionId !== input.sessionId) return notFound("Codex interaction not found.");
+  if (interaction.status !== "pending") return interaction;
+
+  const now = nowIso();
+  const status = normalizeInteractionStatus(input.decision);
+  const response = buildInteractionResponse(interaction, input, status);
+  const answeredBy = String(options.user?.username || options.user?.displayName || "mobile").slice(0, 120);
+
+  const decide = db.transaction(() => {
+    db.prepare(`
+      UPDATE codex_session_interactions
+      SET status = @status,
+          response_json = @responseJson,
+          answered_at = @now,
+          answered_by = @answeredBy,
+          updated_at = @now
+      WHERE id = @id
+        AND status = 'pending'
+    `).run({
+      id,
+      status,
+      responseJson: JSON.stringify(response).slice(0, 30000),
+      now,
+      answeredBy
+    });
+
+    insertSessionEvent.run(
+      normalizeSessionEvent(interaction.sessionId, {
+        type: status === "answered" ? "interaction.answered" : `interaction.${status}`,
+        text: interaction.method ? `${interaction.method} ${status}.` : `Interaction ${status}.`,
+        raw: { interactionId: interaction.id, response: redactInteractionResponseForEvent(interaction, response) }
+      }, now)
+    );
+
+    return getSessionInteractionSummary(id);
+  });
+
+  return decide();
+}
+
 export function waitForSessionApprovalDecision(id, options = {}) {
   expireOldApprovals();
   const approval = getSessionApprovalSummary(id);
@@ -1291,10 +1419,19 @@ export function waitForSessionApprovalDecision(id, options = {}) {
   return approval.status === "pending" ? null : approval;
 }
 
+export function waitForSessionInteractionDecision(id, options = {}) {
+  expireOldInteractions();
+  const interaction = getSessionInteractionSummary(id);
+  if (!interaction) return null;
+  if (options.agentId && interaction.requestedBy !== normalizeAgentId(options.agentId)) return null;
+  return interaction.status === "pending" ? null : interaction;
+}
+
 export function resetStoreForTest() {
   db.prepare("DELETE FROM codex_workspace_commands").run();
   db.prepare("DELETE FROM codex_session_attachments").run();
   db.prepare("DELETE FROM codex_session_messages").run();
+  db.prepare("DELETE FROM codex_session_interactions").run();
   db.prepare("DELETE FROM codex_session_approvals").run();
   db.prepare("DELETE FROM codex_session_events").run();
   db.prepare("DELETE FROM codex_session_commands").run();
@@ -1474,6 +1611,30 @@ function migrate() {
 
     CREATE INDEX IF NOT EXISTS idx_codex_session_approvals_status
       ON codex_session_approvals(status, created_at);
+
+    CREATE TABLE IF NOT EXISTS codex_session_interactions (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES codex_sessions(id) ON DELETE CASCADE,
+      app_request_id TEXT NOT NULL,
+      method TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('user_input', 'unknown')),
+      status TEXT NOT NULL CHECK (status IN ('pending', 'answered', 'cancelled', 'timed_out')),
+      prompt TEXT NOT NULL DEFAULT '',
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      response_json TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      answered_at TEXT,
+      answered_by TEXT NOT NULL DEFAULT '',
+      requested_by TEXT NOT NULL DEFAULT '',
+      UNIQUE(session_id, app_request_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_codex_session_interactions_session
+      ON codex_session_interactions(session_id, status, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_codex_session_interactions_status
+      ON codex_session_interactions(status, created_at);
   `);
 
   ensureColumn("codex_sessions", "archived_at", "TEXT");
@@ -1516,6 +1677,12 @@ function migrate() {
 
     CREATE INDEX IF NOT EXISTS idx_codex_session_approvals_status
       ON codex_session_approvals(status, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_codex_session_interactions_session
+      ON codex_session_interactions(session_id, status, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_codex_session_interactions_status
+      ON codex_session_interactions(status, created_at);
   `);
 }
 
@@ -1704,6 +1871,27 @@ function sessionChildTableSchema(name) {
         updated_at TEXT NOT NULL,
         decided_at TEXT,
         decided_by TEXT NOT NULL DEFAULT '',
+        requested_by TEXT NOT NULL DEFAULT '',
+        UNIQUE(session_id, app_request_id)
+      )
+    `;
+  }
+  if (name === "codex_session_interactions") {
+    return `
+      CREATE TABLE codex_session_interactions (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL REFERENCES codex_sessions(id) ON DELETE CASCADE,
+        app_request_id TEXT NOT NULL,
+        method TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('user_input', 'unknown')),
+        status TEXT NOT NULL CHECK (status IN ('pending', 'answered', 'cancelled', 'timed_out')),
+        prompt TEXT NOT NULL DEFAULT '',
+        payload_json TEXT NOT NULL DEFAULT '{}',
+        response_json TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        answered_at TEXT,
+        answered_by TEXT NOT NULL DEFAULT '',
         requested_by TEXT NOT NULL DEFAULT '',
         UNIQUE(session_id, app_request_id)
       )
@@ -1901,12 +2089,14 @@ function sessionStatusSnapshot() {
       AND archived_at IS NULL
   `).get().count;
   const pendingApprovals = db.prepare("SELECT COUNT(*) AS count FROM codex_session_approvals WHERE status = 'pending'").get().count;
+  const pendingInteractions = db.prepare("SELECT COUNT(*) AS count FROM codex_session_interactions WHERE status = 'pending'").get().count;
   const archivedSessions = db.prepare("SELECT COUNT(*) AS count FROM codex_sessions WHERE archived_at IS NOT NULL").get().count;
 
   return {
     queuedCommands,
     activeSessions,
     pendingApprovals,
+    pendingInteractions,
     archivedSessions,
     recent: listSessions(8)
   };
@@ -1957,6 +2147,19 @@ function summarizeSession(row) {
     WHERE session_id = ?
       AND status = 'pending'
   `).get(row.id).count;
+  const pendingInteractionCount = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM codex_session_interactions
+    WHERE session_id = ?
+      AND status = 'pending'
+  `).get(row.id).count;
+  const pendingUserInputCount = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM codex_session_interactions
+    WHERE session_id = ?
+      AND status = 'pending'
+      AND kind = 'user_input'
+  `).get(row.id).count;
 
   return {
     ...row,
@@ -1966,6 +2169,8 @@ function summarizeSession(row) {
     eventCount,
     pendingCommandCount,
     pendingApprovalCount,
+    pendingInteractionCount,
+    pendingUserInputCount,
     lastEvent: lastEvent ? parseEvent(lastEvent, { includeRaw: false }) : null
   };
 }
@@ -2025,7 +2230,24 @@ function getSessionApprovalSummary(id) {
   return row ? summarizeSessionApproval(row) : null;
 }
 
+function getSessionInteractionSummary(id) {
+  const row = db.prepare(`
+    SELECT ${summarizeSessionInteractionColumns}
+    FROM codex_session_interactions
+    WHERE id = ?
+  `).get(id);
+  return row ? summarizeSessionInteraction(row) : null;
+}
+
 function summarizeSessionApproval(row) {
+  return {
+    ...row,
+    payload: parseJson(row.payloadJson, {}),
+    response: parseJson(row.responseJson, null)
+  };
+}
+
+function summarizeSessionInteraction(row) {
   return {
     ...row,
     payload: parseJson(row.payloadJson, {}),
@@ -2131,6 +2353,16 @@ function listSessionApprovals(sessionId) {
   `).all(sessionId).map(summarizeSessionApproval);
 }
 
+function listSessionInteractions(sessionId) {
+  return db.prepare(`
+    SELECT ${summarizeSessionInteractionColumns}
+    FROM codex_session_interactions
+    WHERE session_id = ?
+      AND status = 'pending'
+    ORDER BY created_at ASC
+  `).all(sessionId).map(summarizeSessionInteraction);
+}
+
 function sessionHasLeasedCommand(sessionId) {
   return (
     db.prepare(`
@@ -2205,6 +2437,112 @@ function denyPendingSessionApprovals(sessionId, now, decidedBy) {
         raw: { approvalId: approval.id, response }
       }, now)
     );
+  }
+}
+
+function cancelPendingSessionInteractions(sessionId, now, answeredBy) {
+  const interactions = db.prepare(`
+    SELECT ${summarizeSessionInteractionColumns}
+    FROM codex_session_interactions
+    WHERE session_id = ?
+      AND status = 'pending'
+  `).all(sessionId).map(summarizeSessionInteraction);
+
+  for (const interaction of interactions) {
+    const response = buildInteractionResponse(interaction, {}, "cancelled");
+    db.prepare(`
+      UPDATE codex_session_interactions
+      SET status = 'cancelled',
+          response_json = @responseJson,
+          answered_at = @now,
+          answered_by = @answeredBy,
+          updated_at = @now
+      WHERE id = @id
+        AND status = 'pending'
+    `).run({
+      id: interaction.id,
+      responseJson: JSON.stringify(response),
+      now,
+      answeredBy
+    });
+
+    insertSessionEvent.run(
+      normalizeSessionEvent(interaction.sessionId, {
+        type: "interaction.cancelled",
+        text: `${interaction.method || "Interaction"} cancelled.`,
+        raw: { interactionId: interaction.id, response: redactInteractionResponseForEvent(interaction, response) }
+      }, now)
+    );
+  }
+}
+
+function serverRequestResolutionsFromEvents(events = []) {
+  return events
+    .map((event) => {
+      const raw = event?.raw || {};
+      const method = raw.method || event?.type || "";
+      if (method !== "serverRequest/resolved") return null;
+      const requestId = raw.params?.requestId;
+      if (requestId === undefined || requestId === null) return null;
+      return { requestId: String(requestId) };
+    })
+    .filter(Boolean);
+}
+
+function resolvePendingServerRequest(sessionId, appRequestId, now) {
+  const requestId = String(appRequestId || "");
+  if (!requestId) return;
+
+  const interactions = db.prepare(`
+    SELECT ${summarizeSessionInteractionColumns}
+    FROM codex_session_interactions
+    WHERE session_id = ?
+      AND app_request_id = ?
+      AND status = 'pending'
+  `).all(sessionId, requestId).map(summarizeSessionInteraction);
+
+  for (const interaction of interactions) {
+    const response = buildInteractionResponse(interaction, {}, "cancelled");
+    db.prepare(`
+      UPDATE codex_session_interactions
+      SET status = 'cancelled',
+          response_json = @responseJson,
+          answered_at = @now,
+          answered_by = 'serverRequest/resolved',
+          updated_at = @now
+      WHERE id = @id
+        AND status = 'pending'
+    `).run({
+      id: interaction.id,
+      responseJson: JSON.stringify(response),
+      now
+    });
+  }
+
+  const approvals = db.prepare(`
+    SELECT ${summarizeSessionApprovalColumns}
+    FROM codex_session_approvals
+    WHERE session_id = ?
+      AND app_request_id = ?
+      AND status = 'pending'
+  `).all(sessionId, requestId).map(summarizeSessionApproval);
+
+  for (const approval of approvals) {
+    const response = buildApprovalResponse(approval.method, "denied");
+    db.prepare(`
+      UPDATE codex_session_approvals
+      SET status = 'denied',
+          response_json = @responseJson,
+          decided_at = @now,
+          decided_by = 'serverRequest/resolved',
+          updated_at = @now
+      WHERE id = @id
+        AND status = 'pending'
+    `).run({
+      id: approval.id,
+      responseJson: JSON.stringify(response),
+      now
+    });
   }
 }
 
@@ -2423,7 +2761,7 @@ function buildAgentSessionCommand(command) {
   const messageId = String(parsed.payload?.messageId || "").trim();
   const message = messageId ? getSessionMessage(messageId) : null;
   const mode = normalizeSessionMode(parsed.payload?.mode);
-  const agentText = message ? promptForSessionMode(message.text, mode) : "";
+  const agentText = message ? String(message.text || "").trim() : "";
   const payload = {
     ...parsed.payload,
     ...(message
@@ -2452,19 +2790,6 @@ function buildAgentSessionCommand(command) {
 function normalizeSessionMode(value) {
   const mode = String(value || "").trim().toLowerCase();
   return mode === "plan" ? "plan" : "execute";
-}
-
-function promptForSessionMode(text, mode) {
-  const normalized = String(text || "").trim();
-  if (mode !== "plan" || !normalized) return normalized;
-  return [
-    "请先进入计划模式，只分析并给出可执行计划。",
-    "不要修改文件，不要提交、推送、部署，也不要运行会改变仓库状态的命令。",
-    "如果需要验证，请只说明建议运行哪些检查，等待我确认后再执行。",
-    "",
-    "用户请求：",
-    normalized
-  ].join("\n");
 }
 
 function commandHistoryForSession(sessionId, currentMessageId) {
@@ -2618,7 +2943,11 @@ function sessionCanRecoverFailure(session = {}) {
 
 function sessionCanCompact(session = {}) {
   if (["queued", "starting", "running", "failed", "closed", "stale", "cancelled"].includes(session.status)) return false;
-  return Number(session.pendingCommandCount || 0) === 0 && Number(session.pendingApprovalCount || 0) === 0;
+  return (
+    Number(session.pendingCommandCount || 0) === 0 &&
+    Number(session.pendingApprovalCount || 0) === 0 &&
+    Number(session.pendingInteractionCount || 0) === 0
+  );
 }
 
 function canMutateRunningJob(job, agentId) {
@@ -3006,6 +3335,7 @@ function refreshInteractiveSessionState() {
   reclaimExpiredSessionCommandLeases();
   reclaimExpiredSessionLeases();
   expireOldApprovals();
+  expireOldInteractions();
 }
 
 function trimOldSessions() {
@@ -3084,6 +3414,49 @@ function expireOldApprovals() {
   expire();
 }
 
+function expireOldInteractions() {
+  const cutoff = new Date(Date.now() - config.codex.approvalTimeoutMs).toISOString();
+  const expired = db.prepare(`
+    SELECT ${summarizeSessionInteractionColumns}
+    FROM codex_session_interactions
+    WHERE status = 'pending'
+      AND created_at < ?
+  `).all(cutoff).map(summarizeSessionInteraction);
+
+  if (expired.length === 0) return;
+
+  const expire = db.transaction(() => {
+    const now = nowIso();
+    for (const interaction of expired) {
+      const response = buildInteractionResponse(interaction, {}, "timed_out");
+      db.prepare(`
+        UPDATE codex_session_interactions
+        SET status = 'timed_out',
+            response_json = @responseJson,
+            answered_at = @now,
+            answered_by = 'timeout',
+            updated_at = @now
+        WHERE id = @id
+          AND status = 'pending'
+      `).run({
+        id: interaction.id,
+        responseJson: JSON.stringify(response),
+        now
+      });
+
+      insertSessionEvent.run(
+        normalizeSessionEvent(interaction.sessionId, {
+          type: "interaction.timed_out",
+          text: `${interaction.method || "Interaction"} timed out.`,
+          raw: { interactionId: interaction.id, response: redactInteractionResponseForEvent(interaction, response) }
+        }, now)
+      );
+    }
+  });
+
+  expire();
+}
+
 function normalizeApprovalStatus(value) {
   const decision = String(value || "").toLowerCase();
   if (["approve", "approved", "accept", "yes", "allow"].includes(decision)) return "approved";
@@ -3098,6 +3471,71 @@ function buildApprovalResponse(method, status) {
   if (method === "execCommandApproval") return { decision: approved ? "approved" : status === "timed_out" ? "timed_out" : "denied" };
   if (method === "applyPatchApproval") return { decision: approved ? "approved" : status === "timed_out" ? "timed_out" : "denied" };
   return { decision: approved ? "accept" : "decline" };
+}
+
+function normalizeInteractionKind(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "user_input" || normalized.includes("requestuserinput")) return "user_input";
+  return "unknown";
+}
+
+function normalizeInteractionStatus(value) {
+  const decision = String(value || "").trim().toLowerCase();
+  if (["cancel", "cancelled", "canceled", "decline", "denied"].includes(decision)) return "cancelled";
+  if (["timeout", "timed_out"].includes(decision)) return "timed_out";
+  return "answered";
+}
+
+function buildInteractionResponse(interaction, input = {}, status = "answered") {
+  if (interaction.kind !== "user_input") return input.response && typeof input.response === "object" ? input.response : {};
+  if (status !== "answered") return emptyUserInputResponse();
+
+  const directResponse = input.response && typeof input.response === "object" ? input.response : null;
+  const sourceAnswers = input.answers || directResponse?.answers || {};
+  return normalizeUserInputResponse(sourceAnswers, interaction.payload?.questions || []);
+}
+
+function normalizeUserInputResponse(sourceAnswers = {}, questions = []) {
+  const answers = {};
+  const source = sourceAnswers && typeof sourceAnswers === "object" ? sourceAnswers : {};
+  const knownQuestions = Array.isArray(questions) ? questions : [];
+  for (const question of knownQuestions) {
+    const id = String(question?.id || "").trim();
+    if (!id) continue;
+    const values = normalizeUserInputAnswerValues(source[id]);
+    if (values.length > 0) answers[id] = { answers: values };
+  }
+
+  for (const [id, value] of Object.entries(source)) {
+    const normalizedId = String(id || "").trim();
+    if (!normalizedId || answers[normalizedId]) continue;
+    const values = normalizeUserInputAnswerValues(value);
+    if (values.length > 0) answers[normalizedId] = { answers: values };
+  }
+
+  return { answers };
+}
+
+function normalizeUserInputAnswerValues(value) {
+  const rawValues = Array.isArray(value?.answers) ? value.answers : Array.isArray(value) ? value : [value?.answer ?? value?.value ?? value];
+  return rawValues
+    .map((item) => String(item ?? "").slice(0, 4000))
+    .filter((item) => item.length > 0)
+    .slice(0, 10);
+}
+
+function emptyUserInputResponse() {
+  return { answers: {} };
+}
+
+function redactInteractionResponseForEvent(interaction, response) {
+  if (!interactionHasSecretQuestion(interaction)) return response;
+  return { answers: "[redacted]" };
+}
+
+function interactionHasSecretQuestion(interaction = {}) {
+  const questions = Array.isArray(interaction.payload?.questions) ? interaction.payload.questions : [];
+  return questions.some((question) => Boolean(question?.isSecret || question?.is_secret));
 }
 
 function badRequest(message) {

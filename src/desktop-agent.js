@@ -98,7 +98,8 @@ async function runCodexSessionLoop() {
   const runtime = new CodexInteractiveRuntime({
     agentId,
     onEvents: (id, events) => postJson("/api/agent/codex/sessions/events", { id, agentId, events }).catch(() => {}),
-    requestApproval: requestCodexApproval
+    requestApproval: requestCodexApproval,
+    requestInteraction: requestCodexInteraction
   });
 
   while (true) {
@@ -167,6 +168,33 @@ async function requestCodexApproval(approval) {
   return approval.method === "execCommandApproval" || approval.method === "applyPatchApproval"
     ? { decision: "timed_out" }
     : { decision: "cancel" };
+}
+
+async function requestCodexInteraction(interaction) {
+  const created = await postJson("/api/agent/codex/sessions/interactions", {
+    agentId,
+    sessionId: interaction.sessionId,
+    appRequestId: interaction.appRequestId,
+    method: interaction.method,
+    kind: interaction.kind,
+    prompt: interaction.prompt,
+    payload: interaction.payload
+  });
+
+  const interactionId = created.interaction?.id;
+  if (!interactionId) throw new Error("Relay did not create a Codex interaction request.");
+
+  const started = Date.now();
+  const timeoutMs = config.codex.approvalTimeoutMs;
+  while (Date.now() - started < timeoutMs) {
+    const waited = await postJson(`/api/agent/codex/sessions/interactions/${encodeURIComponent(interactionId)}/wait?wait=25000`, {
+      agentId,
+      sessionId: interaction.sessionId
+    });
+    if (waited.interaction?.response) return waited.interaction.response;
+  }
+
+  return interaction.kind === "user_input" ? { answers: {} } : {};
 }
 
 async function pollNextCodexWorkspaceCommand() {

@@ -311,6 +311,8 @@ export function installCore(app) {
           : `正在处理 ${state.composerAttachmentPendingCount} 张图片…`;
     } else if (!elements.codexProject.value) {
       status = "先选择工程";
+    } else if (session?.pendingInteractionCount > 0) {
+      status = "等待你的选择";
     } else if (session?.pendingApprovalCount > 0) {
       status = "等待你的审批";
     } else if (session?.status === "starting") {
