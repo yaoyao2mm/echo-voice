@@ -356,6 +356,68 @@ body.topbar-collapsed .topbar {
   display: none !important;
 }
 
+.context-usage-details-line {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 7px 12px 6px;
+  border-bottom: 1px solid rgba(126, 106, 84, 0.08);
+  background: rgba(248, 244, 237, 0.94);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.context-usage-details-line[hidden] {
+  display: none !important;
+}
+
+.context-usage-details-primary {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-usage-details-secondary {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  white-space: nowrap;
+}
+
+.context-usage-details-secondary::-webkit-scrollbar {
+  display: none;
+}
+
+.context-usage-detail-pill {
+  flex: 0 0 auto;
+  border: 1px solid rgba(126, 106, 84, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 252, 247, 0.72);
+  color: var(--muted);
+  padding: 2px 7px;
+  font-weight: 680;
+}
+
+.context-usage-details-line[data-state="warn"] .context-usage-details-primary {
+  color: #8a6718;
+}
+
+.context-usage-details-line[data-state="risk"] .context-usage-details-primary {
+  color: #9b2f2f;
+}
+
 .composer-statusbar {
   display: flex;
   align-items: center;
@@ -424,16 +486,19 @@ body.topbar-collapsed .topbar {
 }
 
 .context-usage-ring {
+  appearance: none;
   --context-used: 0%;
   --context-color: #82ad8f;
   flex: 0 0 auto;
   width: 16px;
   height: 16px;
+  border: 0;
   border-radius: 999px;
   background:
     radial-gradient(circle at center, rgba(251, 249, 245, 0.98) 0 45%, transparent 47%),
     conic-gradient(var(--context-color) var(--context-used), rgba(126, 106, 84, 0.16) 0);
   box-shadow: inset 0 0 0 1px rgba(126, 106, 84, 0.08);
+  padding: 0;
 }
 
 .context-usage-ring[data-state="warn"] {
@@ -446,6 +511,24 @@ body.topbar-collapsed .topbar {
 
 .context-usage-ring[data-state="unknown"] {
   --context-color: #9aa1aa;
+}
+
+.context-usage-ring.is-clickable {
+  cursor: pointer;
+}
+
+.context-usage-ring.is-clickable:hover,
+.context-usage-ring.is-clickable:focus-visible,
+.context-usage-ring[aria-expanded="true"] {
+  box-shadow:
+    inset 0 0 0 1px rgba(126, 106, 84, 0.16),
+    0 0 0 4px rgba(126, 106, 84, 0.1);
+  outline: 0;
+}
+
+.context-usage-ring:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .composer-status-text {

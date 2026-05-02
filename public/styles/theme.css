@@ -297,9 +297,15 @@
   background: rgba(14, 18, 24, 0.92);
 }
 
-:root[data-theme="dark"] .turn-activity-line {
+:root[data-theme="dark"] .turn-activity-line,
+:root[data-theme="dark"] .context-usage-details-line {
   border-color: rgba(139, 154, 174, 0.12);
   background: rgba(16, 20, 26, 0.94);
+}
+
+:root[data-theme="dark"] .context-usage-detail-pill {
+  border-color: rgba(139, 154, 174, 0.14);
+  background: rgba(22, 27, 35, 0.78);
 }
 
 :root[data-theme="dark"] .context-usage-ring {
@@ -307,6 +313,14 @@
     radial-gradient(circle at center, rgba(17, 21, 27, 0.98) 0 45%, transparent 47%),
     conic-gradient(var(--context-color) var(--context-used), rgba(139, 154, 174, 0.18) 0);
   box-shadow: inset 0 0 0 1px rgba(139, 154, 174, 0.12);
+}
+
+:root[data-theme="dark"] .context-usage-ring.is-clickable:hover,
+:root[data-theme="dark"] .context-usage-ring.is-clickable:focus-visible,
+:root[data-theme="dark"] .context-usage-ring[aria-expanded="true"] {
+  box-shadow:
+    inset 0 0 0 1px rgba(139, 154, 174, 0.2),
+    0 0 0 4px rgba(139, 154, 174, 0.1);
 }
 
 :root[data-theme="dark"] .composer textarea {

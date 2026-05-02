@@ -809,10 +809,17 @@
   }
 
   body.mobile-ui .composer-statusbar,
+  body.mobile-ui .context-usage-details-line,
   body.mobile-ui .composer-attachment-tray,
   body.mobile-ui .composer-editor {
     padding-left: var(--mobile-chat-rail);
     padding-right: var(--mobile-chat-rail);
+  }
+
+  body.mobile-ui .context-usage-details-line {
+    min-height: 34px;
+    padding-top: 6px;
+    padding-bottom: 5px;
   }
 
   body.mobile-ui .turn-activity-line:not([hidden]) {

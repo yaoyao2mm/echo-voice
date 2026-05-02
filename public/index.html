@@ -15,8 +15,8 @@
         if (localStorage.getItem("echoTheme") === "dark") document.documentElement.dataset.theme = "dark";
       } catch {}
     </script>
-    <link rel="manifest" href="/manifest.webmanifest?v=87" />
-    <link rel="stylesheet" href="/styles.css?v=87" />
+    <link rel="manifest" href="/manifest.webmanifest?v=88" />
+    <link rel="stylesheet" href="/styles.css?v=88" />
   </head>
   <body>
     <main class="shell">
@@ -323,6 +323,7 @@
                 <span class="turn-activity-label">终端</span>
                 <span id="turnActivityText" class="turn-activity-text"></span>
               </div>
+              <div id="contextUsageDetailsLine" class="context-usage-details-line" aria-live="polite" hidden></div>
               <div class="composer-statusbar" aria-label="输入状态">
                 <div class="composer-status-meta">
                   <button id="composerAttachmentButton" class="composer-status-action" type="button" aria-label="附加截图">
@@ -356,18 +357,16 @@
                       />
                     </svg>
                   </button>
-                  <span
+                  <button
                     id="contextUsageIndicator"
                     class="context-usage-ring"
+                    type="button"
                     data-state="unknown"
-                    role="meter"
                     aria-label="上下文使用暂未同步"
-                    aria-valuemin="0"
-                    aria-valuemax="100"
-                    aria-valuenow="0"
-                    aria-valuetext="上下文使用暂未同步"
+                    aria-expanded="false"
+                    aria-controls="contextUsageDetailsLine"
                     title="上下文使用暂未同步"
-                  ></span>
+                  ></button>
                   <button
                     id="compactContextButton"
                     class="composer-status-action"
@@ -440,6 +439,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=87" type="module"></script>
+    <script src="/app.js?v=88" type="module"></script>
   </body>
 </html>

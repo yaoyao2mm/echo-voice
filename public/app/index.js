@@ -1,7 +1,7 @@
-import { installAuth } from "./auth.js?v=87";
-import { installCodex } from "./codex.js?v=87";
-import { createAppContext, installCore } from "./core.js?v=87";
-import { installSessions } from "./sessions.js?v=87";
+import { installAuth } from "./auth.js?v=88";
+import { installCodex } from "./codex.js?v=88";
+import { createAppContext, installCore } from "./core.js?v=88";
+import { installSessions } from "./sessions.js?v=88";
 
 export function createApp(windowRef = window, documentRef = document) {
   const app = createAppContext(windowRef, documentRef);
@@ -28,6 +28,7 @@ export function createApp(windowRef = window, documentRef = document) {
     elements.sendCodexButton.addEventListener("click", app.sendToCodex);
     elements.stopCodexTurnButton?.addEventListener("click", app.cancelSelectedCodexTurn);
     elements.composerStatusText?.addEventListener("click", app.toggleTurnActivityDetails);
+    elements.contextUsageIndicator?.addEventListener("click", app.toggleContextUsageDetails);
     elements.quickSkillsButton?.addEventListener("click", app.toggleQuickSkillsPanel);
     elements.quickSkillNewButton?.addEventListener("click", app.startNewQuickSkill);
     elements.quickSkillForm?.addEventListener("submit", app.saveQuickSkill);

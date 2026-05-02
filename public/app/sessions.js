@@ -558,7 +558,9 @@ export function installSessions(app) {
     state.renderedCodexSessionSignature = "";
     elements.codexApprovals.hidden = true;
     elements.codexApprovals.innerHTML = "";
+    state.contextUsageDetailsOpen = false;
     app.renderSessionStatusRail(null);
+    app.refreshContextUsageIndicator?.();
     elements.runLog.hidden = true;
     elements.codexLog.textContent = "";
     elements.codexRunSummary.innerHTML = `
@@ -1335,6 +1337,109 @@ export function installSessions(app) {
     return status || "完成";
   };
 
+  app.toggleContextUsageDetails = function toggleContextUsageDetails() {
+    const session = state.composingNewSession ? null : state.selectedCodexSession;
+    if (!session?.id) return;
+    state.contextUsageDetailsOpen = !state.contextUsageDetailsOpen;
+    app.refreshContextUsageIndicator?.();
+  };
+
+  app.refreshContextUsageDetails = function refreshContextUsageDetails() {
+    const line = elements.contextUsageDetailsLine;
+    if (!line) return;
+
+    const session = state.composingNewSession ? null : state.selectedCodexSession;
+    const entry = app.contextUsageDetailsEntry(session);
+    if (!state.contextUsageDetailsOpen || !entry) {
+      if (line.hidden && !line.innerHTML && !line.dataset.state) return;
+      line.hidden = true;
+      line.innerHTML = "";
+      line.dataset.state = "";
+      line.removeAttribute("title");
+      app.syncComposerMetrics?.();
+      return;
+    }
+
+    line.hidden = false;
+    line.dataset.state = entry.state || "normal";
+    line.title = entry.title || entry.primary;
+    line.innerHTML = `
+      <span class="context-usage-details-primary">${app.escapeHtml(entry.primary)}</span>
+      <span class="context-usage-details-secondary">
+        ${entry.parts.map((part) => `<span class="context-usage-detail-pill">${app.escapeHtml(part)}</span>`).join("")}
+      </span>
+    `;
+    app.syncComposerMetrics?.();
+  };
+
+  app.contextUsageDetailsEntry = function contextUsageDetailsEntry(session) {
+    if (!session?.id) return null;
+
+    const usage = app.normalizeContextUsage(session.contextUsage) || app.latestContextUsageFromEvents(session.events || []);
+    const contextPercent = app.currentContextPercentForSession(session);
+    const eventCount = app.sessionEventCount(session);
+    const artifactBytes = app.sessionArtifactBytes(session);
+    const risk = app.sessionRiskLevel({ contextPercent, eventCount, artifactBytes });
+    const primary = app.contextUsagePrimaryLabel(usage, contextPercent);
+    const parts = [];
+
+    if (usage?.inputTokens) parts.push(`输入 ${app.formatTokenCount(usage.inputTokens)}`);
+    if (usage?.cachedInputTokens) parts.push(`缓存 ${app.formatTokenCount(usage.cachedInputTokens)}`);
+    if (usage?.outputTokens) parts.push(`输出 ${app.formatTokenCount(usage.outputTokens)}`);
+    if (usage?.reasoningOutputTokens) parts.push(`推理 ${app.formatTokenCount(usage.reasoningOutputTokens)}`);
+    if (Number.isFinite(eventCount)) parts.push(`${eventCount.toLocaleString("zh-CN")} 事件`);
+    const streamLabel = app.sessionStreamStatusLabel(session);
+    if (streamLabel) parts.push(`事件流 ${streamLabel}`);
+    if (artifactBytes > 0) parts.push(`产物 ${app.formatBytes(artifactBytes)}`);
+    const updatedAt = usage?.at || session.lastEvent?.at || "";
+    if (updatedAt) parts.push(`更新 ${app.formatRelativeTime(updatedAt)}`);
+
+    return {
+      state: risk === "high" ? "risk" : risk === "warn" ? "warn" : "normal",
+      primary,
+      parts,
+      title: [primary, ...parts].filter(Boolean).join("\n")
+    };
+  };
+
+  app.contextUsagePrimaryLabel = function contextUsagePrimaryLabel(usage, contextPercent) {
+    if (!usage) return "上下文暂未同步";
+    const used = app.formatTokenCount(usage.usedTokens);
+    if (usage.limitTokens > 0 && Number.isFinite(contextPercent)) {
+      return `上下文 ${contextPercent}% · ${used} / ${app.formatTokenCount(usage.limitTokens)} tokens`;
+    }
+    return `上下文已同步 · ${used} tokens · 模型窗口未知`;
+  };
+
+  app.sessionEventCount = function sessionEventCount(session) {
+    const count = Number(session?.metrics?.eventCount ?? session?.eventCount);
+    if (Number.isFinite(count) && count >= 0) return count;
+    return Array.isArray(session?.events) ? session.events.length : 0;
+  };
+
+  app.sessionArtifactBytes = function sessionArtifactBytes(session) {
+    const bytes = Number(session?.metrics?.artifactBytes ?? session?.artifactBytes ?? 0);
+    return Number.isFinite(bytes) && bytes > 0 ? bytes : 0;
+  };
+
+  app.sessionStreamStatusLabel = function sessionStreamStatusLabel(session) {
+    if (!session?.id || session.id !== state.selectedCodexJobId) return "";
+    if (!windowRef.EventSource) return "轮询回退";
+    if (state.sessionEventSourceId === session.id && state.sessionEventSource) {
+      const readyState = Number(state.sessionEventSource.readyState);
+      if (readyState === 1) return "SSE 实时";
+      if (readyState === 0) return "SSE 连接中";
+      return "SSE 重连中";
+    }
+    if (state.sessionEventReconnectTimer) return "SSE 重连中";
+    return "轮询回退";
+  };
+
+  app.formatTokenCount = function formatTokenCount(value) {
+    const count = Number(value || 0);
+    return Number.isFinite(count) ? count.toLocaleString("zh-CN") : "0";
+  };
+
   app.renderSessionStatusRail = function renderSessionStatusRail(session) {
     const rail = elements.sessionStatusRail;
     if (!rail) return;
@@ -1369,8 +1474,7 @@ export function installSessions(app) {
     const latestGitEvent = app.latestGitSummaryEvent(session.events || []);
     const summary = latestGitEvent?.raw?.gitSummary || {};
     const inWorktree = execution.mode === "worktree";
-    const health = app.sessionHealthEntry(session);
-    if (!inWorktree && !latestGitEvent && !health) return null;
+    if (!inWorktree && !latestGitEvent) return null;
 
     const changedFiles = Array.isArray(summary.changedFiles) ? summary.changedFiles : null;
     const changedFileCount = Number.isFinite(Number(summary.changedFileCount))
@@ -1387,14 +1491,14 @@ export function installSessions(app) {
         : "Git 无变更"
       : app.sessionStatusGitPendingLabel(session);
     const modeLabel = inWorktree ? "隔离 worktree" : "主工作区";
-    const title = [modeLabel, health?.title, refText, execution.path || summary.root || ""].filter(Boolean).join("\n");
+    const title = [modeLabel, refText, execution.path || summary.root || ""].filter(Boolean).join("\n");
 
     return {
       mode: inWorktree ? "worktree" : "workspace",
-      gitState: health?.state || (Number.isFinite(changedFileCount) && changedFileCount > 0 ? "dirty" : Number.isFinite(changedFileCount) ? "clean" : "pending"),
+      gitState: Number.isFinite(changedFileCount) && changedFileCount > 0 ? "dirty" : Number.isFinite(changedFileCount) ? "clean" : "pending",
       modeLabel,
       gitLabel,
-      healthLabel: health?.label || "",
+      healthLabel: "",
       refText,
       title
     };

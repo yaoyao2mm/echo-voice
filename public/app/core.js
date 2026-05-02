@@ -97,6 +97,7 @@ export function createAppContext(windowRef = window, documentRef = document) {
       quickSkillsBusy: false,
       quickSkillEditingId: "",
       turnActivityDetailsOpen: false,
+      contextUsageDetailsOpen: false,
       autoCompactedSessionIds: new Set()
     }
   };
@@ -352,15 +353,20 @@ export function installCore(app) {
     const indicator = elements.contextUsageIndicator;
     if (!indicator) return;
 
+    const detailsAvailable = Boolean(!state.composingNewSession && state.selectedCodexSession?.id);
+    if (!detailsAvailable) state.contextUsageDetailsOpen = false;
+    indicator.disabled = !detailsAvailable;
+    indicator.classList.toggle("is-clickable", detailsAvailable);
+    indicator.setAttribute("aria-expanded", detailsAvailable && state.contextUsageDetailsOpen ? "true" : "false");
+
     const usage = app.currentContextUsage();
     if (!usage) {
       const label = "上下文使用暂未同步";
       indicator.style.setProperty("--context-used", "0%");
       indicator.dataset.state = "unknown";
-      indicator.title = label;
-      indicator.setAttribute("aria-label", label);
-      indicator.setAttribute("aria-valuenow", "0");
-      indicator.setAttribute("aria-valuetext", label);
+      indicator.title = detailsAvailable ? `${label}\n点击查看会话负载详情` : label;
+      indicator.setAttribute("aria-label", detailsAvailable ? `${label}，点击查看会话负载详情` : label);
+      app.refreshContextUsageDetails?.();
       return;
     }
 
@@ -376,10 +382,9 @@ export function installCore(app) {
 
     indicator.style.setProperty("--context-used", `${visiblePercent}%`);
     indicator.dataset.state = stateName;
-    indicator.title = label;
-    indicator.setAttribute("aria-label", label);
-    indicator.setAttribute("aria-valuenow", String(percent));
-    indicator.setAttribute("aria-valuetext", label);
+    indicator.title = detailsAvailable ? `${label}\n点击查看会话负载详情` : label;
+    indicator.setAttribute("aria-label", detailsAvailable ? `${label}，点击查看会话负载详情` : label);
+    app.refreshContextUsageDetails?.();
     if (hasLimit) app.maybeAutoCompactContext?.(usage, percent);
   };
 
@@ -1031,6 +1036,7 @@ function queryElements(documentRef) {
     stopCodexTurnButton: documentRef.querySelector("#stopCodexTurnButton"),
     turnActivityLine: documentRef.querySelector("#turnActivityLine"),
     turnActivityText: documentRef.querySelector("#turnActivityText"),
+    contextUsageDetailsLine: documentRef.querySelector("#contextUsageDetailsLine"),
     composerStatusText: documentRef.querySelector("#composerStatusText"),
     composerActionsMeta: documentRef.querySelector("#composerActionsMeta"),
     contextUsageIndicator: documentRef.querySelector("#contextUsageIndicator"),
