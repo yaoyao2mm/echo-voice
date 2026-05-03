@@ -279,6 +279,7 @@ export class CodexInteractiveRuntime {
       if (!turnId) throw new Error("Codex app-server did not return a turn id.");
       const completedTurn = this.#takeCompletedTurn(threadId, turnId);
       if (completedTurn) {
+        await this.#waitForCompletedTurnEvents(completedTurn);
         await this.#cleanupAttachmentDir(threadId);
         return { id: turnId, completed: true, sessionStatus: completedTurn.sessionStatus, error: completedTurn.error };
       }
@@ -593,7 +594,7 @@ export class CodexInteractiveRuntime {
     }
   }
 
-  #rememberCompletedTurn(threadId, turn = {}) {
+  #rememberCompletedTurn(threadId, turn = {}, eventFlush = null) {
     const key = turnGitBaselineKey(threadId, turn?.id);
     if (!key) return;
     const previous = this.completedTurns.get(key);
@@ -605,6 +606,7 @@ export class CodexInteractiveRuntime {
     this.completedTurns.set(key, {
       sessionStatus: turn?.status === "failed" ? "failed" : "active",
       error: turn?.error?.message || "",
+      eventFlush,
       timer
     });
   }
@@ -617,6 +619,11 @@ export class CodexInteractiveRuntime {
     if (completed.timer) clearTimeout(completed.timer);
     this.completedTurns.delete(key);
     return completed;
+  }
+
+  async #waitForCompletedTurnEvents(completedTurn = {}) {
+    if (!completedTurn?.eventFlush) return;
+    await completedTurn.eventFlush.catch(() => {});
   }
 
   #clearCompletedTurns() {
@@ -649,12 +656,13 @@ export class CodexInteractiveRuntime {
       this.activeTurns.set(threadId, message.params?.turn?.id || "");
     }
     if (message.method === "turn/completed") {
-      this.#rememberCompletedTurn(threadId, message.params?.turn);
       this.activeTurns.delete(threadId);
       this.#cleanupAttachmentDir(threadId).catch((error) => {
         console.error(`[codex attachment cleanup] ${error.message}`);
       });
-      this.#emitTurnCompleted(sessionId, threadId, event).catch((error) => {
+      const eventFlush = this.#emitTurnCompleted(sessionId, threadId, event);
+      this.#rememberCompletedTurn(threadId, message.params?.turn, eventFlush);
+      eventFlush.catch((error) => {
         console.error(`[codex app-server event] ${error.message}`);
       });
       return;

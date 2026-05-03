@@ -171,7 +171,13 @@ export function cancelCodexSession(id, input = {}) {
 export async function waitForCodexSessionCommand(input = {}) {
   const agent = updateCodexAgent(input.agent || {});
   const acquire = () => {
-    const command = acquireNextSessionCommand({ agentId: agent.id, workspaces: agent.workspaces });
+    const command = acquireNextSessionCommand({
+      agentId: agent.id,
+      workspaces: agent.workspaces,
+      busySessionIds: input.busySessionIds,
+      busyProjectIds: input.busyProjectIds,
+      runningSessionIds: input.runningSessionIds
+    });
     if (command) notifySessionChanged(command.sessionId);
     return command;
   };

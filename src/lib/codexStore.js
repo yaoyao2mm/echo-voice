@@ -1085,19 +1085,28 @@ export function completeWorkspaceCommand(commandId, result = {}, options = {}) {
   return true;
 }
 
-export function acquireNextSessionCommand({ agentId, workspaces = [] } = {}) {
+export function acquireNextSessionCommand({
+  agentId,
+  workspaces = [],
+  busySessionIds = [],
+  busyProjectIds = [],
+  runningSessionIds = []
+} = {}) {
   refreshInteractiveSessionState();
 
   const workspaceIds = workspaces.map((workspace) => workspace.id).filter(Boolean);
   if (workspaceIds.length === 0) return null;
 
   const leaseHolder = normalizeAgentId(agentId);
+  const blockedSessionIds = normalizeIdSet(busySessionIds);
+  const blockedProjectIds = normalizeIdSet(busyProjectIds);
+  const activeRunningSessionIds = normalizeIdSet(runningSessionIds);
   const now = nowIso();
   const leaseExpiresAt = new Date(Date.now() + config.codex.leaseMs).toISOString();
   const placeholders = workspaceIds.map(() => "?").join(",");
 
   const acquire = db.transaction(() => {
-    const command = db.prepare(`
+    const candidates = db.prepare(`
       SELECT
         c.id,
         c.session_id AS sessionId,
@@ -1119,65 +1128,98 @@ export function acquireNextSessionCommand({ agentId, workspaces = [] } = {}) {
       WHERE c.status = 'queued'
         AND s.status NOT IN ('closed', 'failed', 'cancelled', 'stale')
         AND s.project_id IN (${placeholders})
+        AND (
+          c.type = 'stop'
+          OR NOT EXISTS (
+            SELECT 1
+            FROM codex_session_commands leased
+            WHERE leased.session_id = c.session_id
+              AND leased.status = 'leased'
+          )
+        )
       ORDER BY CASE WHEN c.type = 'stop' THEN 0 ELSE 1 END, c.created_at ASC
-      LIMIT 1
-    `).get(...workspaceIds);
+      LIMIT 50
+    `).all(...workspaceIds);
 
-    if (!command) return null;
+    for (const command of candidates) {
+      const agentRuntime = runtimeForAgentAndProject(leaseHolder, command.projectId);
+      const runtime = sanitizeRuntimeForAgent(parseJson(command.runtimeJson, {}), agentRuntime);
+      if (
+        shouldSkipSessionCommandForBusyDesktop(command, runtime, {
+          blockedSessionIds,
+          blockedProjectIds,
+          activeRunningSessionIds
+        })
+      ) {
+        continue;
+      }
 
-    const agentRuntime = runtimeForAgentAndProject(leaseHolder, command.projectId);
-    const runtime = sanitizeRuntimeForAgent(parseJson(command.runtimeJson, {}), agentRuntime);
-    const runtimeJson = JSON.stringify(runtime);
+      const runtimeJson = JSON.stringify(runtime);
 
-    db.prepare(`
-      UPDATE codex_sessions
-      SET runtime_json = @runtimeJson
-      WHERE id = @sessionId
-    `).run({
-      sessionId: command.sessionId,
-      runtimeJson
-    });
+      const leased = db.prepare(`
+        UPDATE codex_session_commands
+        SET status = 'leased',
+            leased_by = @leasedBy,
+            lease_expires_at = @leaseExpiresAt,
+            updated_at = @now
+        WHERE id = @id
+          AND status = 'queued'
+          AND (
+            @isStop = 1
+            OR NOT EXISTS (
+              SELECT 1
+              FROM codex_session_commands active
+              WHERE active.session_id = @sessionId
+                AND active.status = 'leased'
+            )
+          )
+      `).run({
+        id: command.id,
+        sessionId: command.sessionId,
+        isStop: command.type === "stop" ? 1 : 0,
+        leasedBy: leaseHolder,
+        leaseExpiresAt,
+        now
+      });
+      if (leased.changes === 0) continue;
 
-    command.runtimeJson = runtimeJson;
+      db.prepare(`
+        UPDATE codex_sessions
+        SET runtime_json = @runtimeJson
+        WHERE id = @sessionId
+      `).run({
+        sessionId: command.sessionId,
+        runtimeJson
+      });
 
-    db.prepare(`
-      UPDATE codex_session_commands
-      SET status = 'leased',
-          leased_by = @leasedBy,
-          lease_expires_at = @leaseExpiresAt,
-          updated_at = @now
-      WHERE id = @id
-        AND status = 'queued'
-    `).run({
-      id: command.id,
-      leasedBy: leaseHolder,
-      leaseExpiresAt,
-      now
-    });
+      command.runtimeJson = runtimeJson;
 
-    db.prepare(`
-      UPDATE codex_sessions
-      SET status = @status,
-          leased_by = @leasedBy,
-          lease_expires_at = @leaseExpiresAt,
-          updated_at = @now
-      WHERE id = @sessionId
-    `).run({
-      sessionId: command.sessionId,
-      status: command.type === "start" ? "starting" : "running",
-      leasedBy: leaseHolder,
-      leaseExpiresAt,
-      now
-    });
+      db.prepare(`
+        UPDATE codex_sessions
+        SET status = @status,
+            leased_by = @leasedBy,
+            lease_expires_at = @leaseExpiresAt,
+            updated_at = @now
+        WHERE id = @sessionId
+      `).run({
+        sessionId: command.sessionId,
+        status: command.type === "start" ? "starting" : "running",
+        leasedBy: leaseHolder,
+        leaseExpiresAt,
+        now
+      });
 
-    insertSessionEvent.run(
-      normalizeSessionEvent(command.sessionId, {
-        type: "command.acquired",
-        text: `Desktop agent ${leaseHolder} acquired ${command.type}.`
-      }, now)
-    );
+      insertSessionEvent.run(
+        normalizeSessionEvent(command.sessionId, {
+          type: "command.acquired",
+          text: `Desktop agent ${leaseHolder} acquired ${command.type}.`
+        }, now)
+      );
 
-    return buildAgentSessionCommand(command);
+      return buildAgentSessionCommand(command);
+    }
+
+    return null;
   });
 
   return acquire();
@@ -3043,7 +3085,7 @@ function sessionCompletedAsyncWorkSince(sessionId, sinceAt = "", expectedTurnId 
     if (
       allowCompactionCompletion &&
       threadMatchesExpected(threadId, normalizedExpectedThreadId) &&
-      (method === "thread/compacted" || itemType === "contextCompaction")
+      method === "thread/compacted"
     ) {
       return { status: "active", error: "" };
     }
@@ -3793,6 +3835,10 @@ function deriveSessionUpdate(events, session) {
       update.releaseLease = true;
       update.status = "active";
     }
+    if (method === "item/completed" && raw.params?.item?.type === "contextCompaction") {
+      update.clearActiveTurnId = true;
+      update.status = "active";
+    }
     if (method === "item/agentMessage/delta" && event.text && !agentMessageCompleted) {
       nextFinalMessage = `${nextFinalMessage}${event.text}`.slice(0, 12000);
       update.finalMessage = nextFinalMessage;
@@ -3875,6 +3921,23 @@ function parseJson(value, fallback = undefined) {
 
 function normalizeAgentId(value) {
   return String(value || "default-agent").trim().slice(0, 120) || "default-agent";
+}
+
+function normalizeIdSet(value) {
+  const items = Array.isArray(value) ? value : String(value || "").split(",");
+  return new Set(items.map((item) => String(item || "").trim()).filter(Boolean));
+}
+
+function shouldSkipSessionCommandForBusyDesktop(
+  command,
+  runtime,
+  { blockedSessionIds = new Set(), blockedProjectIds = new Set(), activeRunningSessionIds = new Set() } = {}
+) {
+  if (command.type === "stop") return false;
+  if (blockedSessionIds.has(command.sessionId)) return true;
+  if (!blockedProjectIds.has(command.projectId)) return false;
+  if (activeRunningSessionIds.has(command.sessionId)) return false;
+  return String(runtime?.worktreeMode || "").trim() !== "always";
 }
 
 function canMutateSession(session, agentId) {

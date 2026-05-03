@@ -23,6 +23,7 @@ const volcengineCodingModel =
   process.env.VOLCENGINE_CODING_CHAT_MODEL ||
   "ark-code-latest";
 const authUsers = parseAuthUsers();
+const codexWorktreeMode = normalizeWorktreeMode(process.env.ECHO_CODEX_WORKTREE_MODE || "off");
 
 export const config = {
   host: process.env.ECHO_HOST || "0.0.0.0",
@@ -80,8 +81,9 @@ export const config = {
     profile: process.env.ECHO_CODEX_PROFILE || "",
     timeoutMs: Number(process.env.ECHO_CODEX_TIMEOUT_MS || 30 * 60 * 1000),
     leaseMs: Number(process.env.ECHO_CODEX_LEASE_MS || 10 * 60 * 1000),
+    sessionConcurrency: parseIntegerInRange(process.env.ECHO_CODEX_SESSION_CONCURRENCY, 3, 1, 8),
     maxEvents: Number(process.env.ECHO_CODEX_MAX_EVENTS || 500),
-    worktreeMode: normalizeWorktreeMode(process.env.ECHO_CODEX_WORKTREE_MODE || "off"),
+    worktreeMode: codexWorktreeMode,
     worktreeRoot: path.resolve(expandHome(process.env.ECHO_CODEX_WORKTREE_ROOT || path.join(os.homedir(), ".echo-voice", "worktrees"))),
     worktreeRetentionDays: Number(process.env.ECHO_CODEX_WORKTREE_RETENTION_DAYS || 14)
   }
@@ -119,6 +121,12 @@ function hasExplicitOpenAiCompatibleRefineKey() {
 function parseBoolean(value, fallback) {
   if (value === undefined || value === "") return fallback;
   return ["1", "true", "yes", "on"].includes(String(value).toLowerCase());
+}
+
+function parseIntegerInRange(value, fallback, min, max) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(Math.floor(parsed), max));
 }
 
 function normalizeWorktreeMode(value) {

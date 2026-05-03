@@ -620,6 +620,104 @@ test("interactive Codex sessions lease commands and keep thread state", async ()
   assert.equal(messageCommand.runtime.approvalPolicy, "on-request");
 });
 
+test("interactive Codex leasing allows parallel sessions without re-entering one session command", async () => {
+  store.resetStoreForTest();
+
+  const agent = {
+    id: "parallel-lease-agent",
+    workspaces: [{ id: "demo", path: process.cwd() }]
+  };
+
+  const first = queue.createCodexSession({ projectId: "demo", prompt: "first task" });
+  const second = queue.createCodexSession({ projectId: "demo", prompt: "second task" });
+  const firstCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  assert.equal(firstCommand.sessionId, first.id);
+  assert.equal(firstCommand.type, "start");
+
+  queue.enqueueCodexSessionMessage(first.id, { text: "follow-up before the first thread exists" });
+
+  const secondCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  assert.equal(secondCommand.sessionId, second.id);
+  assert.equal(secondCommand.type, "start");
+
+  const blockedSameSessionCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  assert.equal(blockedSameSessionCommand, null);
+});
+
+test("interactive Codex busy desktop hints protect active checkouts but allow isolated worktree sessions", async () => {
+  store.resetStoreForTest();
+
+  const directAgent = {
+    id: "busy-direct-agent",
+    workspaces: [
+      { id: "demo", path: process.cwd() },
+      { id: "docs", path: process.cwd() }
+    ],
+    runtime: { worktreeMode: "off", sandbox: "workspace-write", approvalPolicy: "on-request" }
+  };
+
+  queue.createCodexSession({ projectId: "demo", prompt: "change demo" });
+  const docs = queue.createCodexSession({ projectId: "docs", prompt: "change docs" });
+  const docsCommand = await queue.waitForCodexSessionCommand({
+    waitMs: 1000,
+    agent: directAgent,
+    busyProjectIds: ["demo"]
+  });
+  assert.equal(docsCommand.sessionId, docs.id);
+  assert.equal(docsCommand.projectId, "docs");
+
+  const blockedDemoCommand = await queue.waitForCodexSessionCommand({
+    waitMs: 1000,
+    agent: directAgent,
+    busyProjectIds: ["demo"]
+  });
+  assert.equal(blockedDemoCommand, null);
+
+  store.resetStoreForTest();
+  const running = queue.createCodexSession({ projectId: "demo", prompt: "long direct turn" });
+  const startCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent: directAgent });
+  queue.appendCodexSessionEvents(running.id, [{ type: "thread.started", text: "started", appThreadId: "thr_busy" }], {
+    agentId: directAgent.id
+  });
+  queue.completeCodexSessionCommand(
+    startCommand.id,
+    { ok: true, appThreadId: "thr_busy", activeTurnId: "turn_busy", sessionStatus: "running" },
+    { agentId: directAgent.id }
+  );
+  queue.enqueueCodexSessionMessage(running.id, { text: "steer the active direct turn" });
+
+  const blockedFollowUp = await queue.waitForCodexSessionCommand({
+    waitMs: 1000,
+    agent: directAgent,
+    busyProjectIds: ["demo"]
+  });
+  assert.equal(blockedFollowUp, null);
+
+  const allowedFollowUp = await queue.waitForCodexSessionCommand({
+    waitMs: 1000,
+    agent: directAgent,
+    busyProjectIds: ["demo"],
+    runningSessionIds: [running.id]
+  });
+  assert.equal(allowedFollowUp.type, "message");
+  assert.equal(allowedFollowUp.sessionId, running.id);
+
+  store.resetStoreForTest();
+  const worktreeAgent = {
+    id: "busy-worktree-agent",
+    workspaces: [{ id: "demo", path: process.cwd() }],
+    runtime: { worktreeMode: "optional", sandbox: "workspace-write", approvalPolicy: "on-request" }
+  };
+  const isolated = queue.createCodexSession({ projectId: "demo", prompt: "change demo in isolation" });
+  const isolatedCommand = await queue.waitForCodexSessionCommand({
+    waitMs: 1000,
+    agent: worktreeAgent,
+    busyProjectIds: ["demo"]
+  });
+  assert.equal(isolatedCommand.sessionId, isolated.id);
+  assert.equal(isolatedCommand.runtime.worktreeMode, "always");
+});
+
 test("interactive Codex command completion keeps turns that already completed", async () => {
   store.resetStoreForTest();
 

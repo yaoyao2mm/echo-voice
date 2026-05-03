@@ -189,6 +189,7 @@ pnpm run desktop:mac:dmg
 | `ECHO_CODEX_WORKSPACES` | Codex 可访问的项目 allowlist | 当前目录 |
 | `ECHO_CODEX_SANDBOX` | Codex sandbox 模式 | `workspace-write` |
 | `ECHO_CODEX_APPROVAL_POLICY` | Codex 审批策略 | `on-request` |
+| `ECHO_CODEX_SESSION_CONCURRENCY` | 桌面 agent 并行处理会话命令的 worker 数；未隔离的同一项目 checkout 会自动串行 | `3` |
 | `ECHO_CODEX_WORKTREE_MODE` | 是否为新会话创建隔离 Git worktree，`off`、`optional` 或 `always` | `off` |
 | `ECHO_CODEX_WORKTREE_ROOT` | 隔离 worktree 根目录 | `~/.echo-voice/worktrees` |
 | `ECHO_CODEX_WORKTREE_RETENTION_DAYS` | 自动清理超过保留期且 Git 状态干净的 worktree | `14` |
@@ -457,6 +458,7 @@ Common environment variables:
 | `ECHO_CODEX_WORKSPACES` | Allowlisted Codex project directories | current directory |
 | `ECHO_CODEX_SANDBOX` | Codex sandbox mode | `workspace-write` |
 | `ECHO_CODEX_APPROVAL_POLICY` | Codex approval policy | `on-request` |
+| `ECHO_CODEX_SESSION_CONCURRENCY` | Desktop session-command worker count; non-isolated commands in the same project checkout are serialized automatically | `3` |
 | `ECHO_CODEX_WORKTREE_MODE` | Create isolated Git worktrees for new sessions, `off`, `optional`, or `always` | `off` |
 | `ECHO_CODEX_WORKTREE_ROOT` | Isolated worktree root directory | `~/.echo-voice/worktrees` |
 | `ECHO_CODEX_WORKTREE_RETENTION_DAYS` | Prune old clean worktrees after the retention window | `14` |

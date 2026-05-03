@@ -591,7 +591,10 @@ app.post("/api/agent/codex/sessions/next", async (req, res) => {
         id: req.body.agentId || req.body.agent?.id,
         workspaces: req.body.workspaces || [],
         runtime: req.body.runtime || {}
-      }
+      },
+      busySessionIds: req.body.busySessionIds || [],
+      busyProjectIds: req.body.busyProjectIds || [],
+      runningSessionIds: req.body.runningSessionIds || []
     });
     res.json({ command });
   } catch (error) {
