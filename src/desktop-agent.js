@@ -5,7 +5,7 @@ import { probeCodexModels } from "./lib/codexModelProbe.js";
 import { publicCodexRuntime, publicWorkspaces } from "./lib/codexRunner.js";
 import { maybeCleanupCodexSessionWorktrees, prepareCodexSessionWorktree } from "./lib/codexWorktree.js";
 import { createManagedWorkspace, workspaceCreationRoot } from "./lib/codexWorkspaceManager.js";
-import { describeHttpNetwork, formatFetchError, httpFetch } from "./lib/http.js";
+import { describeHttpNetwork, formatFetchError, httpFetch, isLikelyNetworkError } from "./lib/http.js";
 
 if (!config.relayUrl) {
   console.error("Missing ECHO_RELAY_URL. Example: ECHO_RELAY_URL=https://voice.example.com ECHO_TOKEN=... pnpm run desktop");
@@ -23,6 +23,7 @@ let codexRuntimeRefreshPromise = null;
 let codexRuntimeRefreshTimer = null;
 let activeCodexCommandCount = 0;
 const runningSessionHeartbeats = new Map();
+const completedSessionCommandResults = new Map();
 
 console.log("Echo Codex desktop agent is running.");
 console.log(`Relay: ${config.relayUrl}`);
@@ -61,15 +62,18 @@ if (config.codex.enabled) {
 }
 
 async function runCodexWorkspaceLoop() {
+  const retryBackoff = createRetryBackoff();
+
   while (true) {
     let command = null;
     try {
       command = await pollNextCodexWorkspaceCommand();
+      retryBackoff.reset();
       if (!command) continue;
 
       console.log(`[${new Date().toLocaleTimeString()}] codex workspace ${command.type}`);
       const result = await handleCodexWorkspaceCommand(command);
-      await postJson("/api/agent/codex/workspaces/commands/complete", {
+      await postJsonWithRetry("/api/agent/codex/workspaces/commands/complete", {
         id: command.id,
         agentId,
         result,
@@ -78,9 +82,10 @@ async function runCodexWorkspaceLoop() {
       });
       console.log(`  workspace ${command.type} ${result.ok ? "completed" : "failed"}`);
     } catch (error) {
-      console.error(`[codex workspace ${new Date().toLocaleTimeString()}] ${formatFetchError(error)}`);
+      const retryDelayMs = retryBackoff.nextDelay(error);
+      console.error(`[codex workspace ${new Date().toLocaleTimeString()}] ${formatFetchError(error)}${retryNote(error, retryDelayMs)}`);
       if (command?.id) {
-        await postJson("/api/agent/codex/workspaces/commands/complete", {
+        await postJsonWithRetry("/api/agent/codex/workspaces/commands/complete", {
           id: command.id,
           agentId,
           result: {
@@ -91,7 +96,7 @@ async function runCodexWorkspaceLoop() {
           runtime: currentCodexRuntime()
         }).catch(() => {});
       }
-      await sleep(2500);
+      await sleep(retryDelayMs);
     }
   }
 }
@@ -103,38 +108,45 @@ async function runCodexSessionLoop() {
     requestApproval: requestCodexApproval,
     requestInteraction: requestCodexInteraction
   });
-  runtime.warmup().then(
-    () => console.log("Codex app-server is ready."),
-    (error) => console.warn(`[codex app-server warmup] ${formatFetchError(error)}; will retry on the next task.`)
-  );
+  const retryBackoff = createRetryBackoff();
 
   while (true) {
     let command = null;
     try {
       await maybeCleanupWorktrees();
       command = await pollNextCodexSessionCommand();
+      retryBackoff.reset();
       if (!command) continue;
 
       console.log(`[${new Date().toLocaleTimeString()}] codex session ${command.sessionId} ${command.type}`);
       activeCodexCommandCount += 1;
       const heartbeat = startCodexSessionHeartbeat(command.sessionId);
       try {
-        const preparedCommand = await prepareCodexSessionWorktree(command);
-        const result = await runtime.handleCommand(preparedCommand);
-        if (preparedCommand.execution && !result.execution) result.execution = preparedCommand.execution;
-        result.sessionId = preparedCommand.sessionId || command.sessionId;
-        await postJson("/api/agent/codex/sessions/commands/complete", { id: command.id, agentId, result });
+        const cachedResult = getCompletedSessionCommandResult(command.id);
+        const result = cachedResult || (await runCodexSessionCommand(runtime, command));
+        rememberCompletedSessionCommandResult(command.id, result);
+        const completed = await postJsonWithRetry("/api/agent/codex/sessions/commands/complete", {
+          id: command.id,
+          agentId,
+          result
+        });
+        if (completed?.ok === false) {
+          console.warn(`  session ${command.type} completion was no longer accepted by relay; cached for replay.`);
+          continue;
+        }
+        forgetCompletedSessionCommandResult(command.id);
         updateRunningSessionHeartbeatFromResult(result.sessionId, result);
-        console.log(`  session ${command.type} ${result.ok ? "accepted" : "failed"}`);
+        console.log(`  session ${command.type} ${cachedResult ? "replayed" : result.ok ? "accepted" : "failed"}`);
       } finally {
         clearInterval(heartbeat);
         activeCodexCommandCount = Math.max(0, activeCodexCommandCount - 1);
       }
     } catch (error) {
-      console.error(`[codex session ${new Date().toLocaleTimeString()}] ${formatFetchError(error)}`);
+      const retryDelayMs = retryBackoff.nextDelay(error);
+      console.error(`[codex session ${new Date().toLocaleTimeString()}] ${formatFetchError(error)}${retryNote(error, retryDelayMs)}`);
       if (command?.sessionId) stopRunningSessionHeartbeat(command.sessionId);
       if (command?.id) {
-        await postJson("/api/agent/codex/sessions/commands/complete", {
+        await postJsonWithRetry("/api/agent/codex/sessions/commands/complete", {
           id: command.id,
           agentId,
           result: {
@@ -144,9 +156,17 @@ async function runCodexSessionLoop() {
           }
         }).catch(() => {});
       }
-      await sleep(2500);
+      await sleep(retryDelayMs);
     }
   }
+}
+
+async function runCodexSessionCommand(runtime, command) {
+  const preparedCommand = await prepareCodexSessionWorktree(command);
+  const result = await runtime.handleCommand(preparedCommand);
+  if (preparedCommand.execution && !result.execution) result.execution = preparedCommand.execution;
+  result.sessionId = preparedCommand.sessionId || command.sessionId;
+  return result;
 }
 
 async function postCodexSessionEvents(sessionId, events = []) {
@@ -325,6 +345,20 @@ async function postJson(path, body) {
   return parseApiResponse(response);
 }
 
+async function postJsonWithRetry(path, body, options = {}) {
+  const backoff = createRetryBackoff({ maxMs: Number(options.maxMs || 30000) || 30000 });
+  while (true) {
+    try {
+      return await postJson(path, body);
+    } catch (error) {
+      if (!isLikelyNetworkError(error)) throw error;
+      const retryDelayMs = backoff.nextDelay(error);
+      console.error(`[relay post ${new Date().toLocaleTimeString()}] ${formatFetchError(error)}${retryNote(error, retryDelayMs)}`);
+      await sleep(retryDelayMs);
+    }
+  }
+}
+
 async function parseApiResponse(response) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
@@ -337,6 +371,66 @@ function authHeaders() {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function createRetryBackoff(options = {}) {
+  const baseMs = Number(options.baseMs || 2500) || 2500;
+  const maxMs = Number(options.maxMs || 30000) || 30000;
+  let nextMs = baseMs;
+
+  return {
+    reset() {
+      nextMs = baseMs;
+    },
+    nextDelay(error) {
+      if (!isLikelyNetworkError(error)) {
+        nextMs = baseMs;
+        return baseMs;
+      }
+      const delayMs = nextMs;
+      nextMs = Math.min(maxMs, Math.round(nextMs * 1.8));
+      return delayMs;
+    }
+  };
+}
+
+function retryNote(error, delayMs) {
+  if (!isLikelyNetworkError(error)) return "";
+  return `; retrying in ${Math.round(delayMs / 1000)}s`;
+}
+
+function rememberCompletedSessionCommandResult(commandId, result = {}) {
+  const id = String(commandId || "").trim();
+  if (!id || result.ok !== true) return;
+  completedSessionCommandResults.set(id, {
+    result: JSON.parse(JSON.stringify(result)),
+    expiresAt: Date.now() + Math.max(config.codex.leaseMs * 2, 30 * 60 * 1000)
+  });
+  pruneCompletedSessionCommandResults();
+}
+
+function getCompletedSessionCommandResult(commandId) {
+  const id = String(commandId || "").trim();
+  if (!id) return null;
+  const cached = completedSessionCommandResults.get(id);
+  if (!cached) return null;
+  if (cached.expiresAt <= Date.now()) {
+    completedSessionCommandResults.delete(id);
+    return null;
+  }
+  return JSON.parse(JSON.stringify(cached.result));
+}
+
+function forgetCompletedSessionCommandResult(commandId) {
+  const id = String(commandId || "").trim();
+  if (id) completedSessionCommandResults.delete(id);
+}
+
+function pruneCompletedSessionCommandResults() {
+  const now = Date.now();
+  for (const [id, cached] of completedSessionCommandResults) {
+    if (cached.expiresAt <= now) completedSessionCommandResults.delete(id);
+  }
 }
 
 function currentCodexRuntime() {

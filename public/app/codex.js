@@ -321,6 +321,7 @@ export function installCodex(app) {
   };
 
   app.sendToCodex = async function sendToCodex() {
+    if (state.composerBusy) return;
     if (!app.ensurePaired()) return;
     if (app.hasPendingComposerAttachments()) {
       app.toast("图片还在处理中，请稍候再发送");
@@ -507,6 +508,7 @@ export function installCodex(app) {
   };
 
   app.sendQuickSkill = async function sendQuickSkill(skill) {
+    if (state.composerBusy) return;
     if (!app.ensurePaired()) return;
     if (app.hasPendingComposerAttachments()) {
       app.toast("图片还在处理中，请稍候再发送");

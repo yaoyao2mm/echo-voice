@@ -245,7 +245,7 @@ function proxyFromScutil(data, prefix) {
   return `http://${host}:${port}`;
 }
 
-function isLikelyNetworkError(error) {
+export function isLikelyNetworkError(error) {
   const message = `${error?.name || ""} ${error?.message || ""} ${error?.cause?.code || ""}`;
   return /AbortError|TimeoutError|fetch failed|ECHO_PROXY_URL|proxy|ECONN|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|network/i.test(
     message
