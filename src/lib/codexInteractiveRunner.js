@@ -42,6 +42,10 @@ export class CodexInteractiveRuntime {
     }
   }
 
+  async warmup() {
+    await this.#ensureClient();
+  }
+
   stop() {
     this.#cleanupAllAttachmentDirs().catch((error) => {
       console.error(`[codex attachment cleanup] ${error.message}`);
@@ -462,6 +466,10 @@ export class CodexInteractiveRuntime {
 
   async #ensureClient() {
     if (this.client?.initialized) return;
+    if (this.client) {
+      await this.client.start();
+      return;
+    }
 
     const client = new CodexAppServerClient();
     this.client = client;

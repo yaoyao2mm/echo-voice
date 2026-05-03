@@ -1011,6 +1011,50 @@ test("interactive Codex approvals wait for mobile decisions", async () => {
   assert.equal(detail.events.some((event) => event.type === "approval.approved"), true);
 });
 
+test("mobile cancellation wakes pending Codex approval waits", async () => {
+  store.resetStoreForTest();
+
+  const agent = {
+    id: "approval-cancel-agent",
+    workspaces: [{ id: "demo", path: process.cwd() }]
+  };
+  const session = queue.createCodexSession({ projectId: "demo", prompt: "需要审批后继续" });
+  const command = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  queue.appendCodexSessionEvents(
+    session.id,
+    [{ type: "turn/started", text: "started", appThreadId: "thr_cancel_approval", activeTurnId: "turn_cancel_approval" }],
+    { agentId: agent.id }
+  );
+  queue.completeCodexSessionCommand(
+    command.id,
+    { ok: true, appThreadId: "thr_cancel_approval", activeTurnId: "turn_cancel_approval", sessionStatus: "running" },
+    { agentId: agent.id }
+  );
+
+  const approval = queue.createCodexSessionApproval(
+    {
+      sessionId: session.id,
+      appRequestId: "request-cancel-approval",
+      method: "item/commandExecution/requestApproval",
+      prompt: "Approve a long running command?",
+      payload: { command: "pnpm test", cwd: process.cwd() }
+    },
+    { agentId: agent.id }
+  );
+
+  const waitPromise = queue.waitForCodexSessionApproval(approval.id, {
+    waitMs: 1000,
+    agentId: agent.id,
+    sessionId: session.id
+  });
+  queue.cancelCodexSession(session.id, { reason: "cancel while waiting for approval" });
+
+  const waited = await waitPromise;
+  assert.equal(waited.id, approval.id);
+  assert.equal(waited.status, "denied");
+  assert.deepEqual(waited.response, { decision: "decline" });
+});
+
 test("interactive Codex user input waits for mobile answers", async () => {
   store.resetStoreForTest();
 

@@ -170,14 +170,19 @@ export function cancelCodexSession(id, input = {}) {
 
 export async function waitForCodexSessionCommand(input = {}) {
   const agent = updateCodexAgent(input.agent || {});
-  const immediateCommand = acquireNextSessionCommand({ agentId: agent.id, workspaces: agent.workspaces });
+  const acquire = () => {
+    const command = acquireNextSessionCommand({ agentId: agent.id, workspaces: agent.workspaces });
+    if (command) notifySessionChanged(command.sessionId);
+    return command;
+  };
+  const immediateCommand = acquire();
   if (immediateCommand) return immediateCommand;
 
   const waitMs = clampWaitMs(input.waitMs);
   return waitForEventValue({
     eventNames: ["codex-session-command"],
     waitMs,
-    getValue: () => acquireNextSessionCommand({ agentId: agent.id, workspaces: agent.workspaces })
+    getValue: acquire
   });
 }
 
@@ -230,7 +235,7 @@ export async function waitForCodexSessionApproval(id, input = {}) {
 
   const waitMs = clampWaitMs(input.waitMs);
   return waitForEventValue({
-    eventNames: [`codex-approval-${id}`],
+    eventNames: [`codex-approval-${id}`, input.sessionId ? sessionChangedEventName(input.sessionId) : ""],
     waitMs,
     getValue: () => getStoredApprovalDecision(id, { agentId: input.agentId || input.agent?.id })
   });

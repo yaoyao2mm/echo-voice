@@ -688,7 +688,8 @@ app.post("/api/agent/codex/sessions/approvals/:id/wait", async (req, res) => {
 
     const approval = await waitForCodexSessionApproval(req.params.id, {
       waitMs: Number(req.query.wait || req.body.wait || 25000),
-      agentId: req.body.agentId
+      agentId: req.body.agentId,
+      sessionId: req.body.sessionId
     });
     res.json({ approval });
   } catch (error) {

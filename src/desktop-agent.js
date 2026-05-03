@@ -103,6 +103,10 @@ async function runCodexSessionLoop() {
     requestApproval: requestCodexApproval,
     requestInteraction: requestCodexInteraction
   });
+  runtime.warmup().then(
+    () => console.log("Codex app-server is ready."),
+    (error) => console.warn(`[codex app-server warmup] ${formatFetchError(error)}; will retry on the next task.`)
+  );
 
   while (true) {
     let command = null;
@@ -175,7 +179,8 @@ async function requestCodexApproval(approval) {
   const timeoutMs = config.codex.approvalTimeoutMs;
   while (Date.now() - started < timeoutMs) {
     const waited = await postJson(`/api/agent/codex/sessions/approvals/${encodeURIComponent(approvalId)}/wait?wait=25000`, {
-      agentId
+      agentId,
+      sessionId: approval.sessionId
     });
     if (waited.approval?.response) return waited.approval.response;
   }

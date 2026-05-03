@@ -50,16 +50,6 @@ test("Codex session SSE streams partial updates after the initial snapshot", asy
   });
   const sessionId = created.session.id;
 
-  const leased = await apiJson(baseUrl, token, "/api/agent/codex/sessions/next?wait=1000", {
-    method: "POST",
-    body: {
-      agentId,
-      workspaces: [{ id: "echo", label: "Echo", path: process.cwd() }],
-      runtime: { command: "fake-codex" }
-    }
-  });
-  assert.equal(leased.command?.sessionId, sessionId);
-
   const ticket = await apiJson(baseUrl, token, `/api/codex/sessions/${encodeURIComponent(sessionId)}/events-ticket`, {
     method: "POST",
     body: {}
@@ -76,6 +66,23 @@ test("Codex session SSE streams partial updates after the initial snapshot", asy
   const initial = await readSseSession(reader);
   assert.equal(initial.partial, false);
   assert.equal(initial.session.id, sessionId);
+  assert.equal(initial.session.status, "queued");
+
+  const leased = await apiJson(baseUrl, token, "/api/agent/codex/sessions/next?wait=1000", {
+    method: "POST",
+    body: {
+      agentId,
+      workspaces: [{ id: "echo", label: "Echo", path: process.cwd() }],
+      runtime: { command: "fake-codex" }
+    }
+  });
+  assert.equal(leased.command?.sessionId, sessionId);
+
+  const acquired = await readSseSession(reader);
+  assert.equal(acquired.partial, true);
+  assert.equal(acquired.session.id, sessionId);
+  assert.equal(acquired.session.status, "starting");
+  assert.equal(acquired.session.events.some((event) => event.type === "command.acquired"), true);
 
   const appended = await apiJson(baseUrl, token, "/api/agent/codex/sessions/events", {
     method: "POST",
@@ -107,7 +114,7 @@ test("Codex session SSE streams partial updates after the initial snapshot", asy
   assert.equal(update.session.id, sessionId);
   assert.equal(update.session.status, "running");
   assert.equal(update.session.events.some((event) => event.type === "turn/started"), true);
-  assert.ok(update.lastEventId > 0);
+  assert.ok(update.lastEventId > acquired.lastEventId);
   assert.ok(update.session.events.every((event) => event.id > 0));
 
   await reader.cancel().catch(() => {});
