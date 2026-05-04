@@ -590,6 +590,117 @@ try {
   assert.equal(result.status, 0, [result.stdout, result.stderr].filter(Boolean).join("\n"));
 });
 
+test("CodexInteractiveRuntime recovers stale active turns by starting a new turn", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "echo-runtime-stale-turn-"));
+  const homePath = path.join(tempRoot, "home");
+  const workspacePath = path.join(tempRoot, "workspace");
+  const fakeCodexPath = path.join(tempRoot, "fake-codex-app");
+  const recordPath = path.join(tempRoot, "requests.json");
+
+  fs.mkdirSync(homePath, { recursive: true });
+  fs.mkdirSync(workspacePath, { recursive: true });
+  fs.writeFileSync(
+    fakeCodexPath,
+    `#!/usr/bin/env node
+import fs from "node:fs";
+import readline from "node:readline";
+
+const rl = readline.createInterface({ input: process.stdin });
+const requests = [];
+const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
+const record = (message) => {
+  requests.push({ method: message.method, params: message.params || {} });
+  fs.writeFileSync(${JSON.stringify(recordPath)}, JSON.stringify(requests), "utf8");
+};
+
+rl.on("line", (line) => {
+  const message = JSON.parse(line);
+  if (message.method === "initialize") {
+    send({ id: message.id, result: { userAgent: "fake", codexHome: "/tmp/codex", platformFamily: "unix", platformOs: "macos" } });
+    return;
+  }
+  if (message.method === "initialized") return;
+  if (message.method === "thread/resume") {
+    record(message);
+    send({ id: message.id, result: { thread: { id: message.params.threadId, preview: "", ephemeral: false, modelProvider: "openai", createdAt: 1 } } });
+    return;
+  }
+  if (message.method === "turn/steer") {
+    record(message);
+    send({ id: message.id, error: { code: -32603, message: "no active turn to steer" } });
+    return;
+  }
+  if (message.method === "turn/start") {
+    record(message);
+    const turn = { id: "turn_new", items: [], status: "inProgress", error: null, startedAt: 2, completedAt: null, durationMs: null };
+    send({ id: message.id, result: { turn } });
+  }
+});
+`,
+    "utf8"
+  );
+  fs.chmodSync(fakeCodexPath, 0o755);
+
+  const script = `
+import assert from "node:assert/strict";
+import fs from "node:fs";
+
+process.env.HOME = ${JSON.stringify(homePath)};
+process.env.ECHO_MODE = "relay";
+process.env.ECHO_TOKEN = "test-token";
+process.env.ECHO_RELAY_URL = "https://example.test";
+process.env.ECHO_CODEX_COMMAND = ${JSON.stringify(fakeCodexPath)};
+process.env.ECHO_CODEX_APP_PATH = ${JSON.stringify(fakeCodexPath)};
+process.env.ECHO_CODEX_WORKSPACES = ${JSON.stringify(`demo=${workspacePath}`)};
+
+const { CodexInteractiveRuntime } = await import(${JSON.stringify(path.join(process.cwd(), "src/lib/codexInteractiveRunner.js"))});
+
+const events = [];
+const runtime = new CodexInteractiveRuntime({
+  onEvents: async (_id, batch) => {
+    events.push(...batch);
+  }
+});
+
+try {
+  const result = await runtime.handleCommand({
+    sessionId: "session-stale-turn",
+    type: "message",
+    projectId: "demo",
+    appThreadId: "thr_existing",
+    activeTurnId: "turn_old",
+    payload: { text: "结果呢", attachments: [] },
+    runtime: {}
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.appThreadId, "thr_existing");
+  assert.equal(result.activeTurnId, "turn_new");
+  assert.equal(result.sessionStatus, "running");
+
+  const staleEvent = events.find((event) => event.type === "turn.stale");
+  assert.ok(staleEvent);
+  assert.equal(staleEvent.clearActiveTurnId, true);
+  assert.equal(staleEvent.activeTurnId, "turn_old");
+
+  const requests = JSON.parse(fs.readFileSync(${JSON.stringify(recordPath)}, "utf8"));
+  assert.deepEqual(requests.map((request) => request.method), ["thread/resume", "turn/steer", "turn/start"]);
+  assert.equal(requests[1].params.expectedTurnId, "turn_old");
+  assert.equal(requests[2].params.input[0].text, "结果呢");
+} finally {
+  runtime.stop();
+}
+`;
+
+  const result = spawnSync(process.execPath, ["--input-type=module", "-"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    input: script
+  });
+
+  assert.equal(result.status, 0, [result.stdout, result.stderr].filter(Boolean).join("\n"));
+});
+
 test("CodexInteractiveRuntime keeps restored token usage notifications mapped to the session", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "echo-runtime-token-usage-"));
   const homePath = path.join(tempRoot, "home");

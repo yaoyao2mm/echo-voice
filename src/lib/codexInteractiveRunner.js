@@ -215,30 +215,46 @@ export class CodexInteractiveRuntime {
     const activeTurnId = this.activeTurns.get(threadId);
     try {
       if (activeTurnId) {
-        const result = await this.client.request(
-          "turn/steer",
-          {
-            threadId,
-            input,
-            expectedTurnId: activeTurnId
-          },
-          60000
-        );
-        const completedTurn = this.#takeCompletedTurn(threadId, activeTurnId);
-        await this.#emit(sessionId, [
-          {
-            type: "turn.steered",
-            text: "Message added to the active Codex turn.",
-            appThreadId: threadId,
-            activeTurnId,
-            clearActiveTurnId: Boolean(completedTurn),
-            sessionStatus: completedTurn?.sessionStatus || "running",
-            raw: { method: "turn/steer", result }
-          }
-        ]);
-        return completedTurn
-          ? { id: result?.turnId || activeTurnId, completed: true, sessionStatus: completedTurn.sessionStatus, error: completedTurn.error }
-          : { id: result?.turnId || activeTurnId };
+        try {
+          const result = await this.client.request(
+            "turn/steer",
+            {
+              threadId,
+              input,
+              expectedTurnId: activeTurnId
+            },
+            60000
+          );
+          const completedTurn = this.#takeCompletedTurn(threadId, activeTurnId);
+          await this.#emit(sessionId, [
+            {
+              type: "turn.steered",
+              text: "Message added to the active Codex turn.",
+              appThreadId: threadId,
+              activeTurnId,
+              clearActiveTurnId: Boolean(completedTurn),
+              sessionStatus: completedTurn?.sessionStatus || "running",
+              raw: { method: "turn/steer", result }
+            }
+          ]);
+          return completedTurn
+            ? { id: result?.turnId || activeTurnId, completed: true, sessionStatus: completedTurn.sessionStatus, error: completedTurn.error }
+            : { id: result?.turnId || activeTurnId };
+        } catch (error) {
+          if (!isNoActiveTurnToSteerError(error)) throw error;
+          this.activeTurns.delete(threadId);
+          await this.#emit(sessionId, [
+            {
+              type: "turn.stale",
+              text: "Cleared a stale Codex turn and started a new turn for the follow-up.",
+              appThreadId: threadId,
+              activeTurnId,
+              clearActiveTurnId: true,
+              sessionStatus: "active",
+              raw: { method: "turn/steer", stale: true, error: error.message || "" }
+            }
+          ]);
+        }
       }
 
       const turnStartParams = await this.#turnStartParams({
@@ -1050,6 +1066,10 @@ function turnGitBaselineKey(threadId, turnId) {
   const thread = String(threadId || "").trim();
   const turn = String(turnId || "").trim();
   return thread && turn ? `${thread}\u001f${turn}` : "";
+}
+
+function isNoActiveTurnToSteerError(error) {
+  return /no active turn to steer/i.test(String(error?.message || ""));
 }
 
 function isBufferedDeltaMethod(method) {

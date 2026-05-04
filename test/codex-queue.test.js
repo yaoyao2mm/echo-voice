@@ -620,6 +620,37 @@ test("interactive Codex sessions lease commands and keep thread state", async ()
   assert.equal(messageCommand.runtime.approvalPolicy, "on-request");
 });
 
+test("interactive Codex session heartbeats renew leased command leases", async () => {
+  store.resetStoreForTest();
+
+  const agent = {
+    id: "command-heartbeat-agent",
+    workspaces: [{ id: "demo", path: process.cwd() }]
+  };
+
+  const session = queue.createCodexSession({ projectId: "demo", prompt: "长时间 plan turn" });
+  const command = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  db.prepare("UPDATE codex_sessions SET lease_expires_at = ? WHERE id = ?").run("2020-01-01T00:00:00.000Z", session.id);
+  db.prepare("UPDATE codex_session_commands SET lease_expires_at = ? WHERE id = ?").run(
+    "2020-01-01T00:00:00.000Z",
+    command.id
+  );
+
+  assert.equal(queue.appendCodexSessionEvents(session.id, [], { agentId: agent.id }), true);
+
+  const detail = queue.getCodexSession(session.id);
+  const commandRow = db.prepare(`
+    SELECT status, leased_by AS leasedBy, lease_expires_at AS leaseExpiresAt
+    FROM codex_session_commands
+    WHERE id = ?
+  `).get(command.id);
+  assert.equal(detail.leasedBy, agent.id);
+  assert.equal(commandRow.status, "leased");
+  assert.equal(commandRow.leasedBy, agent.id);
+  assert.ok(Date.parse(commandRow.leaseExpiresAt) > Date.now());
+  assert.equal(detail.events.some((event) => event.type === "command.lease.expired"), false);
+});
+
 test("interactive Codex leasing allows parallel sessions without re-entering one session command", async () => {
   store.resetStoreForTest();
 
@@ -1036,6 +1067,32 @@ test("interactive Codex sessions recover expired running leases instead of looki
   assert.equal(recovered.events.some((event) => event.type === "session.lease.expired"), true);
 });
 
+test("interactive Codex running command completion refreshes the session lease", async () => {
+  store.resetStoreForTest();
+
+  const agent = {
+    id: "complete-renew-agent",
+    workspaces: [{ id: "demo", path: process.cwd() }]
+  };
+
+  const session = queue.createCodexSession({ projectId: "demo", prompt: "启动一个长 turn" });
+  const command = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  db.prepare("UPDATE codex_sessions SET lease_expires_at = ? WHERE id = ?").run("2020-01-01T00:00:00.000Z", session.id);
+
+  queue.completeCodexSessionCommand(
+    command.id,
+    { ok: true, appThreadId: "thr_complete_renew", activeTurnId: "turn_complete_renew", sessionStatus: "running" },
+    { agentId: agent.id }
+  );
+
+  const detail = queue.getCodexSession(session.id);
+  assert.equal(detail.status, "running");
+  assert.equal(detail.leasedBy, agent.id);
+  assert.equal(detail.activeTurnId, "turn_complete_renew");
+  assert.ok(Date.parse(detail.leaseExpiresAt) > Date.now());
+  assert.equal(detail.events.some((event) => event.type === "session.lease.expired"), false);
+});
+
 test("interactive Codex sessions can continue after recoverable app-server failures", async () => {
   store.resetStoreForTest();
 
@@ -1219,6 +1276,61 @@ test("interactive Codex user input waits for mobile answers", async () => {
   assert.equal(detail.pendingInteractionCount, 0);
   assert.equal(detail.interactions.length, 0);
   assert.equal(detail.events.some((event) => event.type === "interaction.answered"), true);
+});
+
+test("interactive Codex user input requests and waits renew running session leases", async () => {
+  store.resetStoreForTest();
+
+  const agent = {
+    id: "interaction-renew-agent",
+    workspaces: [{ id: "demo", path: process.cwd() }]
+  };
+  const session = queue.createCodexSession({ projectId: "demo", prompt: "计划模式需要选择" });
+  const command = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
+  queue.completeCodexSessionCommand(
+    command.id,
+    { ok: true, appThreadId: "thr_interaction_renew", activeTurnId: "turn_interaction_renew", sessionStatus: "running" },
+    { agentId: agent.id }
+  );
+
+  db.prepare("UPDATE codex_sessions SET lease_expires_at = ? WHERE id = ?").run("2020-01-01T00:00:00.000Z", session.id);
+  const interaction = queue.createCodexSessionInteraction(
+    {
+      sessionId: session.id,
+      appRequestId: "request-input-renew",
+      method: "item/tool/requestUserInput",
+      kind: "user_input",
+      prompt: "选择下一步方案",
+      payload: {
+        threadId: "thr_interaction_renew",
+        turnId: "turn_interaction_renew",
+        questions: [{ id: "plan_choice", question: "选择下一步方案", options: [{ label: "A" }, { label: "B" }] }]
+      }
+    },
+    { agentId: agent.id }
+  );
+  assert.equal(interaction.status, "pending");
+
+  let detail = queue.getCodexSession(session.id);
+  assert.equal(detail.status, "running");
+  assert.equal(detail.leasedBy, agent.id);
+  assert.equal(detail.pendingInteractionCount, 1);
+  assert.equal(detail.events.some((event) => event.type === "session.lease.expired"), false);
+
+  db.prepare("UPDATE codex_sessions SET lease_expires_at = ? WHERE id = ?").run("2020-01-01T00:00:00.000Z", session.id);
+  const waited = await queue.waitForCodexSessionInteraction(interaction.id, {
+    waitMs: 1000,
+    agentId: agent.id,
+    sessionId: session.id
+  });
+  assert.equal(waited, null);
+
+  detail = queue.getCodexSession(session.id);
+  assert.equal(detail.status, "running");
+  assert.equal(detail.leasedBy, agent.id);
+  assert.equal(detail.pendingInteractionCount, 1);
+  assert.ok(Date.parse(detail.leaseExpiresAt) > Date.now());
+  assert.equal(detail.events.some((event) => event.type === "session.lease.expired"), false);
 });
 
 test("interactive Codex user input clears when app-server resolves the request", async () => {

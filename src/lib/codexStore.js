@@ -1312,6 +1312,7 @@ export function appendSessionEvents(sessionId, incomingEvents = [], options = {}
     for (const message of assistantMessages) {
       insertSessionMessageIgnore.run(message);
     }
+    touchSessionCommandLeasesForAgent(sessionId, session.leasedBy, { now, leaseExpiresAt });
     trimSessionEvents.run(sessionId, sessionId, config.codex.maxEvents);
     return true;
   });
@@ -1329,6 +1330,7 @@ export function completeSessionCommand(commandId, result = {}, options = {}) {
   if (!session || !canMutateSession(session, providedAgentId)) return false;
 
   const now = nowIso();
+  const leaseExpiresAt = new Date(Date.now() + config.codex.leaseMs).toISOString();
   const ok = result.ok === true;
   const error = String(result.error || "");
   const status = ok ? "done" : "failed";
@@ -1375,7 +1377,7 @@ export function completeSessionCommand(commandId, result = {}, options = {}) {
           final_message = COALESCE(@finalMessage, final_message),
           execution_json = COALESCE(@executionJson, execution_json),
           leased_by = CASE WHEN @releaseLease = 1 THEN NULL ELSE leased_by END,
-          lease_expires_at = CASE WHEN @releaseLease = 1 THEN NULL ELSE lease_expires_at END,
+          lease_expires_at = CASE WHEN @releaseLease = 1 THEN NULL ELSE @leaseExpiresAt END,
           updated_at = @now
       WHERE id = @sessionId
         AND leased_by = @leasedBy
@@ -1386,6 +1388,7 @@ export function completeSessionCommand(commandId, result = {}, options = {}) {
       activeTurnId,
       clearActiveTurnId: clearActiveTurnId ? 1 : 0,
       releaseLease: releaseLease ? 1 : 0,
+      leaseExpiresAt,
       lastError,
       finalMessage: result.finalMessage || null,
       executionJson,
@@ -1412,6 +1415,7 @@ export function createSessionApproval(input = {}, options = {}) {
   if (!canMutateSession(session, options.agentId)) return false;
 
   const now = nowIso();
+  const leaseExpiresAt = new Date(Date.now() + config.codex.leaseMs).toISOString();
   const approval = {
     id: crypto.randomUUID(),
     sessionId: session.id,
@@ -1424,6 +1428,8 @@ export function createSessionApproval(input = {}, options = {}) {
   };
 
   const create = db.transaction(() => {
+    touchSessionLeaseForAgent(approval.sessionId, approval.requestedBy, { now, leaseExpiresAt });
+
     const existing = db.prepare(`
       SELECT ${summarizeSessionApprovalColumns}
       FROM codex_session_approvals
@@ -1505,6 +1511,7 @@ export function createSessionInteraction(input = {}, options = {}) {
   if (!canMutateSession(session, options.agentId)) return false;
 
   const now = nowIso();
+  const leaseExpiresAt = new Date(Date.now() + config.codex.leaseMs).toISOString();
   const interaction = {
     id: crypto.randomUUID(),
     sessionId: session.id,
@@ -1518,6 +1525,8 @@ export function createSessionInteraction(input = {}, options = {}) {
   };
 
   const create = db.transaction(() => {
+    touchSessionLeaseForAgent(interaction.sessionId, interaction.requestedBy, { now, leaseExpiresAt });
+
     const existing = db.prepare(`
       SELECT ${summarizeSessionInteractionColumns}
       FROM codex_session_interactions
@@ -1598,7 +1607,9 @@ export function waitForSessionApprovalDecision(id, options = {}) {
   expireOldApprovals();
   const approval = getSessionApprovalSummary(id);
   if (!approval) return null;
-  if (options.agentId && approval.requestedBy !== normalizeAgentId(options.agentId)) return null;
+  const agentId = normalizeAgentId(options.agentId);
+  if (agentId && approval.requestedBy !== agentId) return null;
+  if (approval.status === "pending" && agentId) touchSessionLeaseForAgent(approval.sessionId, agentId);
   return approval.status === "pending" ? null : approval;
 }
 
@@ -1606,7 +1617,9 @@ export function waitForSessionInteractionDecision(id, options = {}) {
   expireOldInteractions();
   const interaction = getSessionInteractionSummary(id);
   if (!interaction) return null;
-  if (options.agentId && interaction.requestedBy !== normalizeAgentId(options.agentId)) return null;
+  const agentId = normalizeAgentId(options.agentId);
+  if (agentId && interaction.requestedBy !== agentId) return null;
+  if (interaction.status === "pending" && agentId) touchSessionLeaseForAgent(interaction.sessionId, agentId);
   return interaction.status === "pending" ? null : interaction;
 }
 
@@ -3944,6 +3957,48 @@ function canMutateSession(session, agentId) {
   const providedAgentId = String(agentId || "").trim();
   if (!session.leasedBy || !providedAgentId) return false;
   return session.leasedBy === normalizeAgentId(providedAgentId);
+}
+
+function touchSessionLeaseForAgent(sessionId, agentId, options = {}) {
+  const leasedBy = normalizeAgentId(agentId);
+  if (!sessionId || !leasedBy) return false;
+  const now = options.now || nowIso();
+  const leaseExpiresAt = options.leaseExpiresAt || new Date(Date.now() + config.codex.leaseMs).toISOString();
+  const updated = db.prepare(`
+    UPDATE codex_sessions
+    SET lease_expires_at = @leaseExpiresAt,
+        updated_at = @now
+    WHERE id = @sessionId
+      AND leased_by = @leasedBy
+  `).run({
+    sessionId,
+    leasedBy,
+    leaseExpiresAt,
+    now
+  });
+  const commandUpdates = touchSessionCommandLeasesForAgent(sessionId, leasedBy, { now, leaseExpiresAt });
+  return updated.changes > 0 || commandUpdates > 0;
+}
+
+function touchSessionCommandLeasesForAgent(sessionId, agentId, options = {}) {
+  const leasedBy = normalizeAgentId(agentId);
+  if (!sessionId || !leasedBy) return 0;
+  const now = options.now || nowIso();
+  const leaseExpiresAt = options.leaseExpiresAt || new Date(Date.now() + config.codex.leaseMs).toISOString();
+  const updated = db.prepare(`
+    UPDATE codex_session_commands
+    SET lease_expires_at = @leaseExpiresAt,
+        updated_at = @now
+    WHERE session_id = @sessionId
+      AND status = 'leased'
+      AND leased_by = @leasedBy
+  `).run({
+    sessionId,
+    leasedBy,
+    leaseExpiresAt,
+    now
+  });
+  return updated.changes;
 }
 
 function sessionCanRecoverFailure(session = {}) {
