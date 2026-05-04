@@ -49,6 +49,8 @@ import {
 
 const app = express();
 const sseTickets = new Map();
+const sseInitialMaxEvents = 160;
+const sseIncrementalMaxEvents = 80;
 
 await loadHistory();
 
@@ -405,25 +407,13 @@ app.get("/api/codex/sessions/:id/events", (req, res) => {
     "X-Accel-Buffering": "no"
   });
   res.write(": connected\n\n");
-  let lastEventId = maxSessionEventId(session.events || [], afterEventId);
-  writeSse(
-    res,
-    "session",
-    {
-      session,
-      partial: afterEventId > 0,
-      recovered: afterEventId > 0,
-      lastEventId
-    },
-    { id: lastEventId }
-  );
+  let lastEventId =
+    afterEventId > 0
+      ? writeSseSessionCatchup(res, req.params.id, afterEventId, { firstSession: session, recovered: true })
+      : writeSseSessionPage(res, session, { partial: false }, afterEventId);
 
   const unsubscribe = subscribeCodexSession(req.params.id, () => {
-    const updated = getCodexSession(req.params.id, streamSessionOptions({ initial: false, afterEventId: lastEventId }));
-    if (!updated) return;
-    const nextEventId = maxSessionEventId(updated.events || [], lastEventId);
-    lastEventId = nextEventId;
-    writeSse(res, "session", { session: updated, partial: true, lastEventId }, { id: lastEventId });
+    lastEventId = writeSseSessionCatchup(res, req.params.id, lastEventId);
   });
   const heartbeat = setInterval(() => {
     res.write(": keep-alive\n\n");
@@ -801,11 +791,53 @@ function writeSse(res, event, data, options = {}) {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
+function writeSseSessionPage(res, session, data = {}, fallbackEventId = 0) {
+  const lastEventId = maxSessionEventId(session.events || [], fallbackEventId);
+  writeSse(
+    res,
+    "session",
+    {
+      session,
+      partial: data.partial !== false,
+      recovered: Boolean(data.recovered),
+      lastEventId
+    },
+    { id: lastEventId }
+  );
+  return lastEventId;
+}
+
+function writeSseSessionCatchup(res, sessionId, afterEventId, options = {}) {
+  let cursor = Math.max(0, Number(afterEventId || 0) || 0);
+  let session = options.firstSession || getCodexSession(sessionId, streamSessionOptions({ initial: false, afterEventId: cursor }));
+  let wrote = false;
+
+  while (session && !res.writableEnded) {
+    const events = Array.isArray(session.events) ? session.events : [];
+    const nextEventId = maxSessionEventId(events, cursor);
+    cursor = writeSseSessionPage(
+      res,
+      session,
+      {
+        partial: true,
+        recovered: Boolean(options.recovered && !wrote)
+      },
+      cursor
+    );
+    wrote = true;
+
+    if (events.length < sseIncrementalMaxEvents || nextEventId <= afterEventId) break;
+    session = getCodexSession(sessionId, streamSessionOptions({ initial: false, afterEventId: cursor }));
+  }
+
+  return cursor;
+}
+
 function streamSessionOptions({ initial = false, afterEventId = 0 } = {}) {
   return {
     rawMode: "client",
     afterEventId,
-    maxEvents: initial ? 160 : 80,
+    maxEvents: initial ? sseInitialMaxEvents : sseIncrementalMaxEvents,
     includeMessages: initial && afterEventId === 0,
     includeApprovals: true,
     includeInteractions: true,

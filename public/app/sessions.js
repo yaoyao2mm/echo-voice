@@ -448,7 +448,23 @@ export function installSessions(app) {
       seen.add(key);
       merged.push(event);
     }
-    return merged.slice(-160);
+    return app.sortSessionEvents(merged).slice(-160);
+  };
+
+  app.sortSessionEvents = function sortSessionEvents(events) {
+    return [...(events || [])].sort((a, b) => {
+      const leftId = Number(a?.id || 0);
+      const rightId = Number(b?.id || 0);
+      if (Number.isFinite(leftId) && Number.isFinite(rightId) && leftId > 0 && rightId > 0 && leftId !== rightId) {
+        return leftId - rightId;
+      }
+      const leftAt = Date.parse(a?.at || "");
+      const rightAt = Date.parse(b?.at || "");
+      if (Number.isFinite(leftAt) && Number.isFinite(rightAt) && leftAt !== rightAt) return leftAt - rightAt;
+      if (Number.isFinite(leftAt) && !Number.isFinite(rightAt)) return -1;
+      if (!Number.isFinite(leftAt) && Number.isFinite(rightAt)) return 1;
+      return 0;
+    });
   };
 
   app.sessionEventKey = function sessionEventKey(event) {
@@ -1114,12 +1130,18 @@ export function installSessions(app) {
     const messages = Array.isArray(job.messages) ? job.messages : [];
 
     if (messages.length > 0) {
+      const renderedUserKeys = new Set();
+      const renderedUserTexts = new Set();
       const renderedAssistantKeys = new Set();
       const renderedAssistantTexts = new Set();
       for (const message of messages) {
         const text = String(message.text || "").trim();
         const attachments = app.messageAttachments(message);
         if (!text && attachments.length === 0) continue;
+        if (message.role !== "assistant") {
+          if (message.externalKey) renderedUserKeys.add(message.externalKey);
+          if (text) renderedUserTexts.add(text);
+        }
         if (message.role === "assistant") {
           if (message.externalKey) renderedAssistantKeys.add(message.externalKey);
           if (text) renderedAssistantTexts.add(text);
@@ -1129,11 +1151,22 @@ export function installSessions(app) {
           role: message.role === "assistant" ? "assistant" : "user",
           text,
           attachments,
-          at: message.createdAt || job.updatedAt || job.createdAt || ""
+          at: message.createdAt || job.updatedAt || job.createdAt || "",
+          externalKey: message.externalKey || ""
         });
       }
 
       for (const event of job.events || []) {
+        const userEntry = app.userMessageEntryFromEvent(event);
+        if (userEntry?.text || userEntry?.attachments?.length) {
+          if (userEntry.externalKey && renderedUserKeys.has(userEntry.externalKey)) continue;
+          if (!userEntry.externalKey && userEntry.text && renderedUserTexts.has(userEntry.text)) continue;
+          if (userEntry.externalKey) renderedUserKeys.add(userEntry.externalKey);
+          if (userEntry.text) renderedUserTexts.add(userEntry.text);
+          timeline.push(userEntry);
+          continue;
+        }
+
         const assistantEntry = app.assistantMessageEntryFromEvent(event);
         if (!assistantEntry?.text) continue;
         if (assistantEntry.externalKey && renderedAssistantKeys.has(assistantEntry.externalKey)) continue;
@@ -1155,7 +1188,9 @@ export function installSessions(app) {
             role: "user",
             text: userText,
             attachments: userAttachments,
-            at: event.at || job.createdAt || ""
+            at: event.at || job.createdAt || "",
+            eventId: Number(event.id || 0) || 0,
+            externalKey: app.userMessageExternalKey(event)
           });
           continue;
         }
@@ -1167,7 +1202,9 @@ export function installSessions(app) {
           kind: "message",
           role: "assistant",
           text: assistantText,
-          at: event.at || job.updatedAt || ""
+          at: event.at || job.updatedAt || "",
+          eventId: Number(event.id || 0) || 0,
+          externalKey: app.assistantMessageExternalKey(event)
         });
       }
     }
@@ -1244,13 +1281,27 @@ export function installSessions(app) {
   };
 
   app.sortTimelineEntries = function sortTimelineEntries(timeline) {
+    timeline.forEach((entry, index) => {
+      if (entry && entry.order === undefined) entry.order = index;
+    });
     timeline.sort((a, b) => {
       const left = Date.parse(a.at || "");
       const right = Date.parse(b.at || "");
-      if (!Number.isFinite(left) && !Number.isFinite(right)) return 0;
+      if (Number.isFinite(left) && Number.isFinite(right) && left !== right) return left - right;
       if (!Number.isFinite(left)) return 1;
       if (!Number.isFinite(right)) return -1;
-      return left - right;
+      const leftEventId = Number(a.eventId || 0);
+      const rightEventId = Number(b.eventId || 0);
+      if (
+        Number.isFinite(leftEventId) &&
+        Number.isFinite(rightEventId) &&
+        leftEventId > 0 &&
+        rightEventId > 0 &&
+        leftEventId !== rightEventId
+      ) {
+        return leftEventId - rightEventId;
+      }
+      return Number(a.order || 0) - Number(b.order || 0);
     });
   };
 
@@ -1758,6 +1809,7 @@ export function installSessions(app) {
       role: "assistant",
       text,
       at: event.at || "",
+      eventId: Number(event.id || 0) || 0,
       externalKey: app.assistantMessageExternalKey(event)
     };
   };
@@ -1772,12 +1824,38 @@ export function installSessions(app) {
     return itemId ? `assistant:${turnId}:${itemId}` : "";
   };
 
+  app.userMessageEntryFromEvent = function userMessageEntryFromEvent(event) {
+    if (event?.type !== "user.message") return null;
+    const text = String(event.text || "").trim();
+    const attachments = app.userMessageAttachments(event);
+    if (!text && attachments.length === 0) return null;
+    return {
+      kind: "message",
+      role: "user",
+      text,
+      attachments,
+      at: event.at || "",
+      eventId: Number(event.id || 0) || 0,
+      externalKey: app.userMessageExternalKey(event)
+    };
+  };
+
+  app.userMessageExternalKey = function userMessageExternalKey(event) {
+    const raw = event?.raw || {};
+    const commandId = String(raw.commandId || raw.params?.commandId || "").trim();
+    if (commandId) return `user:${commandId}`;
+    const messageId = String(raw.messageId || raw.params?.messageId || "").trim();
+    return messageId ? `user-message:${messageId}` : "";
+  };
+
   app.activeAssistantDraft = function activeAssistantDraft(job, timeline) {
     const streamedDraft = app.activeAssistantDraftFromEvents(job.events || []);
-    if (streamedDraft && app.lastTimelineMessageText(timeline, "assistant") !== streamedDraft) return streamedDraft;
     const current = String(job.finalMessage || "").trim();
+    const lastAssistant = app.lastTimelineMessageText(timeline, "assistant");
+    if (streamedDraft && current && current !== lastAssistant && current.endsWith(streamedDraft)) return current;
+    if (streamedDraft && lastAssistant !== streamedDraft) return streamedDraft;
     if (!current) return "";
-    if (app.lastTimelineMessageText(timeline, "assistant") === current) return "";
+    if (lastAssistant === current) return "";
     return current;
   };
 

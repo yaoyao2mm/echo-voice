@@ -162,6 +162,58 @@ test("Codex session SSE streams partial updates after the initial snapshot", asy
   assert.equal(resumed.session.events.length, 1);
   assert.equal(resumed.session.events[0].type, "item/agentMessage/delta");
   assert.ok(resumed.session.events[0].id > update.lastEventId);
+  await resumedReader.cancel().catch(() => {});
+
+  const backlogStartEventId = resumed.lastEventId;
+  const backlogEvents = Array.from({ length: 95 }, (_, index) => ({
+    type: "item/agentMessage/delta",
+    text: `chunk-${index + 1}`,
+    finalMessage: `chunk-${index + 1}`,
+    raw: {
+      method: "item/agentMessage/delta",
+      params: {
+        threadId: "thr_sse_test",
+        turnId: "turn_sse_test",
+        itemId: "msg_backlog",
+        delta: `chunk-${index + 1}`
+      }
+    }
+  }));
+  assert.equal(
+    (
+      await apiJson(baseUrl, token, "/api/agent/codex/sessions/events", {
+        method: "POST",
+        body: { id: sessionId, agentId, events: backlogEvents.slice(0, 80) }
+      })
+    ).ok,
+    true
+  );
+  assert.equal(
+    (
+      await apiJson(baseUrl, token, "/api/agent/codex/sessions/events", {
+        method: "POST",
+        body: { id: sessionId, agentId, events: backlogEvents.slice(80) }
+      })
+    ).ok,
+    true
+  );
+
+  const backlogTicket = await apiJson(baseUrl, token, `/api/codex/sessions/${encodeURIComponent(sessionId)}/events-ticket`, {
+    method: "POST",
+    body: {}
+  });
+  const backlogStream = await fetch(
+    `${baseUrl}/api/codex/sessions/${encodeURIComponent(sessionId)}/events?ticket=${encodeURIComponent(backlogTicket.ticket)}&after=${encodeURIComponent(backlogStartEventId)}`
+  );
+  assert.equal(backlogStream.ok, true);
+  const backlogReader = backlogStream.body.getReader();
+  t.after(() => backlogReader.cancel().catch(() => {}));
+
+  const backlogPages = await readSseSessions(backlogReader, 2);
+  assert.equal(backlogPages[0].session.events.length, 80);
+  assert.equal(backlogPages[1].session.events.length, 15);
+  assert.equal(backlogPages[1].session.events.at(-1).text, "chunk-95");
+  assert.ok(backlogPages[1].lastEventId > backlogPages[0].lastEventId);
 });
 
 async function apiJson(baseUrl, token, pathName, options = {}) {
@@ -213,6 +265,32 @@ async function readSseSession(reader) {
   }
 
   throw new Error("Timed out waiting for session SSE event.");
+}
+
+async function readSseSessions(reader, count) {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const sessions = [];
+  const deadline = Date.now() + 5000;
+
+  while (Date.now() < deadline) {
+    const result = await Promise.race([
+      reader.read(),
+      delay(500).then(() => ({ timeout: true }))
+    ]);
+    if (result.timeout) continue;
+    if (result.done) break;
+
+    buffer += decoder.decode(result.value, { stream: true });
+    const parsed = parseSseBlocks(buffer);
+    buffer = parsed.remainder;
+    for (const event of parsed.events) {
+      if (event.event === "session") sessions.push(event.data);
+      if (sessions.length >= count) return sessions;
+    }
+  }
+
+  throw new Error(`Timed out waiting for ${count} session SSE events; received ${sessions.length}.`);
 }
 
 function parseSseBlocks(buffer) {
