@@ -824,20 +824,24 @@ body.topbar-collapsed .topbar {
 }
 
 .file-browser-panel {
-  position: absolute;
-  top: calc(100% + 10px);
+  position: fixed;
+  top: calc(var(--safe-top) + 76px);
   right: 0;
-  z-index: 73;
+  bottom: 0;
+  z-index: 27;
   display: grid;
-  grid-template-rows: auto auto auto minmax(120px, auto) auto;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   gap: 10px;
-  width: min(560px, calc(100vw - 28px));
-  max-height: min(680px, calc(var(--app-height) - var(--safe-top) - 92px));
+  width: min(620px, 46vw);
+  min-width: min(420px, calc(100vw - 32px));
+  max-height: none;
   overflow: hidden;
   border: 1px solid rgba(126, 106, 84, 0.14);
-  border-radius: 18px;
-  background: rgba(255, 252, 247, 0.98);
-  box-shadow: 0 24px 54px rgba(23, 20, 17, 0.16);
+  border-right: 0;
+  border-bottom: 0;
+  border-radius: 18px 0 0 0;
+  background: rgba(248, 246, 241, 0.985);
+  box-shadow: -16px 0 34px rgba(23, 20, 17, 0.08);
   padding: 12px;
 }
 
@@ -852,6 +856,12 @@ body.topbar-collapsed .topbar {
   justify-content: space-between;
   gap: 12px;
   min-width: 0;
+}
+
+.file-browser-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .file-browser-head > div,
@@ -884,6 +894,7 @@ body.topbar-collapsed .topbar {
 }
 
 .file-browser-refresh,
+.file-browser-close,
 .file-preview-close {
   width: 32px;
   min-height: 32px;
@@ -936,8 +947,8 @@ body.topbar-collapsed .topbar {
 }
 
 .file-browser-list {
-  min-height: 120px;
-  max-height: min(270px, 34vh);
+  min-height: 0;
+  max-height: none;
   overflow: auto;
   border-top: 1px solid rgba(126, 106, 84, 0.08);
 }
@@ -1021,10 +1032,16 @@ body.topbar-collapsed .topbar {
 
 .file-preview {
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
   min-height: 0;
+  overflow: hidden;
   border-top: 1px solid rgba(126, 106, 84, 0.1);
   padding-top: 10px;
+}
+
+.file-browser-panel.has-preview .file-browser-list {
+  display: none;
 }
 
 .file-preview[hidden] {
@@ -1038,7 +1055,8 @@ body.topbar-collapsed .topbar {
 }
 
 .file-preview-content {
-  max-height: min(260px, 34vh);
+  min-height: 0;
+  max-height: none;
   overflow: auto;
   margin: 0;
   border: 1px solid rgba(126, 106, 84, 0.1);
@@ -1049,8 +1067,8 @@ body.topbar-collapsed .topbar {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
   line-height: 1.55;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  white-space: pre;
+  overflow-wrap: normal;
   user-select: text;
   -webkit-user-select: text;
 }
@@ -1066,18 +1084,38 @@ body.topbar-collapsed .topbar {
 
   body.mobile-ui .file-browser-panel {
     position: fixed;
-    top: calc(var(--safe-top) + 48px);
-    left: max(8px, var(--safe-left));
-    right: max(8px, var(--safe-right));
-    width: auto;
-    max-height: min(680px, calc(var(--app-height) - var(--safe-top) - 64px));
+    top: calc(var(--visual-viewport-top, 0px) + var(--mobile-frame-top, var(--topbar-height, 72px)));
+    left: auto;
+    right: 0;
+    bottom: 0;
+    z-index: 27;
+    width: min(88vw, 390px);
+    min-width: 0;
+    height: auto;
+    max-height: none;
+    border-top: 1px solid rgba(126, 106, 84, 0.1);
+    border-left: 1px solid rgba(126, 106, 84, 0.12);
+    border-right: 0;
+    border-bottom: 0;
+    border-radius: 0;
+    background: rgba(248, 246, 241, 0.985);
+    box-shadow: -10px 0 24px rgba(23, 20, 17, 0.08);
+    padding: 10px;
+  }
+
+  body.mobile-ui .codex-section.files-open .codex-main {
+    transform: translateX(-14px) scale(0.992);
+    opacity: 0.72;
+    transition:
+      transform 180ms ease,
+      opacity 160ms ease;
   }
 
   body.mobile-ui .file-browser-list {
-    max-height: min(310px, 38vh);
+    max-height: none;
   }
 
   body.mobile-ui .file-preview-content {
-    max-height: min(260px, 32vh);
+    max-height: none;
   }
 }

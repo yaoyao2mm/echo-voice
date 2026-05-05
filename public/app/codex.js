@@ -205,9 +205,12 @@ export function installCodex(app) {
   };
 
   app.openSessionSidebar = function openSessionSidebar() {
+    app.closeFileBrowser?.({ restoreFocus: false });
     elements.codexView.classList.add("sessions-open");
     app.setTopbarCollapsed(false);
     elements.sessionBackdrop.hidden = false;
+    elements.sessionBackdrop.dataset.layer = "sessions";
+    elements.sessionBackdrop.setAttribute("aria-label", "关闭会话列表");
     app.updateSessionSidebarToggle(true);
     app.syncBodySheetState();
   };
@@ -215,6 +218,8 @@ export function installCodex(app) {
   app.closeSessionSidebar = function closeSessionSidebar({ restoreFocus = true } = {}) {
     elements.codexView.classList.remove("sessions-open");
     elements.sessionBackdrop.hidden = true;
+    delete elements.sessionBackdrop.dataset.layer;
+    app.closeProjectSwitcher?.();
     app.setSidebarUserMenuOpen(false);
     app.updateSessionSidebarToggle(false);
     app.syncBodySheetState();
@@ -1130,31 +1135,32 @@ export function installCodex(app) {
     }
   };
 
+  app.updateProjectSummary = function updateProjectSummary(workspace, hasProjects, agentOnline = state.codexAgentOnline) {
+    if (workspace) {
+      elements.projectPickerLabel.textContent = app.workspaceDirectoryName(workspace);
+      elements.projectPickerMeta.textContent = "";
+      return;
+    }
+    elements.projectPickerLabel.textContent = hasProjects ? "选择工程" : agentOnline ? "还没有工程" : "等待桌面 agent";
+    elements.projectPickerMeta.textContent = hasProjects
+      ? `已同步 ${state.codexWorkspaces.length} 个项目。`
+      : agentOnline
+        ? "可以新建工程，或去桌面端添加允许的项目。"
+        : "桌面端启动后会同步可切换项目。";
+  };
+
   app.renderProjectPicker = function renderProjectPicker(agentOnline) {
     const selectedWorkspace = state.codexWorkspaces.find((workspace) => workspace.id === elements.codexProject.value) || null;
     const hasProjects = state.codexWorkspaces.length > 0;
-    elements.projectSidebarCard.classList.toggle("empty", !selectedWorkspace);
+    app.updateProjectSummary(selectedWorkspace, hasProjects, agentOnline);
     app.updateProjectCreateControls();
 
     if (!hasProjects) {
-      elements.projectPickerLabel.textContent = agentOnline ? "还没有工程" : "等待桌面 agent";
-      elements.projectPickerMeta.textContent = agentOnline
-        ? "可以新建工程，或去桌面端添加允许的项目。"
-        : "桌面端启动后会同步可切换项目。";
       elements.projectSheetStatus.textContent = "";
       app.renderProjectSheetList();
       app.refreshActiveSessionHeader();
       app.refreshTopbarProjectChip();
       return;
-    }
-
-    if (selectedWorkspace) {
-      const directoryName = app.workspaceDirectoryName(selectedWorkspace);
-      elements.projectPickerLabel.textContent = directoryName;
-      elements.projectPickerMeta.textContent = app.workspaceLabel(selectedWorkspace);
-    } else {
-      elements.projectPickerLabel.textContent = "选择工程";
-      elements.projectPickerMeta.textContent = `已同步 ${state.codexWorkspaces.length} 个项目。`;
     }
 
     elements.projectSheetStatus.textContent = "";
@@ -1164,6 +1170,8 @@ export function installCodex(app) {
   };
 
   app.renderProjectSheetList = function renderProjectSheetList() {
+    const sessionList = elements.codexJobs;
+    if (sessionList && elements.projectSheetList.contains(sessionList)) sessionList.remove();
     elements.projectSheetList.innerHTML = "";
     if (!state.codexWorkspaces.length) {
       elements.projectSheetList.innerHTML = '<div class="project-sheet-empty">暂时没有可切换工程。</div>';
@@ -1171,29 +1179,41 @@ export function installCodex(app) {
     }
 
     for (const workspace of state.codexWorkspaces) {
+      const group = document.createElement("div");
       const button = document.createElement("button");
       const isActive = workspace.id === elements.codexProject.value;
       const directoryName = app.workspaceDirectoryName(workspace);
       const secondaryLabel = workspace.label && workspace.label !== directoryName ? workspace.label : app.workspaceSecondaryLabel(workspace);
       const pathLabel = app.workspacePathLabel(workspace) || app.workspaceMeta(workspace);
+      group.className = "project-tree-group";
+      group.classList.toggle("active", isActive);
       button.type = "button";
-      button.className = "project-option";
+      button.className = "project-option project-tree-project";
       button.dataset.projectId = workspace.id || "";
       button.title = pathLabel;
       button.setAttribute("role", "option");
       button.setAttribute("aria-selected", isActive ? "true" : "false");
       button.classList.toggle("active", isActive);
       button.innerHTML = `
+        <span class="project-option-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24">
+            <path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-9Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.7" />
+          </svg>
+        </span>
         <div class="project-option-main">
           <div class="project-option-title-row">
             <strong>${app.escapeHtml(directoryName)}</strong>
-            ${isActive ? '<span class="project-option-badge">当前</span>' : ""}
           </div>
           ${secondaryLabel ? `<span class="project-option-id">${app.escapeHtml(secondaryLabel)}</span>` : ""}
         </div>
       `;
       button.addEventListener("click", () => app.selectProject(workspace.id));
-      elements.projectSheetList.append(button);
+      group.append(button);
+      if (isActive && sessionList) {
+        sessionList.classList.add("project-session-list");
+        group.append(sessionList);
+      }
+      elements.projectSheetList.append(group);
     }
   };
 
@@ -1222,6 +1242,7 @@ export function installCodex(app) {
       app.closeCodexSessionStream?.();
       app.applyRuntimeDraft(state.runtimePreferences, { persist: false, dirty: false });
       app.renderEmptySessionDetail({ title: "切换工程", body: "正在打开这个工程的最近会话。" });
+      elements.codexJobs.innerHTML = '<div class="empty-state">正在加载会话...</div>';
     }
     app.syncProjectPicker();
     app.updateComposerAvailability();
@@ -1243,15 +1264,8 @@ export function installCodex(app) {
 
   app.syncProjectPicker = function syncProjectPicker() {
     const workspace = state.codexWorkspaces.find((item) => item.id === elements.codexProject.value);
-    if (workspace) {
-      const directoryName = app.workspaceDirectoryName(workspace);
-      elements.projectPickerLabel.textContent = directoryName;
-      elements.projectPickerMeta.textContent = app.workspaceLabel(workspace);
-    } else {
-      elements.projectPickerLabel.textContent = "选择工程";
-      elements.projectPickerMeta.textContent = `已同步 ${state.codexWorkspaces.length} 个项目。`;
-    }
-    elements.projectSidebarCard.classList.toggle("empty", !workspace);
+    const hasProjects = state.codexWorkspaces.length > 0;
+    app.updateProjectSummary(workspace, hasProjects);
     app.refreshTopbarProjectChip();
     app.renderProjectSheetList();
     app.refreshActiveSessionHeader();

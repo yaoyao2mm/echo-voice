@@ -64,50 +64,6 @@
               />
             </svg>
           </button>
-          <section id="fileBrowserPanel" class="file-browser-panel" role="dialog" aria-label="文件浏览" hidden>
-            <div class="file-browser-head">
-              <div>
-                <strong id="fileBrowserTitle">文件</strong>
-                <span id="fileBrowserMeta">当前工程</span>
-              </div>
-              <button
-                id="fileBrowserRefreshButton"
-                class="icon-button file-browser-refresh"
-                type="button"
-                aria-label="刷新目录"
-                title="刷新目录"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path
-                    d="M20 6v5h-5M4 18v-5h5M18.1 9a6.5 6.5 0 0 0-11-2.5L4 9.5M5.9 15a6.5 6.5 0 0 0 11 2.5L20 14.5"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="1.8"
-                  />
-                </svg>
-              </button>
-            </div>
-            <div id="fileBrowserBreadcrumbs" class="file-browser-breadcrumbs" aria-label="路径"></div>
-            <div id="fileBrowserStatus" class="file-browser-status" role="status"></div>
-            <div id="fileBrowserList" class="file-browser-list"></div>
-            <section id="filePreview" class="file-preview" aria-label="文件预览" hidden>
-              <div class="file-preview-head">
-                <div>
-                  <strong id="filePreviewTitle">预览</strong>
-                  <span id="filePreviewMeta"></span>
-                </div>
-                <div class="file-preview-actions">
-                  <button id="filePreviewInsertButton" class="secondary compact-action" type="button">引用路径</button>
-                  <button id="filePreviewCloseButton" class="icon-button file-preview-close" type="button" aria-label="关闭预览" title="关闭预览">
-                    x
-                  </button>
-                </div>
-              </div>
-              <pre id="filePreviewContent" class="file-preview-content"></pre>
-            </section>
-          </section>
         </div>
         <div id="quickSkills" class="topbar-quick-skills" data-authenticated hidden>
           <button
@@ -214,65 +170,109 @@
 
       <section id="codexView" class="codex-section" data-authenticated hidden>
         <button id="sessionBackdrop" class="session-backdrop" type="button" aria-label="关闭会话列表" hidden></button>
-        <aside id="codexSessionSidebar" class="session-sidebar" aria-label="Codex 会话">
-          <div class="sidebar-head">
-            <strong>对话</strong>
-            <div class="sidebar-head-actions">
+        <section id="fileBrowserPanel" class="file-browser-panel" role="dialog" aria-label="代码浏览" hidden>
+          <div class="file-browser-head">
+            <div>
+              <strong id="fileBrowserTitle">文件</strong>
+              <span id="fileBrowserMeta">当前工程</span>
+            </div>
+            <div class="file-browser-head-actions">
               <button
-                id="newCodexSessionButton"
-                class="icon-button sidebar-add-button"
+                id="fileBrowserRefreshButton"
+                class="icon-button file-browser-refresh"
                 type="button"
-                aria-label="新话题"
-                title="新话题"
+                aria-label="刷新目录"
+                title="刷新目录"
               >
-                +
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M20 6v5h-5M4 18v-5h5M18.1 9a6.5 6.5 0 0 0-11-2.5L4 9.5M5.9 15a6.5 6.5 0 0 0 11 2.5L20 14.5"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="1.8"
+                  />
+                </svg>
+              </button>
+              <button
+                id="fileBrowserCloseButton"
+                class="icon-button file-browser-close"
+                type="button"
+                aria-label="关闭文件浏览"
+                title="关闭文件浏览"
+              >
+                x
               </button>
             </div>
           </div>
-          <section id="projectSwitcher" class="sidebar-panel sidebar-panel-project" data-authenticated hidden>
-            <div class="sidebar-panel-head">
-              <strong>工程</strong>
-              <button
-                id="newProjectButton"
-                class="icon-button sidebar-project-add"
-                type="button"
-                aria-label="新建工程"
-                title="新建工程"
-              >
-                +
-              </button>
-            </div>
-            <div id="projectSidebarCard" class="project-sidebar-card">
-              <div class="project-switcher-current">
-                <span class="project-switcher-kicker">当前</span>
-                <strong id="projectPickerLabel" class="project-picker-label">等待桌面 agent</strong>
-                <span id="projectPickerMeta" class="project-picker-meta">桌面端启动后会同步可切换项目。</span>
+          <div id="fileBrowserBreadcrumbs" class="file-browser-breadcrumbs" aria-label="路径"></div>
+          <div id="fileBrowserStatus" class="file-browser-status" role="status"></div>
+          <div id="fileBrowserList" class="file-browser-list"></div>
+          <section id="filePreview" class="file-preview" aria-label="文件预览" hidden>
+            <div class="file-preview-head">
+              <div>
+                <strong id="filePreviewTitle">预览</strong>
+                <span id="filePreviewMeta"></span>
+              </div>
+              <div class="file-preview-actions">
+                <button id="filePreviewInsertButton" class="secondary compact-action" type="button">引用路径</button>
+                <button id="filePreviewCloseButton" class="icon-button file-preview-close" type="button" aria-label="返回文件列表" title="返回文件列表">
+                  x
+                </button>
               </div>
             </div>
+            <pre id="filePreviewContent" class="file-preview-content"></pre>
+          </section>
+        </section>
+        <aside id="codexSessionSidebar" class="session-sidebar" aria-label="Codex 会话">
+          <div class="sidebar-head">
+            <button
+              id="newCodexSessionButton"
+              class="sidebar-primary-action"
+              type="button"
+              aria-label="新对话"
+              title="新对话"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4L16.5 3.5Z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.8"
+                />
+              </svg>
+              <span>新对话</span>
+            </button>
+          </div>
+          <section id="projectSwitcher" class="sidebar-panel sidebar-panel-project" data-authenticated hidden>
+            <div class="sidebar-panel-head">
+              <strong>项目</strong>
+            </div>
+            <span id="projectPickerLabel" class="sr-only">等待桌面 agent</span>
+            <p id="projectPickerMeta" class="sidebar-panel-note">桌面端启动后会同步可切换项目。</p>
+            <div class="sidebar-tools project-session-tools">
+              <div class="session-filter" role="tablist" aria-label="会话筛选">
+                <button id="showActiveSessionsButton" class="active" type="button">最近</button>
+                <button id="showArchivedSessionsButton" type="button">归档</button>
+              </div>
+            </div>
+            <div class="sidebar-status project-session-status">
+              <strong id="codexStatusText">等待桌面 agent</strong>
+              <p id="codexQueueMeta" class="codex-runtime"></p>
+            </div>
+            <div id="projectSheetList" class="project-sheet-list sidebar-project-list" role="listbox" aria-label="项目列表"></div>
+            <div id="codexJobs" class="codex-jobs"></div>
             <form id="projectCreateForm" class="project-create-form" hidden>
               <label class="sr-only" for="projectCreateName">新工程名称</label>
               <input id="projectCreateName" type="text" autocomplete="off" maxlength="80" placeholder="新工程名" />
               <button id="projectCreateSubmit" class="project-create-submit" type="submit">创建</button>
             </form>
             <p id="projectSheetStatus" class="sidebar-panel-note"></p>
-            <div id="projectSheetList" class="project-sheet-list sidebar-project-list" role="listbox" aria-label="项目列表"></div>
+            <button id="newProjectButton" class="project-create-trigger" type="button">新建项目</button>
             <select id="codexProject" class="sr-only" tabindex="-1" aria-hidden="true"></select>
-          </section>
-          <section class="sidebar-panel sidebar-panel-conversations">
-            <div class="sidebar-panel-head">
-              <strong>会话</strong>
-            </div>
-            <div class="sidebar-tools">
-              <div class="session-filter" role="tablist" aria-label="会话筛选">
-                <button id="showActiveSessionsButton" class="active" type="button">最近</button>
-                <button id="showArchivedSessionsButton" type="button">归档</button>
-              </div>
-            </div>
-            <div class="sidebar-status">
-              <strong id="codexStatusText">等待桌面 agent</strong>
-              <p id="codexQueueMeta" class="codex-runtime"></p>
-            </div>
-            <div id="codexJobs" class="codex-jobs"></div>
           </section>
 
           <section class="sidebar-panel sidebar-panel-appearance">

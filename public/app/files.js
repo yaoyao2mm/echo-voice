@@ -13,11 +13,21 @@ export function installFiles(app) {
 
   app.openFileBrowser = async function openFileBrowser() {
     if (!elements.fileBrowserPanel) return;
+    if (elements.codexView?.classList.contains("sessions-open")) app.closeSessionSidebar?.({ restoreFocus: false });
     app.closeProjectSwitcher?.();
     app.closeQuickSkillsPanel?.();
     app.setTopbarCollapsed(false);
+    if (state.fileBrowserCloseTimer) {
+      windowRef.clearTimeout(state.fileBrowserCloseTimer);
+      state.fileBrowserCloseTimer = null;
+    }
     elements.fileBrowserPanel.hidden = false;
     elements.fileBrowserButton?.setAttribute("aria-expanded", "true");
+    elements.sessionBackdrop.hidden = false;
+    elements.sessionBackdrop.dataset.layer = "files";
+    elements.sessionBackdrop.setAttribute("aria-label", "关闭代码浏览");
+    elements.fileBrowserPanel.getBoundingClientRect();
+    elements.codexView?.classList.add("files-open");
 
     const projectId = app.currentProjectId();
     const projectChanged = state.fileBrowserProjectId !== projectId;
@@ -33,8 +43,16 @@ export function installFiles(app) {
 
   app.closeFileBrowser = function closeFileBrowser({ restoreFocus = false } = {}) {
     if (!elements.fileBrowserPanel || elements.fileBrowserPanel.hidden) return;
-    elements.fileBrowserPanel.hidden = true;
     elements.fileBrowserButton?.setAttribute("aria-expanded", "false");
+    elements.codexView?.classList.remove("files-open");
+    elements.sessionBackdrop.hidden = true;
+    delete elements.sessionBackdrop.dataset.layer;
+    elements.sessionBackdrop.setAttribute("aria-label", "关闭会话列表");
+    if (state.fileBrowserCloseTimer) windowRef.clearTimeout(state.fileBrowserCloseTimer);
+    state.fileBrowserCloseTimer = windowRef.setTimeout(() => {
+      state.fileBrowserCloseTimer = null;
+      if (!elements.codexView?.classList.contains("files-open")) elements.fileBrowserPanel.hidden = true;
+    }, 220);
     if (restoreFocus) elements.fileBrowserButton?.focus({ preventScroll: true });
   };
 
@@ -177,6 +195,8 @@ export function installFiles(app) {
     const workspace = state.codexWorkspaces.find((item) => item.id === app.currentProjectId()) || null;
     const tree = state.fileBrowserTree;
     const title = workspace ? app.workspaceDirectoryName(workspace) : "文件";
+    elements.fileBrowserPanel.classList.toggle("has-preview", Boolean(state.filePreview));
+    elements.fileBrowserPanel.classList.toggle("is-busy", Boolean(state.fileBrowserBusy));
     elements.fileBrowserTitle.textContent = title;
     elements.fileBrowserMeta.textContent = workspace ? app.workspaceLabel(workspace) : "等待桌面 agent";
     elements.fileBrowserRefreshButton.disabled = state.fileBrowserBusy || !app.codexCommandsAvailable();
@@ -340,9 +360,6 @@ export function installFiles(app) {
   const previousHandleDocumentClick = app.handleDocumentClick;
   app.handleDocumentClick = function handleDocumentClickWithFiles(event) {
     previousHandleDocumentClick?.(event);
-    if (elements.fileBrowser && !elements.fileBrowserPanel?.hidden && !elements.fileBrowser.contains(event.target)) {
-      app.closeFileBrowser();
-    }
   };
 
   const previousHandleGlobalKeydown = app.handleGlobalKeydown;
@@ -372,6 +389,7 @@ export function installFiles(app) {
 
   elements.fileBrowserButton?.addEventListener("click", app.toggleFileBrowser);
   elements.fileBrowserRefreshButton?.addEventListener("click", app.refreshFileBrowser);
+  elements.fileBrowserCloseButton?.addEventListener("click", () => app.closeFileBrowser({ restoreFocus: true }));
   elements.filePreviewCloseButton?.addEventListener("click", app.closeFilePreview);
   elements.filePreviewInsertButton?.addEventListener("click", app.insertFilePreviewPath);
 

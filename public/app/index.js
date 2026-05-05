@@ -40,7 +40,13 @@ export function createApp(windowRef = window, documentRef = document) {
     elements.composerPlanModeButton?.addEventListener("click", app.toggleComposerPlanMode);
     elements.compactContextButton?.addEventListener("click", () => app.requestContextCompaction({ automatic: false }));
     elements.toggleSessionsButton.addEventListener("click", app.toggleSessionSidebar);
-    elements.sessionBackdrop.addEventListener("click", app.closeSessionSidebar);
+    elements.sessionBackdrop.addEventListener("click", () => {
+      if (elements.codexView.classList.contains("files-open")) {
+        app.closeFileBrowser?.({ restoreFocus: false });
+        return;
+      }
+      app.closeSessionSidebar();
+    });
     elements.newProjectButton?.addEventListener("click", app.toggleProjectCreateForm);
     elements.projectCreateForm?.addEventListener("submit", app.createProjectFromMobile);
     elements.showActiveSessionsButton.addEventListener("click", () => app.setSessionArchiveView(false));

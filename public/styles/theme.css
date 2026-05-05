@@ -185,6 +185,10 @@
   background: rgba(17, 21, 27, 0.98);
 }
 
+:root[data-theme="dark"] .project-sheet-list.sidebar-project-list {
+  background: transparent;
+}
+
 :root[data-theme="dark"] .sidebar-head,
 :root[data-theme="dark"] .sidebar-panel + .sidebar-panel,
 :root[data-theme="dark"] .conversation-item,
@@ -225,6 +229,11 @@
   box-shadow: inset 2px 0 0 rgba(143, 164, 232, 0.82);
 }
 
+:root[data-theme="dark"] .codex-jobs.project-session-list .conversation-item.active {
+  background: rgba(139, 154, 174, 0.14);
+  box-shadow: none;
+}
+
 :root[data-theme="dark"] .conversation-item:hover,
 :root[data-theme="dark"] .project-option:hover,
 :root[data-theme="dark"] .sidebar-add-button:hover,
@@ -233,6 +242,12 @@
 :root[data-theme="dark"] .sidebar-section-toggle:focus-visible,
 :root[data-theme="dark"] .sidebar-section-toggle[aria-expanded="true"] {
   background: rgba(139, 154, 174, 0.1);
+}
+
+:root[data-theme="dark"] .project-tree-project.project-option:hover,
+:root[data-theme="dark"] .project-tree-project.project-option.active {
+  background: transparent;
+  box-shadow: none;
 }
 
 :root[data-theme="dark"] .theme-switch {
