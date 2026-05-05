@@ -202,7 +202,7 @@
 .session-sidebar {
   top: calc(var(--topbar-height, 72px) + 8px);
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
   gap: 0;
   min-height: calc(var(--app-height) - var(--topbar-height, 72px) - 20px);
   max-height: calc(var(--app-height) - var(--topbar-height, 72px) - 20px);
@@ -602,27 +602,6 @@
     padding-bottom: 6px;
     padding-left: max(8px, var(--safe-left));
     padding-right: max(8px, var(--safe-right));
-  }
-
-  body.mobile-ui .topbar-project-switcher {
-    flex: 0 1 108px;
-    min-width: 78px;
-    max-width: 112px;
-  }
-
-  body.mobile-ui .topbar-project-chip {
-    min-width: 0;
-    min-height: 34px;
-    justify-content: flex-start;
-  }
-
-  body.mobile-ui .project-switcher-panel {
-    position: fixed;
-    top: calc(var(--safe-top) + 48px);
-    left: max(8px, var(--safe-left));
-    right: max(8px, var(--safe-right));
-    width: auto;
-    max-height: min(430px, calc(var(--app-height) - var(--safe-top) - 64px));
   }
 
   body.mobile-ui .topbar-brand-copy p {

@@ -41,7 +41,6 @@ export function createApp(windowRef = window, documentRef = document) {
     elements.compactContextButton?.addEventListener("click", () => app.requestContextCompaction({ automatic: false }));
     elements.toggleSessionsButton.addEventListener("click", app.toggleSessionSidebar);
     elements.sessionBackdrop.addEventListener("click", app.closeSessionSidebar);
-    elements.projectSwitcherButton?.addEventListener("click", app.toggleProjectSwitcher);
     elements.newProjectButton?.addEventListener("click", app.toggleProjectCreateForm);
     elements.projectCreateForm?.addEventListener("submit", app.createProjectFromMobile);
     elements.showActiveSessionsButton.addEventListener("click", () => app.setSessionArchiveView(false));

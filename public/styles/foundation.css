@@ -154,86 +154,6 @@ button:disabled {
   max-width: 58%;
 }
 
-.topbar-project-switcher {
-  position: relative;
-  flex: 0 1 136px;
-  min-width: 88px;
-  max-width: 150px;
-  margin-left: 0;
-}
-
-.topbar-project-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 7px;
-  width: 100%;
-  min-width: 0;
-  height: 34px;
-  min-height: 34px;
-  border: 1px solid rgba(126, 106, 84, 0.12);
-  border-radius: 999px;
-  background: rgba(255, 252, 247, 0.78);
-  color: var(--ink);
-  padding: 0 11px;
-  overflow: hidden;
-}
-
-.topbar-project-chip:hover,
-.topbar-project-chip:focus-visible,
-.topbar-project-chip[aria-expanded="true"] {
-  background: rgba(23, 20, 17, 0.06);
-}
-
-.topbar-project-icon {
-  flex: 0 0 auto;
-  width: 15px;
-  height: 15px;
-  color: var(--muted);
-}
-
-.topbar-project-chip strong {
-  display: block;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  line-height: 1.2;
-}
-
-.project-switcher-panel {
-  position: absolute;
-  top: calc(100% + 10px);
-  left: 0;
-  z-index: 70;
-  display: grid;
-  gap: 10px;
-  width: min(320px, calc(100vw - 28px));
-  max-height: min(460px, calc(var(--app-height) - var(--safe-top) - 92px));
-  overflow: auto;
-  border: 1px solid rgba(126, 106, 84, 0.14);
-  border-radius: 18px;
-  background: rgba(255, 252, 247, 0.98);
-  box-shadow: 0 24px 54px rgba(23, 20, 17, 0.16);
-  padding: 10px;
-}
-
-.project-switcher-panel[hidden] {
-  display: none !important;
-}
-
-.project-switcher-panel .project-sidebar-card {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  padding: 0;
-}
-
 .project-switcher-current {
   display: grid;
   gap: 2px;
@@ -247,92 +167,6 @@ button:disabled {
   letter-spacing: 0.08em;
   line-height: 1.2;
   text-transform: uppercase;
-}
-
-.project-switcher-panel .project-picker-label {
-  display: block;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 14px;
-  line-height: 1.25;
-}
-
-.project-switcher-panel .project-picker-meta {
-  display: block;
-  min-width: 0;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.35;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.project-switcher-panel .project-create-form {
-  padding: 0;
-}
-
-.project-switcher-panel .project-sheet-list.sidebar-project-list {
-  display: grid;
-  gap: 0;
-  max-height: min(260px, 38vh);
-  overflow: auto;
-  padding: 0;
-}
-
-.project-switcher-panel .project-sheet-empty {
-  border: 0;
-  border-top: 1px dashed rgba(126, 106, 84, 0.14);
-  border-radius: 0;
-  background: transparent;
-  padding: 12px 0;
-}
-
-.project-switcher-panel .project-option {
-  border: 0;
-  border-top: 1px solid rgba(126, 106, 84, 0.08);
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  padding: 10px 0;
-}
-
-.project-switcher-panel .project-option:hover,
-.project-switcher-panel .project-option:focus-visible,
-.project-switcher-panel .project-option.active {
-  border-color: rgba(126, 106, 84, 0.12);
-  background: rgba(23, 20, 17, 0.03);
-  box-shadow: none;
-}
-
-.project-switcher-panel .project-option-main {
-  gap: 2px;
-}
-
-.project-switcher-panel .project-option-title-row {
-  align-items: center;
-}
-
-.project-switcher-panel .project-option-title-row strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  overflow-wrap: normal;
-  font-size: 13px;
-}
-
-.project-switcher-panel .project-option-id {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-}
-
-.project-switcher-panel .project-option-badge {
-  padding: 2px 7px;
-  font-size: 10px;
 }
 
 h1 {
@@ -617,7 +451,7 @@ textarea:focus {
   position: sticky;
   top: calc(var(--safe-top) + 74px);
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto auto;
   min-height: min(620px, calc(var(--app-height) - var(--safe-top) - 96px));
   max-height: calc(var(--app-height) - var(--safe-top) - 96px);
   overflow: hidden;
@@ -1915,6 +1749,7 @@ body {
 
 .project-sidebar-card {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
   border: 1px solid rgba(197, 106, 45, 0.16);
   border-radius: 22px;

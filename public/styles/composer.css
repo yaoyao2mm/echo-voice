@@ -16,23 +16,6 @@
   background: rgba(23, 20, 17, 0.06);
 }
 
-.project-sidebar-card {
-  display: grid;
-  gap: 4px;
-  padding: 2px 0 6px;
-}
-
-.project-picker-label {
-  font-size: 13px;
-  line-height: 1.35;
-}
-
-.project-picker-meta {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
 .sidebar-user-card {
   display: grid;
   gap: 10px;
@@ -757,11 +740,6 @@ body.topbar-collapsed .topbar {
     grid-template-columns: 1fr;
   }
 
-  .topbar-project-switcher {
-    flex-basis: 118px;
-    max-width: 128px;
-  }
-
   .composer {
     bottom: 0;
     border-radius: 0;
@@ -775,12 +753,6 @@ body.topbar-collapsed .topbar {
 @media (max-width: 480px) {
   .topbar {
     gap: 10px;
-  }
-
-  .topbar-project-switcher {
-    flex-basis: 108px;
-    min-width: 78px;
-    max-width: 112px;
   }
 
   .composer-statusbar {
@@ -816,17 +788,6 @@ body.topbar-collapsed .topbar {
   .codex-submit {
     min-height: 34px;
     padding: 0 6px;
-    font-size: 12px;
-  }
-
-  .topbar-project-chip {
-    gap: 6px;
-    padding-left: 9px;
-    padding-right: 9px;
-  }
-
-  .topbar-project-chip strong {
-    max-width: 100%;
     font-size: 12px;
   }
 

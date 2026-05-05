@@ -225,40 +225,25 @@ export function installCodex(app) {
   };
 
   app.openProjectSwitcher = function openProjectSwitcher() {
-    if (!elements.projectSwitcherPanel) return;
     app.closeQuickSkillsPanel?.();
     app.setTopbarCollapsed(false);
-    elements.projectSwitcherPanel.hidden = false;
-    elements.projectSwitcherButton?.setAttribute("aria-expanded", "true");
     app.renderProjectSheetList();
     app.updateProjectCreateControls();
   };
 
-  app.closeProjectSwitcher = function closeProjectSwitcher({ restoreFocus = false } = {}) {
-    if (!elements.projectSwitcherPanel || elements.projectSwitcherPanel.hidden) return;
-    elements.projectSwitcherPanel.hidden = true;
-    elements.projectSwitcherButton?.setAttribute("aria-expanded", "false");
+  app.closeProjectSwitcher = function closeProjectSwitcher() {
     if (!state.projectCreateBusy && elements.projectCreateForm) {
       elements.projectCreateForm.hidden = true;
       if (elements.projectSheetStatus) elements.projectSheetStatus.textContent = "";
     }
-    if (restoreFocus) elements.projectSwitcherButton?.focus({ preventScroll: true });
   };
 
   app.toggleProjectSwitcher = function toggleProjectSwitcher(event) {
     event?.stopPropagation();
-    if (!elements.projectSwitcherPanel) return;
-    if (elements.projectSwitcherPanel.hidden) {
-      app.openProjectSwitcher();
-      return;
-    }
-    app.closeProjectSwitcher({ restoreFocus: true });
+    app.openProjectSwitcher();
   };
 
   app.handleDocumentClick = function handleDocumentClick(event) {
-    if (elements.projectSwitcher && !elements.projectSwitcherPanel?.hidden && !elements.projectSwitcher.contains(event.target)) {
-      app.closeProjectSwitcher();
-    }
     if (elements.quickSkills && !elements.quickSkillsPanel?.hidden && !elements.quickSkills.contains(event.target)) {
       app.closeQuickSkillsPanel();
     }
@@ -1156,7 +1141,6 @@ export function installCodex(app) {
       elements.projectPickerMeta.textContent = agentOnline
         ? "可以新建工程，或去桌面端添加允许的项目。"
         : "桌面端启动后会同步可切换项目。";
-      elements.composerProjectLabel.textContent = agentOnline ? "无工程" : "等待";
       elements.projectSheetStatus.textContent = "";
       app.renderProjectSheetList();
       app.refreshActiveSessionHeader();
@@ -1168,11 +1152,9 @@ export function installCodex(app) {
       const directoryName = app.workspaceDirectoryName(selectedWorkspace);
       elements.projectPickerLabel.textContent = directoryName;
       elements.projectPickerMeta.textContent = app.workspaceLabel(selectedWorkspace);
-      elements.composerProjectLabel.textContent = directoryName;
     } else {
       elements.projectPickerLabel.textContent = "选择工程";
       elements.projectPickerMeta.textContent = `已同步 ${state.codexWorkspaces.length} 个项目。`;
-      elements.composerProjectLabel.textContent = elements.projectPickerLabel.textContent;
     }
 
     elements.projectSheetStatus.textContent = "";
@@ -1222,11 +1204,6 @@ export function installCodex(app) {
       app.closeQuickSkillsPanel({ restoreFocus: true });
       return;
     }
-    if (elements.projectSwitcherPanel && !elements.projectSwitcherPanel.hidden) {
-      event.preventDefault();
-      app.closeProjectSwitcher({ restoreFocus: true });
-      return;
-    }
     if (elements.codexView.classList.contains("sessions-open")) {
       event.preventDefault();
       app.closeSessionSidebar();
@@ -1270,9 +1247,9 @@ export function installCodex(app) {
       const directoryName = app.workspaceDirectoryName(workspace);
       elements.projectPickerLabel.textContent = directoryName;
       elements.projectPickerMeta.textContent = app.workspaceLabel(workspace);
-      elements.composerProjectLabel.textContent = directoryName;
     } else {
-      elements.composerProjectLabel.textContent = elements.projectPickerLabel.textContent;
+      elements.projectPickerLabel.textContent = "选择工程";
+      elements.projectPickerMeta.textContent = `已同步 ${state.codexWorkspaces.length} 个项目。`;
     }
     elements.projectSidebarCard.classList.toggle("empty", !workspace);
     app.refreshTopbarProjectChip();

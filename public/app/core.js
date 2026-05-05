@@ -722,13 +722,12 @@ export function installCore(app) {
     return /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(String(value || ""));
   };
 
-  app.refreshTopbarProjectChip = function refreshTopbarProjectChip() {
-    if (!elements.topbarProjectChip || !elements.projectSwitcher) return;
-    const label = String(elements.composerProjectLabel?.textContent || "").trim();
-    const hide = !app.isLoggedIn() || !state.token || !label;
-    elements.projectSwitcher.hidden = hide;
-    elements.topbarProjectChip.title = label ? `当前工程：${label}` : "切换工程";
+  app.refreshProjectSwitcherVisibility = function refreshProjectSwitcherVisibility() {
+    if (!elements.projectSwitcher) return;
+    elements.projectSwitcher.hidden = !app.isLoggedIn() || !state.token;
   };
+
+  app.refreshTopbarProjectChip = app.refreshProjectSwitcherVisibility;
 
   app.formatRelativeTime = function formatRelativeTime(value) {
     if (!value) return "刚刚";
@@ -1093,15 +1092,11 @@ function queryElements(documentRef) {
     sidebarUserToggle: documentRef.querySelector("#sidebarUserToggle"),
     sidebarUserBody: documentRef.querySelector("#sidebarUserBody"),
     projectSwitcher: documentRef.querySelector("#projectSwitcher"),
-    projectSwitcherButton: documentRef.querySelector("#projectSwitcherButton"),
-    projectSwitcherPanel: documentRef.querySelector("#projectSwitcherPanel"),
-    topbarProjectChip: documentRef.querySelector("#projectSwitcherButton"),
     sidebarUserMeta: documentRef.querySelector("#sidebarUserMeta"),
     codexProject: documentRef.querySelector("#codexProject"),
     codexPermissionMode: documentRef.querySelector("#codexPermissionMode"),
     codexModel: documentRef.querySelector("#codexModel"),
     codexReasoningEffort: documentRef.querySelector("#codexReasoningEffort"),
-    composerProjectLabel: documentRef.querySelector("#composerProjectLabel"),
     composerAttachmentButton: documentRef.querySelector("#composerAttachmentButton"),
     composerAttachmentInput: documentRef.querySelector("#composerAttachmentInput"),
     composerAttachmentTray: documentRef.querySelector("#composerAttachmentTray"),
