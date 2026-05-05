@@ -171,6 +171,31 @@
   border-color: rgba(139, 154, 174, 0.12);
 }
 
+@media (max-width: 760px) {
+  :root[data-theme="dark"] body.mobile-ui .file-browser-panel {
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  :root[data-theme="dark"] body.mobile-ui .file-browser-panel::before {
+    border-left-color: rgba(139, 154, 174, 0.1);
+    background: rgba(10, 13, 18, 0.72);
+    box-shadow: inset 10px 0 18px rgba(0, 0, 0, 0.16);
+  }
+
+  :root[data-theme="dark"] body.mobile-ui .file-browser-panel::after {
+    border-left-color: rgba(139, 154, 174, 0.13);
+    background: rgba(17, 21, 27, 0.985);
+    box-shadow: -9px 0 20px rgba(0, 0, 0, 0.22);
+  }
+
+  :root[data-theme="dark"] body.mobile-ui .codex-section.sessions-open .codex-main,
+  :root[data-theme="dark"] body.mobile-ui .codex-section.files-open .codex-main {
+    background: rgb(13, 16, 20);
+  }
+}
+
 :root[data-theme="dark"] .quick-skill-edit {
   border-left-color: rgba(139, 154, 174, 0.14);
   background: rgba(13, 16, 20, 0.36);
