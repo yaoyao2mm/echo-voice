@@ -230,7 +230,12 @@ export function installCore(app) {
     const currentY = app.currentTopbarScrollY();
     const delta = currentY - state.lastTopbarScrollY;
     state.lastTopbarScrollY = currentY;
-    if (options.forceVisible || currentY <= 8 || elements.codexView.classList.contains("sessions-open")) {
+    if (
+      options.forceVisible ||
+      currentY <= 8 ||
+      elements.codexView.classList.contains("sessions-open") ||
+      elements.codexView.classList.contains("files-open")
+    ) {
       state.topbarScrollAccumulator = 0;
       app.setTopbarCollapsed(false);
       return;

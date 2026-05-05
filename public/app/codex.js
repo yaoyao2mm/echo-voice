@@ -271,7 +271,10 @@ export function installCodex(app) {
   };
 
   app.syncBodySheetState = function syncBodySheetState() {
-    document.body.classList.toggle("sheet-open", elements.codexView.classList.contains("sessions-open"));
+    document.body.classList.toggle(
+      "sheet-open",
+      elements.codexView.classList.contains("sessions-open") || elements.codexView.classList.contains("files-open")
+    );
   };
 
   app.toggleSidebarUserMenu = function toggleSidebarUserMenu() {

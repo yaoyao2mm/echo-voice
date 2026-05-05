@@ -28,6 +28,7 @@ export function installFiles(app) {
     elements.sessionBackdrop.setAttribute("aria-label", "关闭代码浏览");
     elements.fileBrowserPanel.getBoundingClientRect();
     elements.codexView?.classList.add("files-open");
+    app.syncBodySheetState?.();
 
     const projectId = app.currentProjectId();
     const projectChanged = state.fileBrowserProjectId !== projectId;
@@ -45,6 +46,7 @@ export function installFiles(app) {
     if (!elements.fileBrowserPanel || elements.fileBrowserPanel.hidden) return;
     elements.fileBrowserButton?.setAttribute("aria-expanded", "false");
     elements.codexView?.classList.remove("files-open");
+    app.syncBodySheetState?.();
     elements.sessionBackdrop.hidden = true;
     delete elements.sessionBackdrop.dataset.layer;
     elements.sessionBackdrop.setAttribute("aria-label", "关闭会话列表");

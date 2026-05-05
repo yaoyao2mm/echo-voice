@@ -1061,7 +1061,11 @@
   body.mobile-ui .codex-section {
     --mobile-side-layer-width: min(88vw, 344px);
     --mobile-side-layer-shift: calc(var(--mobile-side-layer-width) - 44px);
-    perspective: 1200px;
+    position: relative;
+    height: calc(var(--app-height) - var(--mobile-frame-top, var(--topbar-height, 72px)));
+    min-height: 0;
+    overflow: hidden;
+    isolation: isolate;
   }
 
   body.mobile-ui .codex-main {
@@ -1077,20 +1081,29 @@
   }
 
   body.mobile-ui .session-sidebar {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
     z-index: 30;
     width: var(--mobile-side-layer-width);
+    height: 100%;
+    max-height: none;
     transform: translate3d(calc(-100% - 10px), 0, 0);
     transition: transform 240ms cubic-bezier(0.22, 0.72, 0.22, 1);
     box-shadow: 12px 0 28px rgba(23, 20, 17, 0.08);
   }
 
   body.mobile-ui .file-browser-panel {
-    top: calc(var(--visual-viewport-top, 0px) + var(--mobile-frame-top, var(--topbar-height, 72px)));
+    position: absolute;
+    top: 0;
     right: 0;
     bottom: 0;
     z-index: 30;
     width: var(--mobile-side-layer-width);
     min-width: 0;
+    height: 100%;
+    max-height: none;
     transform: translate3d(calc(100% + 10px), 0, 0);
     transition: transform 240ms cubic-bezier(0.22, 0.72, 0.22, 1);
     box-shadow: -12px 0 28px rgba(23, 20, 17, 0.07);
@@ -1124,8 +1137,11 @@
 
   body.mobile-ui .codex-section.sessions-open .session-backdrop,
   body.mobile-ui .codex-section.files-open .session-backdrop {
+    position: absolute;
+    display: block;
     z-index: 28;
-    inset: var(--mobile-frame-top, var(--topbar-height, 72px)) 0 0 0;
+    inset: 0;
+    border: 0;
     background: rgba(20, 18, 16, 0.1);
     backdrop-filter: none;
   }

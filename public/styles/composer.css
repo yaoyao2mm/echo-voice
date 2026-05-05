@@ -901,7 +901,9 @@ body.topbar-collapsed .topbar {
   border-radius: 10px;
 }
 
-.file-browser-refresh svg {
+.file-browser-refresh svg,
+.file-browser-close svg,
+.file-preview-close svg {
   width: 15px;
   height: 15px;
 }
