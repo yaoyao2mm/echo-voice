@@ -333,8 +333,11 @@ export function installSessions(app) {
       if (state.sessionEventSource !== source) return;
       state.sessionEventReconnectAttempts = 0;
       if (state.codexConnectionState === "error") {
-        state.codexConnectionState = state.codexAgentOnline ? "online" : "waiting";
-        app.setTopbarStatus(state.codexAgentOnline ? "Codex 在线" : "等待桌面 agent", state.codexAgentOnline ? "online" : "idle");
+        state.codexConnectionState = state.codexAgentOnline ? "online" : state.codexAgentAvailable ? "syncing" : "waiting";
+        app.setTopbarStatus(
+          state.codexAgentOnline ? "Codex 在线" : state.codexAgentAvailable ? "桌面状态同步中" : "等待桌面 agent",
+          state.codexAgentOnline ? "online" : "idle"
+        );
         app.updateComposerAvailability();
       }
     });
@@ -909,10 +912,11 @@ export function installSessions(app) {
   };
 
   app.turnActivityAvailable = function turnActivityAvailable(session) {
+    const commandCounts = app.sessionCommandCounts(session);
     return Boolean(
       session &&
         (["queued", "starting", "running"].includes(session.status) ||
-          Number(session.pendingCommandCount || 0) > 0 ||
+          commandCounts.pending > 0 ||
           Number(session.pendingApprovalCount || 0) > 0 ||
           Number(session.pendingInteractionCount || 0) > 0)
     );
@@ -921,6 +925,7 @@ export function installSessions(app) {
   app.turnActivityForSession = function turnActivityForSession(session) {
     if (!session) return null;
     if (!app.turnActivityAvailable(session)) return null;
+    const commandCounts = app.sessionCommandCounts(session);
     if (app.sessionCancelRequested(session)) {
       return { state: "queued", text: "正在中断", title: "取消请求已发送到桌面端" };
     }
@@ -934,11 +939,18 @@ export function installSessions(app) {
     if (Number(session.pendingApprovalCount || 0) > 0) {
       return { state: "approval", text: "等待审批", title: "等待你在手机上批准 Codex 请求" };
     }
-    if (Number(session.pendingCommandCount || 0) > 0 || session.status === "queued") {
+    if (commandCounts.queued > 0 || session.status === "queued") {
       return { state: "queued", text: "等待桌面接收任务", title: "任务已进入桌面端队列" };
     }
     if (session.status === "starting") {
-      return { state: "running", text: "Codex 正在启动", title: "桌面端正在启动 Codex" };
+      return { state: "running", text: "桌面已接收，正在启动 Codex", title: "桌面端已接收任务，正在启动 Codex" };
+    }
+    if (commandCounts.leased > 0 && session.status === "running" && !quietInfo?.quiet) {
+      return {
+        state: "running",
+        text: "桌面已接收，Codex 正在处理",
+        title: "桌面端已接收任务，正在等待 Codex 输出"
+      };
     }
     if (session.status === "running") {
       if (quietInfo?.leaseExpired) {
@@ -966,6 +978,21 @@ export function installSessions(app) {
       return { state: "running", text: "Codex 正在处理这一轮", title: "Codex 正在执行当前 turn" };
     }
     return null;
+  };
+
+  app.sessionCommandCounts = function sessionCommandCounts(session) {
+    if (!session) return { pending: 0, queued: 0, leased: 0 };
+    const pending = Number(session.pendingCommandCount || 0) || 0;
+    const hasSplitCounts = session.queuedCommandCount !== undefined || session.leasedCommandCount !== undefined;
+    if (hasSplitCounts) {
+      const queued = Number(session.queuedCommandCount || 0) || 0;
+      const leased = Number(session.leasedCommandCount || 0) || 0;
+      return { pending: queued + leased || pending, queued, leased };
+    }
+    if (session.status === "starting" || session.status === "running") {
+      return { pending, queued: 0, leased: pending };
+    }
+    return { pending, queued: pending, leased: 0 };
   };
 
   app.latestCommandActivity = function latestCommandActivity(events) {

@@ -1,3 +1,5 @@
+const CODEX_AGENT_STATUS_GRACE_MS = 2 * 60 * 1000;
+
 export function installCodex(app) {
   const { constants, elements, state } = app;
 
@@ -36,11 +38,15 @@ export function installCodex(app) {
 
   app.renderCodexStatus = function renderCodexStatus(codex) {
     const agentOnline = Boolean(codex.agentOnline);
+    const agentAvailable = agentOnline || app.codexAgentRecentlySeen(codex);
+    const agentStatusText = agentOnline ? "Codex 在线" : agentAvailable ? "桌面状态同步中" : "等待桌面 agent";
     const workspaces = app.codexWorkspacesForStatus(codex);
     const previousProject = app.currentProjectId();
     state.codexWorkspaces = workspaces;
     state.codexAgentOnline = agentOnline;
-    state.codexConnectionState = agentOnline ? "online" : "waiting";
+    state.codexAgentAvailable = agentAvailable;
+    state.codexLastAgentSeenAt = app.codexLastAgentSeenAt(codex);
+    state.codexConnectionState = agentOnline ? "online" : agentAvailable ? "syncing" : "waiting";
     state.codexUnsupportedModels = Array.isArray(codex.runtime?.unsupportedModels)
       ? codex.runtime.unsupportedModels.map((model) => String(model || "").trim()).filter(Boolean)
       : [];
@@ -62,10 +68,10 @@ export function installCodex(app) {
     });
     app.refreshRuntimeDefaultOptions();
     app.refreshWorktreeModeControls?.();
-    app.setTopbarStatus(agentOnline ? "Codex 在线" : "等待桌面 agent", agentOnline ? "online" : "idle");
-    elements.codexStatusText.textContent = agentOnline ? "本机 Codex 在线" : "等待桌面 agent";
+    app.setTopbarStatus(agentStatusText, agentOnline ? "online" : "idle");
+    elements.codexStatusText.textContent = agentOnline ? "本机 Codex 在线" : agentStatusText;
     const pendingDecisions = Number(codex.interactive?.pendingInteractions || 0) + Number(codex.interactive?.pendingApprovals || 0);
-    elements.codexQueueMeta.textContent = agentOnline
+    elements.codexQueueMeta.textContent = agentAvailable
       ? `会话 ${codex.interactive?.activeSessions || 0} · 待处理 ${pendingDecisions} · 归档 ${codex.interactive?.archivedSessions || 0} · 项目 ${workspaces.length}`
       : workspaces.length
         ? `桌面离线 · 可浏览已同步会话 · 项目 ${workspaces.length}`
@@ -74,7 +80,7 @@ export function installCodex(app) {
     const preferred = localStorage.getItem("echoCodexProject") || previousProject || elements.codexProject.value;
     const selected =
       workspaces.find((workspace) => workspace.id === preferred)?.id ||
-      (agentOnline ? workspaces[0]?.id : workspaces.find((workspace) => workspace.id === previousProject)?.id || workspaces[0]?.id) ||
+      (agentAvailable ? workspaces[0]?.id : workspaces.find((workspace) => workspace.id === previousProject)?.id || workspaces[0]?.id) ||
       "";
     if (previousProject && selected && previousProject !== selected && agentOnline) {
       state.composingNewSession = false;
@@ -82,12 +88,24 @@ export function installCodex(app) {
       state.selectedCodexSession = null;
       app.closeCodexSessionStream?.();
     }
-    app.renderCodexProjectOptions(workspaces, selected, agentOnline);
+    app.renderCodexProjectOptions(workspaces, selected, agentAvailable);
     if (elements.codexProject.value) localStorage.setItem("echoCodexProject", elements.codexProject.value);
     if (agentOnline && workspaces.length > 0) app.persistCodexWorkspaces(workspaces);
-    app.renderProjectPicker(agentOnline);
+    app.renderProjectPicker(agentAvailable);
     app.updateComposerAvailability();
     app.syncComposerMetrics();
+  };
+
+  app.codexLastAgentSeenAt = function codexLastAgentSeenAt(codex = {}) {
+    const direct = String(codex.lastAgentSeenAt || "").trim();
+    if (direct) return direct;
+    const agents = Array.isArray(codex.agents) ? codex.agents : [];
+    return String(agents[0]?.lastSeenAt || "").trim();
+  };
+
+  app.codexAgentRecentlySeen = function codexAgentRecentlySeen(codex = {}) {
+    const lastSeenMs = new Date(app.codexLastAgentSeenAt(codex)).getTime();
+    return Number.isFinite(lastSeenMs) && Date.now() - lastSeenMs < CODEX_AGENT_STATUS_GRACE_MS;
   };
 
   app.codexWorkspacesForStatus = function codexWorkspacesForStatus(codex = {}) {
@@ -169,6 +187,7 @@ export function installCodex(app) {
     const wasAlreadyError = state.codexConnectionState === "error";
     state.codexConnectionState = "error";
     state.codexAgentOnline = false;
+    state.codexAgentAvailable = false;
     const projectId = app.currentProjectId() || state.codexWorkspaces?.[0]?.id || "";
     if (projectId) {
       state.codexWorkspaces = app.mergeCodexWorkspaces(state.codexWorkspaces, [app.cachedWorkspaceForProject(projectId)]);
@@ -1035,7 +1054,7 @@ export function installCodex(app) {
   };
 
   app.codexCommandsAvailable = function codexCommandsAvailable() {
-    if (state.codexConnectionState === "error" || !state.codexAgentOnline) return false;
+    if (state.codexConnectionState === "error" || !state.codexAgentAvailable) return false;
     const projectId = app.currentProjectId();
     return Boolean(projectId && (state.codexWorkspaces || []).some((workspace) => workspace.id === projectId));
   };

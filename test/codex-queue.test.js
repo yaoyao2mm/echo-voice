@@ -519,12 +519,18 @@ test("interactive Codex sessions lease commands and keep thread state", async ()
   });
   assert.equal(duringRun.status, "running");
   assert.equal(duringRun.pendingCommandCount, 1);
+  assert.equal(duringRun.queuedCommandCount, 1);
+  assert.equal(duringRun.leasedCommandCount, 0);
 
   const steeredCommand = await queue.waitForCodexSessionCommand({ waitMs: 1000, agent });
   assert.equal(steeredCommand.type, "message");
   assert.equal(steeredCommand.appThreadId, "thr_1");
   assert.equal(steeredCommand.activeTurnId, "turn_1");
   assert.equal(steeredCommand.payload.text, "先把这个条件也带上");
+  const duringSteer = queue.getCodexSession(created.id);
+  assert.equal(duringSteer.pendingCommandCount, 1);
+  assert.equal(duringSteer.queuedCommandCount, 0);
+  assert.equal(duringSteer.leasedCommandCount, 1);
   assert.equal(
     queue.completeCodexSessionCommand(
       steeredCommand.id,

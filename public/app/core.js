@@ -74,6 +74,8 @@ export function createAppContext(windowRef = window, documentRef = document) {
       composingNewSession: false,
       codexWorkspaces: readStoredCodexWorkspaces(windowRef.localStorage),
       codexAgentOnline: false,
+      codexAgentAvailable: false,
+      codexLastAgentSeenAt: "",
       codexConnectionState: "connecting",
       projectCreateBusy: false,
       showArchivedSessions: false,
@@ -327,10 +329,6 @@ export function installCore(app) {
           : `正在处理 ${state.composerAttachmentPendingCount} 张图片…`;
     } else if (state.codexConnectionState === "error") {
       status = "连接中断，可继续浏览";
-    } else if (!state.codexAgentOnline) {
-      status = "等待桌面 agent";
-    } else if (!app.currentProjectId()) {
-      status = "先选择工程";
     } else if (app.sessionCancelRequested?.(session)) {
       status = "正在中断";
     } else if (session?.pendingInteractionCount > 0) {
@@ -347,6 +345,12 @@ export function installCore(app) {
       status = "上次中断，可继续";
     } else if (session && !app.sessionCanAcceptFollowUp(session)) {
       status = "当前会话不可继续";
+    } else if (!state.codexAgentAvailable) {
+      status = "等待桌面 agent";
+    } else if (!app.currentProjectId()) {
+      status = "先选择工程";
+    } else if (state.codexConnectionState === "syncing") {
+      status = "桌面状态同步中";
     }
     elements.composerStatusText.textContent = status;
     elements.composerStatusText.classList.toggle("is-empty", !status);

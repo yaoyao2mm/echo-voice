@@ -26,7 +26,6 @@ let activeCodexCommandCount = 0;
 const activeSessionCommands = new Map();
 const runningSessionHeartbeats = new Map();
 const runningSessionStates = new Map();
-const completedSessionCommandResults = new Map();
 
 console.log("Echo Codex desktop agent is running.");
 console.log(`Relay: ${config.relayUrl}`);
@@ -71,6 +70,7 @@ async function runCodexWorkspaceLoop() {
 
   while (true) {
     let command = null;
+    let handledLocally = false;
     try {
       command = await pollNextCodexWorkspaceCommand();
       retryBackoff.reset();
@@ -78,7 +78,8 @@ async function runCodexWorkspaceLoop() {
 
       console.log(`[${new Date().toLocaleTimeString()}] codex workspace ${command.type}`);
       const result = await handleCodexWorkspaceCommand(command);
-      await postJsonWithRetry("/api/agent/codex/workspaces/commands/complete", {
+      handledLocally = true;
+      await postJson("/api/agent/codex/workspaces/commands/complete", {
         id: command.id,
         agentId,
         result,
@@ -89,8 +90,8 @@ async function runCodexWorkspaceLoop() {
     } catch (error) {
       const retryDelayMs = retryBackoff.nextDelay(error);
       console.error(`[codex workspace ${new Date().toLocaleTimeString()}] ${formatFetchError(error)}${retryNote(error, retryDelayMs)}`);
-      if (command?.id) {
-        await postJsonWithRetry("/api/agent/codex/workspaces/commands/complete", {
+      if (command?.id && !handledLocally) {
+        await postJson("/api/agent/codex/workspaces/commands/complete", {
           id: command.id,
           agentId,
           result: {
@@ -111,6 +112,7 @@ async function runCodexFileLoop() {
 
   while (true) {
     let request = null;
+    let handledLocally = false;
     try {
       request = await pollNextCodexFileRequest();
       retryBackoff.reset();
@@ -118,7 +120,8 @@ async function runCodexFileLoop() {
 
       console.log(`[${new Date().toLocaleTimeString()}] codex files ${request.type} ${request.projectId}:${request.path || "/"}`);
       const result = await handleCodexFileRequest(request);
-      await postJsonWithRetry("/api/agent/codex/files/requests/complete", {
+      handledLocally = true;
+      await postJson("/api/agent/codex/files/requests/complete", {
         id: request.id,
         agentId,
         result,
@@ -129,8 +132,8 @@ async function runCodexFileLoop() {
     } catch (error) {
       const retryDelayMs = retryBackoff.nextDelay(error);
       console.error(`[codex files ${new Date().toLocaleTimeString()}] ${formatFetchError(error)}${retryNote(error, retryDelayMs)}`);
-      if (request?.id) {
-        await postJsonWithRetry("/api/agent/codex/files/requests/complete", {
+      if (request?.id && !handledLocally) {
+        await postJson("/api/agent/codex/files/requests/complete", {
           id: request.id,
           agentId,
           result: {
@@ -166,6 +169,7 @@ async function runCodexSessionWorker(runtime, workerId) {
 
   while (true) {
     let command = null;
+    let handledLocally = false;
     try {
       await maybeCleanupWorktrees();
       command = await pollNextCodexSessionCommand();
@@ -177,22 +181,20 @@ async function runCodexSessionWorker(runtime, workerId) {
       rememberActiveSessionCommand(command);
       const heartbeat = startCodexSessionHeartbeat(command.sessionId);
       try {
-        const cachedResult = getCompletedSessionCommandResult(command.id);
-        const result = cachedResult || (await runCodexSessionCommand(runtime, command));
+        const result = await runCodexSessionCommand(runtime, command);
+        handledLocally = true;
         if (!result.projectId) result.projectId = command.projectId;
-        rememberCompletedSessionCommandResult(command.id, result);
-        const completed = await postJsonWithRetry("/api/agent/codex/sessions/commands/complete", {
+        const completed = await postJson("/api/agent/codex/sessions/commands/complete", {
           id: command.id,
           agentId,
           result
         });
         if (completed?.ok === false) {
-          console.warn(`  session ${command.type} completion was no longer accepted by relay; cached for replay.`);
+          console.warn(`  session ${command.type} completion was no longer accepted by relay.`);
           continue;
         }
-        forgetCompletedSessionCommandResult(command.id);
         updateRunningSessionHeartbeatFromResult(result.sessionId, result, command);
-        console.log(`  session ${command.type} ${cachedResult ? "replayed" : result.ok ? "accepted" : "failed"}`);
+        console.log(`  session ${command.type} ${result.ok ? "accepted" : "failed"}`);
       } finally {
         clearInterval(heartbeat);
         forgetActiveSessionCommand(command.id);
@@ -202,8 +204,8 @@ async function runCodexSessionWorker(runtime, workerId) {
       const retryDelayMs = retryBackoff.nextDelay(error);
       console.error(`[codex session ${new Date().toLocaleTimeString()}] ${formatFetchError(error)}${retryNote(error, retryDelayMs)}`);
       if (command?.sessionId) stopRunningSessionHeartbeat(command.sessionId);
-      if (command?.id) {
-        await postJsonWithRetry("/api/agent/codex/sessions/commands/complete", {
+      if (command?.id && !handledLocally) {
+        await postJson("/api/agent/codex/sessions/commands/complete", {
           id: command.id,
           agentId,
           result: {
@@ -518,20 +520,6 @@ async function postJson(path, body) {
   return parseApiResponse(response);
 }
 
-async function postJsonWithRetry(path, body, options = {}) {
-  const backoff = createRetryBackoff({ maxMs: Number(options.maxMs || 30000) || 30000 });
-  while (true) {
-    try {
-      return await postJson(path, body);
-    } catch (error) {
-      if (!isLikelyNetworkError(error)) throw error;
-      const retryDelayMs = backoff.nextDelay(error);
-      console.error(`[relay post ${new Date().toLocaleTimeString()}] ${formatFetchError(error)}${retryNote(error, retryDelayMs)}`);
-      await sleep(retryDelayMs);
-    }
-  }
-}
-
 async function parseApiResponse(response) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
@@ -570,40 +558,6 @@ function createRetryBackoff(options = {}) {
 function retryNote(error, delayMs) {
   if (!isLikelyNetworkError(error)) return "";
   return `; retrying in ${Math.round(delayMs / 1000)}s`;
-}
-
-function rememberCompletedSessionCommandResult(commandId, result = {}) {
-  const id = String(commandId || "").trim();
-  if (!id || result.ok !== true) return;
-  completedSessionCommandResults.set(id, {
-    result: JSON.parse(JSON.stringify(result)),
-    expiresAt: Date.now() + Math.max(config.codex.leaseMs * 2, 30 * 60 * 1000)
-  });
-  pruneCompletedSessionCommandResults();
-}
-
-function getCompletedSessionCommandResult(commandId) {
-  const id = String(commandId || "").trim();
-  if (!id) return null;
-  const cached = completedSessionCommandResults.get(id);
-  if (!cached) return null;
-  if (cached.expiresAt <= Date.now()) {
-    completedSessionCommandResults.delete(id);
-    return null;
-  }
-  return JSON.parse(JSON.stringify(cached.result));
-}
-
-function forgetCompletedSessionCommandResult(commandId) {
-  const id = String(commandId || "").trim();
-  if (id) completedSessionCommandResults.delete(id);
-}
-
-function pruneCompletedSessionCommandResults() {
-  const now = Date.now();
-  for (const [id, cached] of completedSessionCommandResults) {
-    if (cached.expiresAt <= now) completedSessionCommandResults.delete(id);
-  }
 }
 
 function currentCodexRuntime() {

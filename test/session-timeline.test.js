@@ -111,6 +111,34 @@ test("conversation timeline uses the complete relay draft when retained delta ev
   assert.equal(timeline.at(-1).text, "这是完整的前半段，后半段还在继续");
 });
 
+test("turn activity distinguishes queued and leased desktop commands", () => {
+  const app = createTimelineApp();
+
+  assert.equal(
+    app.turnActivityForSession({
+      id: "queued-session",
+      status: "active",
+      pendingCommandCount: 1,
+      queuedCommandCount: 1,
+      leasedCommandCount: 0,
+      events: []
+    }).text,
+    "等待桌面接收任务"
+  );
+
+  assert.equal(
+    app.turnActivityForSession({
+      id: "leased-session",
+      status: "running",
+      pendingCommandCount: 1,
+      queuedCommandCount: 0,
+      leasedCommandCount: 1,
+      events: []
+    }).text,
+    "桌面已接收，Codex 正在处理"
+  );
+});
+
 function createTimelineApp() {
   const app = {
     document: {},

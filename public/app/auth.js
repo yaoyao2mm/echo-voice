@@ -251,8 +251,9 @@ export function installAuth(app) {
     try {
       const status = await app.apiGet("/api/status");
       const codexOnline = status.codex?.agentOnline;
+      const codexAvailable = codexOnline || app.codexAgentRecentlySeen?.(status.codex || {});
       app.setTopbarStatus(
-        codexOnline ? "Codex 在线" : status.mode === "relay" ? "等待桌面 agent" : status.platform,
+        codexOnline ? "Codex 在线" : codexAvailable ? "桌面状态同步中" : status.mode === "relay" ? "等待桌面 agent" : status.platform,
         codexOnline ? "online" : "idle"
       );
       if (status.user) app.setCurrentUser(status.user, { updateView: false });

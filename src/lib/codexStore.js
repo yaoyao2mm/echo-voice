@@ -2672,12 +2672,16 @@ function summarizeSession(row) {
     WHERE session_id = ?
   `).get(row.id).count;
 
-  const pendingCommandCount = db.prepare(`
-    SELECT COUNT(*) AS count
+  const commandCounts = db.prepare(`
+    SELECT status, COUNT(*) AS count
     FROM codex_session_commands
     WHERE session_id = ?
       AND status IN ('queued', 'leased')
-  `).get(row.id).count;
+    GROUP BY status
+  `).all(row.id);
+  const queuedCommandCount = commandCounts.find((item) => item.status === "queued")?.count || 0;
+  const leasedCommandCount = commandCounts.find((item) => item.status === "leased")?.count || 0;
+  const pendingCommandCount = queuedCommandCount + leasedCommandCount;
   const pendingApprovalCount = db.prepare(`
     SELECT COUNT(*) AS count
     FROM codex_session_approvals
@@ -2728,6 +2732,8 @@ function summarizeSession(row) {
       contextUsage
     }),
     pendingCommandCount,
+    queuedCommandCount,
+    leasedCommandCount,
     pendingApprovalCount,
     pendingInteractionCount,
     pendingUserInputCount,
