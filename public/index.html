@@ -15,8 +15,8 @@
         if (localStorage.getItem("echoTheme") === "dark") document.documentElement.dataset.theme = "dark";
       } catch {}
     </script>
-    <link rel="manifest" href="/manifest.webmanifest?v=90" />
-    <link rel="stylesheet" href="/styles.css?v=90" />
+    <link rel="manifest" href="/manifest.webmanifest?v=91" />
+    <link rel="stylesheet" href="/styles.css?v=91" />
   </head>
   <body>
     <main class="shell">
@@ -90,6 +90,73 @@
               <select id="codexProject" class="sr-only" tabindex="-1" aria-hidden="true"></select>
             </div>
           </div>
+        </div>
+        <div id="fileBrowser" class="topbar-file-browser" data-authenticated hidden>
+          <button
+            id="fileBrowserButton"
+            class="topbar-quick-deploy file-browser-trigger"
+            type="button"
+            aria-label="浏览文件"
+            aria-haspopup="dialog"
+            aria-expanded="false"
+            aria-controls="fileBrowserPanel"
+            title="浏览文件"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M3.5 7.7c0-1.1.9-2 2-2h4l2 2h7c1.1 0 2 .9 2 2v6.6c0 1.1-.9 2-2 2h-13c-1.1 0-2-.9-2-2V7.7Z"
+                fill="none"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="1.8"
+              />
+            </svg>
+          </button>
+          <section id="fileBrowserPanel" class="file-browser-panel" role="dialog" aria-label="文件浏览" hidden>
+            <div class="file-browser-head">
+              <div>
+                <strong id="fileBrowserTitle">文件</strong>
+                <span id="fileBrowserMeta">当前工程</span>
+              </div>
+              <button
+                id="fileBrowserRefreshButton"
+                class="icon-button file-browser-refresh"
+                type="button"
+                aria-label="刷新目录"
+                title="刷新目录"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M20 6v5h-5M4 18v-5h5M18.1 9a6.5 6.5 0 0 0-11-2.5L4 9.5M5.9 15a6.5 6.5 0 0 0 11 2.5L20 14.5"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="1.8"
+                  />
+                </svg>
+              </button>
+            </div>
+            <div id="fileBrowserBreadcrumbs" class="file-browser-breadcrumbs" aria-label="路径"></div>
+            <div id="fileBrowserStatus" class="file-browser-status" role="status"></div>
+            <div id="fileBrowserList" class="file-browser-list"></div>
+            <section id="filePreview" class="file-preview" aria-label="文件预览" hidden>
+              <div class="file-preview-head">
+                <div>
+                  <strong id="filePreviewTitle">预览</strong>
+                  <span id="filePreviewMeta"></span>
+                </div>
+                <div class="file-preview-actions">
+                  <button id="filePreviewInsertButton" class="secondary compact-action" type="button">引用路径</button>
+                  <button id="filePreviewCloseButton" class="icon-button file-preview-close" type="button" aria-label="关闭预览" title="关闭预览">
+                    x
+                  </button>
+                </div>
+              </div>
+              <pre id="filePreviewContent" class="file-preview-content"></pre>
+            </section>
+          </section>
         </div>
         <div id="quickSkills" class="topbar-quick-skills" data-authenticated hidden>
           <button
@@ -439,6 +506,6 @@
       </section>
     </main>
 
-    <script src="/app.js?v=90" type="module"></script>
+    <script src="/app.js?v=91" type="module"></script>
   </body>
 </html>

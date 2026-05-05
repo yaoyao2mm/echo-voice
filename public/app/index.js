@@ -1,7 +1,8 @@
-import { installAuth } from "./auth.js?v=90";
-import { installCodex } from "./codex.js?v=90";
-import { createAppContext, installCore } from "./core.js?v=90";
-import { installSessions } from "./sessions.js?v=90";
+import { installAuth } from "./auth.js?v=91";
+import { installCodex } from "./codex.js?v=91";
+import { createAppContext, installCore } from "./core.js?v=91";
+import { installFiles } from "./files.js?v=91";
+import { installSessions } from "./sessions.js?v=91";
 
 export function createApp(windowRef = window, documentRef = document) {
   const app = createAppContext(windowRef, documentRef);
@@ -10,6 +11,7 @@ export function createApp(windowRef = window, documentRef = document) {
   installAuth(app);
   installSessions(app);
   installCodex(app);
+  installFiles(app);
 
   app.bindEventListeners = function bindEventListeners() {
     const { elements } = app;

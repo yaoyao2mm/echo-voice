@@ -23,7 +23,9 @@ import {
   codexStatus,
   compactCodexSession,
   completeCodexSessionCommand,
+  completeCodexFileRequest,
   completeCodexWorkspaceCommand,
+  createCodexFileRequest,
   getCodexSessionArtifactContent,
   getCodexSessionAttachmentContent,
   createCodexSessionInteraction,
@@ -42,6 +44,8 @@ import {
   subscribeCodexSession,
   updateCodexQuickSkill,
   waitForCodexSessionApproval,
+  waitForCodexFileRequest,
+  waitForCodexFileRequestResult,
   waitForCodexSessionInteraction,
   waitForCodexSessionCommand,
   waitForCodexWorkspaceCommand
@@ -319,6 +323,50 @@ app.get("/api/codex/workspaces/:id", (req, res) => {
   const command = getCodexWorkspaceCommand(req.params.id);
   if (!command) return res.status(404).json({ error: "Codex workspace command not found." });
   res.json({ command });
+});
+
+app.post("/api/codex/files/list", async (req, res) => {
+  try {
+    if (config.mode !== "relay") {
+      return res.status(400).json({ error: "Codex file browsing is only available in relay mode." });
+    }
+
+    const request = createCodexFileRequest({
+      type: "list",
+      projectId: req.body.projectId,
+      path: req.body.path,
+      maxEntries: req.body.maxEntries,
+      requestedBy: req.user?.username || req.user?.displayName || "mobile"
+    });
+    const completed = await waitForCodexFileRequestResult(request.id, {
+      waitMs: Number(req.query.wait || req.body.wait || 30000)
+    });
+    sendFileRequestResult(res, completed || request, "tree");
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.post("/api/codex/files/read", async (req, res) => {
+  try {
+    if (config.mode !== "relay") {
+      return res.status(400).json({ error: "Codex file browsing is only available in relay mode." });
+    }
+
+    const request = createCodexFileRequest({
+      type: "read",
+      projectId: req.body.projectId,
+      path: req.body.path,
+      maxBytes: req.body.maxBytes,
+      requestedBy: req.user?.username || req.user?.displayName || "mobile"
+    });
+    const completed = await waitForCodexFileRequestResult(request.id, {
+      waitMs: Number(req.query.wait || req.body.wait || 30000)
+    });
+    sendFileRequestResult(res, completed || request, "file");
+  } catch (error) {
+    handleError(res, error);
+  }
 });
 
 app.get("/api/codex/sessions", (req, res) => {
@@ -612,6 +660,41 @@ app.post("/api/agent/codex/workspaces/next", async (req, res) => {
   }
 });
 
+app.post("/api/agent/codex/files/next", async (req, res) => {
+  try {
+    if (config.mode !== "relay") {
+      return res.status(400).json({ error: "Codex file browser agent polling is only available in relay mode." });
+    }
+
+    const request = await waitForCodexFileRequest({
+      waitMs: Number(req.query.wait || req.body.wait || 25000),
+      agent: {
+        id: req.body.agentId || req.body.agent?.id,
+        workspaces: req.body.workspaces || [],
+        runtime: req.body.runtime || {}
+      }
+    });
+    res.json({ request });
+  } catch (error) {
+    handleError(res, error);
+  }
+});
+
+app.post("/api/agent/codex/files/requests/complete", (req, res) => {
+  if (config.mode !== "relay") {
+    return res.status(400).json({ error: "Codex file browser agent completion is only available in relay mode." });
+  }
+
+  const ok = completeCodexFileRequest(req.body.id, req.body.result || {}, {
+    agent: {
+      id: req.body.agentId || req.body.agent?.id,
+      workspaces: req.body.workspaces || [],
+      runtime: req.body.runtime || {}
+    }
+  });
+  res.json({ ok });
+});
+
 app.post("/api/agent/codex/workspaces/commands/complete", (req, res) => {
   if (config.mode !== "relay") {
     return res.status(400).json({ error: "Codex workspace agent completion is only available in relay mode." });
@@ -777,6 +860,27 @@ server.listen(config.port, config.host, () => {
   }
   console.log("\nKeep this terminal running while using the phone UI.\n");
 });
+
+function sendFileRequestResult(res, request, resultKey) {
+  if (!request) {
+    return res.status(504).json({ error: "File browser request timed out." });
+  }
+  if (request.status === "queued" || request.status === "leased") {
+    return res.status(504).json({ error: "File browser request timed out.", request });
+  }
+  if (request.status === "expired") {
+    return res.status(504).json({ error: request.error || "File browser request expired.", request });
+  }
+  if (request.status === "failed" || request.result?.ok === false) {
+    return res.status(422).json({ error: request.error || request.result?.error || "File browser request failed.", request });
+  }
+
+  res.setHeader("Cache-Control", "no-store, max-age=0");
+  res.json({
+    request,
+    [resultKey]: request.result?.[resultKey] || null
+  });
+}
 
 function handleError(res, error) {
   const status = error.statusCode || 500;

@@ -5,8 +5,11 @@ import {
   archiveSession as archiveStoredSession,
   cancelSession as cancelStoredSession,
   compactSession as compactStoredSession,
+  acquireNextFileRequest,
+  completeFileRequest as completeStoredFileRequest,
   completeSessionCommand as completeStoredSessionCommand,
   completeWorkspaceCommand as completeStoredWorkspaceCommand,
+  createFileRequest as createStoredFileRequest,
   createSessionInteraction as createStoredSessionInteraction,
   createSessionApproval as createStoredSessionApproval,
   createQuickSkill as createStoredQuickSkill,
@@ -16,6 +19,7 @@ import {
   decideSessionInteraction as decideStoredSessionInteraction,
   decideSessionApproval as decideStoredSessionApproval,
   enqueueSessionMessage as enqueueStoredSessionMessage,
+  getFileRequest as getStoredFileRequest,
   getWorkspaceCommand as getStoredWorkspaceCommand,
   getSessionArtifactContent as getStoredSessionArtifactContent,
   getSessionCommandSessionId as getStoredSessionCommandSessionId,
@@ -124,6 +128,58 @@ export function createCodexWorkspace(input = {}) {
 
 export function getCodexWorkspaceCommand(id) {
   return getStoredWorkspaceCommand(id);
+}
+
+export function createCodexFileRequest(input = {}) {
+  const request = createStoredFileRequest(input);
+  events.emit("codex-file-request");
+  return request;
+}
+
+export function getCodexFileRequest(id) {
+  return getStoredFileRequest(id);
+}
+
+export async function waitForCodexFileRequest(input = {}) {
+  const agent = updateCodexAgent(input.agent || {});
+  const acquire = () => acquireNextFileRequest({ agentId: agent.id, workspaces: agent.workspaces });
+  const immediateRequest = acquire();
+  if (immediateRequest) return immediateRequest;
+
+  const waitMs = clampWaitMs(input.waitMs);
+  return waitForEventValue({
+    eventNames: ["codex-file-request"],
+    waitMs,
+    getValue: acquire
+  });
+}
+
+export async function waitForCodexFileRequestResult(id, input = {}) {
+  const terminal = () => {
+    const request = getStoredFileRequest(id);
+    return request && ["done", "failed", "expired"].includes(request.status) ? request : null;
+  };
+
+  const immediateRequest = terminal();
+  if (immediateRequest) return immediateRequest;
+
+  const waitMs = clampWaitMs(input.waitMs);
+  return waitForEventValue({
+    eventNames: [`codex-file-request-${id}`],
+    waitMs,
+    getValue: terminal
+  });
+}
+
+export function completeCodexFileRequest(id, result = {}, options = {}) {
+  if (options.agent) updateCodexAgent(options.agent);
+  else if (options.agentId) touchAgent(options.agentId);
+  const ok = completeStoredFileRequest(id, result, { agentId: options.agentId || options.agent?.id });
+  if (ok) {
+    events.emit("codex-file-request");
+    events.emit(`codex-file-request-${id}`);
+  }
+  return ok;
 }
 
 export async function waitForCodexWorkspaceCommand(input = {}) {

@@ -6,5 +6,6 @@ npm-debug.log*
 .DS_Store
 *.local
 .tmp/
+.echo-codex-attachments/
 playwright-report/
 test-results/

@@ -1,6 +1,7 @@
 import { config } from "./config.js";
 import { loadDesktopAgentId } from "./lib/agentIdentity.js";
 import { CodexInteractiveRuntime } from "./lib/codexInteractiveRunner.js";
+import { listWorkspaceFiles, readWorkspaceFile } from "./lib/codexFileBrowser.js";
 import { probeCodexModels } from "./lib/codexModelProbe.js";
 import { publicCodexRuntime, publicWorkspaces } from "./lib/codexRunner.js";
 import { maybeCleanupCodexSessionWorktrees, prepareCodexSessionWorktree } from "./lib/codexWorktree.js";
@@ -61,6 +62,7 @@ if (config.codex.enabled) {
   }, 10 * 60 * 1000).unref?.();
   scheduleCodexRuntimeRefresh({ delayMs: 30000 });
   runCodexWorkspaceLoop();
+  runCodexFileLoop();
   runCodexSessionLoops();
 }
 
@@ -90,6 +92,46 @@ async function runCodexWorkspaceLoop() {
       if (command?.id) {
         await postJsonWithRetry("/api/agent/codex/workspaces/commands/complete", {
           id: command.id,
+          agentId,
+          result: {
+            ok: false,
+            error: error.message
+          },
+          workspaces: publicWorkspaces(),
+          runtime: currentCodexRuntime()
+        }).catch(() => {});
+      }
+      await sleep(retryDelayMs);
+    }
+  }
+}
+
+async function runCodexFileLoop() {
+  const retryBackoff = createRetryBackoff();
+
+  while (true) {
+    let request = null;
+    try {
+      request = await pollNextCodexFileRequest();
+      retryBackoff.reset();
+      if (!request) continue;
+
+      console.log(`[${new Date().toLocaleTimeString()}] codex files ${request.type} ${request.projectId}:${request.path || "/"}`);
+      const result = await handleCodexFileRequest(request);
+      await postJsonWithRetry("/api/agent/codex/files/requests/complete", {
+        id: request.id,
+        agentId,
+        result,
+        workspaces: publicWorkspaces(),
+        runtime: currentCodexRuntime()
+      });
+      console.log(`  files ${request.type} ${result.ok ? "completed" : "failed"}`);
+    } catch (error) {
+      const retryDelayMs = retryBackoff.nextDelay(error);
+      console.error(`[codex files ${new Date().toLocaleTimeString()}] ${formatFetchError(error)}${retryNote(error, retryDelayMs)}`);
+      if (request?.id) {
+        await postJsonWithRetry("/api/agent/codex/files/requests/complete", {
+          id: request.id,
           agentId,
           result: {
             ok: false,
@@ -198,6 +240,31 @@ async function handleCodexWorkspaceCommand(command) {
   return { ok: true, workspace };
 }
 
+async function handleCodexFileRequest(request) {
+  const payload = request.payload || {};
+  try {
+    if (request.type === "list") {
+      return await listWorkspaceFiles({
+        projectId: request.projectId,
+        relativePath: payload.path ?? request.path,
+        maxEntries: payload.maxEntries,
+        workspaces: publicWorkspaces()
+      });
+    }
+    if (request.type === "read") {
+      return await readWorkspaceFile({
+        projectId: request.projectId,
+        relativePath: payload.path ?? request.path,
+        maxBytes: payload.maxBytes,
+        workspaces: publicWorkspaces()
+      });
+    }
+    return { ok: false, error: `Unsupported file browser request: ${request.type}` };
+  } catch (error) {
+    return { ok: false, error: error.message, code: error.code || "" };
+  }
+}
+
 async function requestCodexApproval(approval) {
   const created = await postJson("/api/agent/codex/sessions/approvals", {
     agentId,
@@ -269,6 +336,24 @@ async function pollNextCodexWorkspaceCommand() {
   });
   const data = await parseApiResponse(response);
   return data.command || null;
+}
+
+async function pollNextCodexFileRequest() {
+  const response = await httpFetch(`${config.relayUrl}/api/agent/codex/files/next?wait=25000`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders()
+    },
+    body: JSON.stringify({
+      agentId,
+      workspaces: publicWorkspaces(),
+      runtime: currentCodexRuntime()
+    }),
+    timeoutMs: 35000
+  });
+  const data = await parseApiResponse(response);
+  return data.request || null;
 }
 
 async function pollNextCodexSessionCommand() {

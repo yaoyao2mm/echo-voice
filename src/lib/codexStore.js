@@ -16,6 +16,9 @@ import {
 const dbPath = path.join(config.dataDir, "echo.sqlite");
 const attachmentStorageDir = path.join(config.dataDir, "codex-attachments");
 const artifactStorageDir = path.join(config.dataDir, "codex-artifacts");
+const fileRequestTtlMs = 90 * 1000;
+const fileRequestRetentionMs = 10 * 60 * 1000;
+const maxStoredFileRequestResultBytes = 480000;
 fs.mkdirSync(config.dataDir, { recursive: true });
 fs.mkdirSync(attachmentStorageDir, { recursive: true });
 fs.mkdirSync(artifactStorageDir, { recursive: true });
@@ -89,6 +92,14 @@ const insertWorkspaceCommand = db.prepare(`
     id, type, payload_json, status, result_json, created_at, updated_at
   ) VALUES (
     @id, @type, @payloadJson, 'queued', '{}', @now, @now
+  )
+`);
+
+const insertFileRequest = db.prepare(`
+  INSERT INTO codex_file_requests (
+    id, type, project_id, path, payload_json, status, result_json, created_at, updated_at, expires_at, requested_by
+  ) VALUES (
+    @id, @type, @projectId, @path, @payloadJson, 'queued', '{}', @now, @now, @expiresAt, @requestedBy
   )
 `);
 
@@ -198,6 +209,23 @@ const summarizeWorkspaceCommandColumns = `
   leased_by AS leasedBy,
   lease_expires_at AS leaseExpiresAt,
   error
+`;
+
+const summarizeFileRequestColumns = `
+  id,
+  type,
+  project_id AS projectId,
+  path,
+  payload_json AS payloadJson,
+  status,
+  result_json AS resultJson,
+  created_at AS createdAt,
+  updated_at AS updatedAt,
+  expires_at AS expiresAt,
+  leased_by AS leasedBy,
+  lease_expires_at AS leaseExpiresAt,
+  error,
+  requested_by AS requestedBy
 `;
 
 const summarizeSessionApprovalColumns = `
@@ -384,6 +412,7 @@ export function touchAgent(id) {
 
 export function statusSnapshot() {
   reclaimExpiredWorkspaceCommandLeases();
+  expireFileRequests();
 
   const nowMs = Date.now();
   const agents = listAgents().map((agent) => ({
@@ -1085,6 +1114,121 @@ export function completeWorkspaceCommand(commandId, result = {}, options = {}) {
   return true;
 }
 
+export function createFileRequest(input = {}) {
+  expireFileRequests();
+
+  const type = normalizeFileRequestType(input.type);
+  const projectId = normalizeFileRequestProjectId(input.projectId);
+  const requestPath = normalizeFileRequestPath(input.path);
+  const workspace = onlineWorkspaceForProject(projectId);
+  if (!workspace) return conflict("Desktop agent is not online for this workspace.");
+
+  const payload = normalizeFileRequestPayload(type, input);
+  const now = nowIso();
+  const request = {
+    id: crypto.randomUUID(),
+    type,
+    projectId,
+    path: requestPath,
+    payloadJson: JSON.stringify(payload),
+    now,
+    expiresAt: new Date(Date.now() + fileRequestTtlMs).toISOString(),
+    requestedBy: String(input.requestedBy || "mobile").slice(0, 120)
+  };
+
+  insertFileRequest.run(request);
+  return getFileRequest(request.id);
+}
+
+export function getFileRequest(id) {
+  expireFileRequests();
+  const row = db.prepare(`
+    SELECT ${summarizeFileRequestColumns}
+    FROM codex_file_requests
+    WHERE id = ?
+  `).get(id);
+  return row ? summarizeFileRequest(row) : null;
+}
+
+export function acquireNextFileRequest({ agentId, workspaces = [] } = {}) {
+  expireFileRequests();
+
+  const workspaceIds = workspaces.map((workspace) => String(workspace?.id || "").trim()).filter(Boolean);
+  if (workspaceIds.length === 0) return null;
+
+  const leaseHolder = normalizeAgentId(agentId);
+  const now = nowIso();
+  const leaseExpiresAt = new Date(Date.now() + config.codex.leaseMs).toISOString();
+  const placeholders = workspaceIds.map(() => "?").join(",");
+
+  const acquire = db.transaction(() => {
+    const request = db.prepare(`
+      SELECT ${summarizeFileRequestColumns}
+      FROM codex_file_requests
+      WHERE status = 'queued'
+        AND expires_at > ?
+        AND project_id IN (${placeholders})
+      ORDER BY created_at ASC
+      LIMIT 1
+    `).get(now, ...workspaceIds);
+
+    if (!request) return null;
+
+    db.prepare(`
+      UPDATE codex_file_requests
+      SET status = 'leased',
+          leased_by = @leasedBy,
+          lease_expires_at = @leaseExpiresAt,
+          updated_at = @now
+      WHERE id = @id
+        AND status = 'queued'
+        AND expires_at > @now
+    `).run({
+      id: request.id,
+      leasedBy: leaseHolder,
+      leaseExpiresAt,
+      now
+    });
+
+    return getFileRequest(request.id);
+  });
+
+  return acquire();
+}
+
+export function completeFileRequest(requestId, result = {}, options = {}) {
+  const request = getFileRequest(requestId);
+  if (!request) return false;
+  const providedAgentId = normalizeAgentId(options.agentId);
+  if (request.status !== "leased" || request.leasedBy !== providedAgentId) return false;
+
+  const now = nowIso();
+  const ok = result.ok === true;
+  const error = String(result.error || "").slice(0, 12000);
+  const resultJson = JSON.stringify(result || {}).slice(0, maxStoredFileRequestResultBytes);
+  db.prepare(`
+    UPDATE codex_file_requests
+    SET status = @status,
+        result_json = @resultJson,
+        error = @error,
+        leased_by = NULL,
+        lease_expires_at = NULL,
+        updated_at = @now
+    WHERE id = @requestId
+      AND status = 'leased'
+      AND leased_by = @leasedBy
+  `).run({
+    requestId,
+    status: ok ? "done" : "failed",
+    resultJson,
+    error,
+    now,
+    leasedBy: providedAgentId
+  });
+
+  return true;
+}
+
 export function acquireNextSessionCommand({
   agentId,
   workspaces = [],
@@ -1717,6 +1861,7 @@ export function deleteQuickSkill(id) {
 
 export function resetStoreForTest() {
   db.prepare("DELETE FROM codex_quick_skills").run();
+  db.prepare("DELETE FROM codex_file_requests").run();
   db.prepare("DELETE FROM codex_workspace_commands").run();
   db.prepare("DELETE FROM codex_session_artifacts").run();
   db.prepare("DELETE FROM codex_session_attachments").run();
@@ -1838,6 +1983,29 @@ function migrate() {
 
     CREATE INDEX IF NOT EXISTS idx_codex_workspace_commands_status_created
       ON codex_workspace_commands(status, created_at);
+
+    CREATE TABLE IF NOT EXISTS codex_file_requests (
+      id TEXT PRIMARY KEY,
+      type TEXT NOT NULL CHECK (type IN ('list', 'read')),
+      project_id TEXT NOT NULL,
+      path TEXT NOT NULL DEFAULT '',
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL CHECK (status IN ('queued', 'leased', 'done', 'failed', 'expired')),
+      result_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      leased_by TEXT,
+      lease_expires_at TEXT,
+      error TEXT NOT NULL DEFAULT '',
+      requested_by TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_codex_file_requests_status_created
+      ON codex_file_requests(status, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_codex_file_requests_expires
+      ON codex_file_requests(expires_at);
 
     CREATE TABLE IF NOT EXISTS codex_session_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1995,6 +2163,12 @@ function migrate() {
 
     CREATE INDEX IF NOT EXISTS idx_codex_session_commands_session
       ON codex_session_commands(session_id, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_codex_file_requests_status_created
+      ON codex_file_requests(status, created_at);
+
+    CREATE INDEX IF NOT EXISTS idx_codex_file_requests_expires
+      ON codex_file_requests(expires_at);
 
     CREATE INDEX IF NOT EXISTS idx_codex_session_events_session_id
       ON codex_session_events(session_id, id);
@@ -2585,6 +2759,14 @@ function summarizeSessionCommand(row) {
 }
 
 function summarizeWorkspaceCommand(row) {
+  return {
+    ...row,
+    payload: parseJson(row.payloadJson, {}),
+    result: parseJson(row.resultJson, {})
+  };
+}
+
+function summarizeFileRequest(row) {
   return {
     ...row,
     payload: parseJson(row.payloadJson, {}),
@@ -4025,6 +4207,57 @@ function normalizeWorkspaceName(value) {
   return String(value || "").trim().replace(/\s+/g, " ").slice(0, 80);
 }
 
+function normalizeFileRequestType(value) {
+  const type = String(value || "").trim().toLowerCase();
+  if (type === "list" || type === "read") return type;
+  return badRequest("Unsupported file browser request type.");
+}
+
+function normalizeFileRequestProjectId(value) {
+  const projectId = String(value || "").trim().slice(0, 160);
+  if (!projectId) return badRequest("Codex project is required.");
+  return projectId;
+}
+
+function normalizeFileRequestPath(value) {
+  const raw = String(value || "").replaceAll("\\", "/").trim();
+  if (!raw || raw === "." || raw === "/") return "";
+  if (raw.includes("\0")) return badRequest("File path is invalid.");
+  if (raw.startsWith("/") || /^[a-zA-Z]:\//.test(raw) || raw.startsWith("~/") || raw === "~") {
+    return badRequest("File browser paths must be relative to the selected workspace.");
+  }
+
+  const parts = [];
+  for (const part of raw.split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") return badRequest("File browser paths must stay inside the selected workspace.");
+    parts.push(part);
+  }
+  return parts.join("/").slice(0, 1000);
+}
+
+function normalizeFileRequestPayload(type, input = {}) {
+  const payload = { path: normalizeFileRequestPath(input.path) };
+  if (type === "list") {
+    payload.maxEntries = clampInteger(input.maxEntries, 1, 500, 240);
+  }
+  if (type === "read") {
+    payload.maxBytes = clampInteger(input.maxBytes, 1024, 320 * 1024, 160 * 1024);
+  }
+  return payload;
+}
+
+function onlineWorkspaceForProject(projectId) {
+  const normalizedProjectId = String(projectId || "").trim();
+  const nowMs = Date.now();
+  for (const agent of listAgents()) {
+    if (!isAgentOnline(agent, nowMs)) continue;
+    const workspace = (agent.workspaces || []).find((item) => item.id === normalizedProjectId);
+    if (workspace) return workspace;
+  }
+  return null;
+}
+
 function normalizeWorkspaces(workspaces = []) {
   return Array.isArray(workspaces)
     ? workspaces
@@ -4353,6 +4586,27 @@ function reclaimExpiredWorkspaceCommandLeases() {
       AND lease_expires_at IS NOT NULL
       AND lease_expires_at < @now
   `).run({ now });
+}
+
+function expireFileRequests() {
+  const now = nowIso();
+  db.prepare(`
+    UPDATE codex_file_requests
+    SET status = 'expired',
+        leased_by = NULL,
+        lease_expires_at = NULL,
+        error = CASE WHEN error = '' THEN 'File browser request expired.' ELSE error END,
+        updated_at = @now
+    WHERE status IN ('queued', 'leased')
+      AND expires_at <= @now
+  `).run({ now });
+
+  const cutoff = new Date(Date.now() - fileRequestRetentionMs).toISOString();
+  db.prepare(`
+    DELETE FROM codex_file_requests
+    WHERE expires_at < @cutoff
+      AND status IN ('done', 'failed', 'expired')
+  `).run({ cutoff });
 }
 
 function reclaimExpiredSessionLeases() {
@@ -4715,6 +4969,12 @@ function throwHttpError(statusCode, message) {
   const error = new Error(message);
   error.statusCode = statusCode;
   throw error;
+}
+
+function clampInteger(value, min, max, fallback) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(Math.floor(number), max));
 }
 
 function nowIso() {

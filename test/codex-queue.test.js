@@ -1687,6 +1687,62 @@ test("mobile workspace commands create and advertise managed workspaces", async 
   assert.equal(runner.publicWorkspaces().some((item) => item.id === workspace.id), true);
 });
 
+test("file browser requests are short-lived and scoped to advertised workspaces", async () => {
+  store.resetStoreForTest();
+
+  assert.throws(
+    () => queue.createCodexFileRequest({ type: "list", projectId: "demo", path: "" }),
+    /not online/
+  );
+
+  const agent = {
+    id: "file-agent",
+    workspaces: [{ id: "demo", label: "Demo", path: process.cwd() }],
+    runtime: { command: "codex" }
+  };
+  queue.updateCodexAgent(agent);
+
+  assert.throws(
+    () => queue.createCodexFileRequest({ type: "read", projectId: "demo", path: "../package.json" }),
+    /stay inside/
+  );
+
+  const created = queue.createCodexFileRequest({ type: "list", projectId: "demo", path: "src", maxEntries: 40 });
+  assert.equal(created.status, "queued");
+  assert.equal(created.type, "list");
+  assert.equal(created.projectId, "demo");
+  assert.equal(created.path, "src");
+  assert.equal(created.payload.maxEntries, 40);
+
+  const wrongAgent = await queue.waitForCodexFileRequest({
+    waitMs: 20,
+    agent: {
+      id: "wrong-file-agent",
+      workspaces: [{ id: "other", path: process.cwd() }],
+      runtime: { command: "codex" }
+    }
+  });
+  assert.equal(wrongAgent, null);
+
+  const request = await queue.waitForCodexFileRequest({ waitMs: 1000, agent });
+  assert.equal(request.id, created.id);
+  assert.equal(request.status, "leased");
+  assert.equal(request.leasedBy, agent.id);
+
+  assert.equal(
+    queue.completeCodexFileRequest(
+      request.id,
+      { ok: true, tree: { projectId: "demo", path: "src", entries: [] } },
+      { agent }
+    ),
+    true
+  );
+
+  const completed = await queue.waitForCodexFileRequestResult(created.id, { waitMs: 1000 });
+  assert.equal(completed.status, "done");
+  assert.equal(completed.result.tree.path, "src");
+});
+
 test("interactive Codex sessions can be archived and restored", async () => {
   store.resetStoreForTest();
 

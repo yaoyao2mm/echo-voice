@@ -151,12 +151,31 @@
   box-shadow: 0 24px 54px rgba(0, 0, 0, 0.34);
 }
 
+:root[data-theme="dark"] .file-browser-panel {
+  border-color: rgba(139, 154, 174, 0.18);
+  background: rgba(17, 21, 27, 0.98);
+  box-shadow: 0 24px 54px rgba(0, 0, 0, 0.34);
+}
+
 :root[data-theme="dark"] .quick-skill-item,
 :root[data-theme="dark"] .quick-skill-form input[type="text"],
 :root[data-theme="dark"] .quick-skill-form select,
 :root[data-theme="dark"] .quick-skill-form textarea {
   border-color: rgba(139, 154, 174, 0.16);
   background: rgba(23, 28, 36, 0.72);
+}
+
+:root[data-theme="dark"] .file-browser-crumb,
+:root[data-theme="dark"] .file-preview-content {
+  border-color: rgba(139, 154, 174, 0.16);
+  background: rgba(23, 28, 36, 0.72);
+}
+
+:root[data-theme="dark"] .file-browser-list,
+:root[data-theme="dark"] .file-entry,
+:root[data-theme="dark"] .file-preview,
+:root[data-theme="dark"] .file-browser-empty {
+  border-color: rgba(139, 154, 174, 0.12);
 }
 
 :root[data-theme="dark"] .quick-skill-edit {

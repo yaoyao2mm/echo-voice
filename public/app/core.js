@@ -98,7 +98,13 @@ export function createAppContext(windowRef = window, documentRef = document) {
       quickSkillEditingId: "",
       turnActivityDetailsOpen: false,
       contextUsageDetailsOpen: false,
-      autoCompactedSessionIds: new Set()
+      autoCompactedSessionIds: new Set(),
+      fileBrowserProjectId: "",
+      fileBrowserPath: "",
+      fileBrowserTree: null,
+      filePreview: null,
+      fileBrowserBusy: false,
+      fileBrowserError: ""
     }
   };
 }
@@ -1059,6 +1065,21 @@ function queryElements(documentRef) {
     quickSkillDeleteButton: documentRef.querySelector("#quickSkillDeleteButton"),
     quickSkillCancelButton: documentRef.querySelector("#quickSkillCancelButton"),
     quickSkillSaveButton: documentRef.querySelector("#quickSkillSaveButton"),
+    fileBrowser: documentRef.querySelector("#fileBrowser"),
+    fileBrowserButton: documentRef.querySelector("#fileBrowserButton"),
+    fileBrowserPanel: documentRef.querySelector("#fileBrowserPanel"),
+    fileBrowserTitle: documentRef.querySelector("#fileBrowserTitle"),
+    fileBrowserMeta: documentRef.querySelector("#fileBrowserMeta"),
+    fileBrowserRefreshButton: documentRef.querySelector("#fileBrowserRefreshButton"),
+    fileBrowserBreadcrumbs: documentRef.querySelector("#fileBrowserBreadcrumbs"),
+    fileBrowserStatus: documentRef.querySelector("#fileBrowserStatus"),
+    fileBrowserList: documentRef.querySelector("#fileBrowserList"),
+    filePreview: documentRef.querySelector("#filePreview"),
+    filePreviewTitle: documentRef.querySelector("#filePreviewTitle"),
+    filePreviewMeta: documentRef.querySelector("#filePreviewMeta"),
+    filePreviewContent: documentRef.querySelector("#filePreviewContent"),
+    filePreviewInsertButton: documentRef.querySelector("#filePreviewInsertButton"),
+    filePreviewCloseButton: documentRef.querySelector("#filePreviewCloseButton"),
     refreshCodex: documentRef.querySelector("#refreshCodex"),
     toggleSessionsButton: documentRef.querySelector("#toggleSessionsButton"),
     sessionBackdrop: documentRef.querySelector("#sessionBackdrop"),
